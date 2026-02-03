@@ -1,1 +1,46 @@
-.claude/internet-mode-used_DO_NOT_REMOVE_MANUALLY_SECURITY_RISK
+# Dependencies
+node_modules/
+.bun/
+
+# Build output
+dist/
+build/
+
+# Cache
+.cache/
+.vite/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test
+coverage/
+playwright-report/
+test-results/
+
+# TypeScript
+*.tsbuildinfo
+
+# PWA
+dev-dist/
+
+# Temporary
+*.tmp
+*.temp

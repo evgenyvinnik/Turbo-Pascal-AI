@@ -1,0 +1,52 @@
+:root {
+  font-family: 'Nouveau IBM', 'Courier New', monospace;
+  line-height: 1.2;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: #ffffff;
+  background-color: #000055;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: auto;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+/* DOS-style selection */
+::selection {
+  background-color: #5555ff;
+  color: #ffffff;
+}
+
+/* Hide scrollbars by default - we'll use custom DOS-style ones */
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Focus outline for accessibility */
+:focus-visible {
+  outline: 2px solid #ffff55;
+  outline-offset: 2px;
+}

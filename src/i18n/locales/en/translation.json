@@ -1,0 +1,92 @@
+{
+  "app": {
+    "title": "Turbo Pascal IDE",
+    "loading": "Loading..."
+  },
+  "menu": {
+    "file": "File",
+    "edit": "Edit",
+    "search": "Search",
+    "run": "Run",
+    "compile": "Compile",
+    "debug": "Debug",
+    "tools": "Tools",
+    "options": "Options",
+    "window": "Window",
+    "help": "Help"
+  },
+  "file": {
+    "new": "New",
+    "open": "Open...",
+    "save": "Save",
+    "saveAs": "Save As...",
+    "saveAll": "Save All",
+    "close": "Close",
+    "print": "Print",
+    "exit": "Exit"
+  },
+  "edit": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "delete": "Delete",
+    "selectAll": "Select All"
+  },
+  "search": {
+    "find": "Find...",
+    "replace": "Replace...",
+    "searchAgain": "Search Again",
+    "gotoLine": "Go to Line..."
+  },
+  "run": {
+    "run": "Run",
+    "stepOver": "Step Over",
+    "traceInto": "Trace Into",
+    "gotoSource": "Go to Source",
+    "resetProgram": "Reset Program",
+    "parameters": "Parameters..."
+  },
+  "compile": {
+    "compile": "Compile",
+    "make": "Make",
+    "build": "Build",
+    "destination": "Destination...",
+    "primaryFile": "Primary File..."
+  },
+  "debug": {
+    "breakpoints": "Breakpoints",
+    "callStack": "Call Stack",
+    "watches": "Watches",
+    "evaluate": "Evaluate/Modify...",
+    "addWatch": "Add Watch...",
+    "toggleBreakpoint": "Toggle Breakpoint"
+  },
+  "options": {
+    "compiler": "Compiler...",
+    "linker": "Linker...",
+    "directories": "Directories...",
+    "colors": "Colors...",
+    "editor": "Editor...",
+    "mouse": "Mouse...",
+    "startup": "Startup..."
+  },
+  "status": {
+    "ready": "Ready",
+    "compiling": "Compiling...",
+    "running": "Running...",
+    "error": "Error",
+    "line": "Line",
+    "col": "Col",
+    "insert": "Insert",
+    "overwrite": "Overwrite"
+  },
+  "dialog": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "yes": "Yes",
+    "no": "No",
+    "close": "Close"
+  }
+}

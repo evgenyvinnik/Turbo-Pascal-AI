@@ -1,0 +1,92 @@
+{
+  "app": {
+    "title": "Turbo Pascal IDE",
+    "loading": "Laden..."
+  },
+  "menu": {
+    "file": "Datei",
+    "edit": "Bearbeiten",
+    "search": "Suchen",
+    "run": "Start",
+    "compile": "Kompilieren",
+    "debug": "Debug",
+    "tools": "Extras",
+    "options": "Optionen",
+    "window": "Fenster",
+    "help": "Hilfe"
+  },
+  "file": {
+    "new": "Neu",
+    "open": "Öffnen...",
+    "save": "Speichern",
+    "saveAs": "Speichern unter...",
+    "saveAll": "Alle speichern",
+    "close": "Schließen",
+    "print": "Drucken",
+    "exit": "Beenden"
+  },
+  "edit": {
+    "undo": "Rückgängig",
+    "redo": "Wiederholen",
+    "cut": "Ausschneiden",
+    "copy": "Kopieren",
+    "paste": "Einfügen",
+    "delete": "Löschen",
+    "selectAll": "Alles auswählen"
+  },
+  "search": {
+    "find": "Suchen...",
+    "replace": "Ersetzen...",
+    "searchAgain": "Weitersuchen",
+    "gotoLine": "Gehe zu Zeile..."
+  },
+  "run": {
+    "run": "Ausführen",
+    "stepOver": "Einzelschritt",
+    "traceInto": "Hineinspringen",
+    "gotoSource": "Gehe zu Quelle",
+    "resetProgram": "Programm zurücksetzen",
+    "parameters": "Parameter..."
+  },
+  "compile": {
+    "compile": "Kompilieren",
+    "make": "Make",
+    "build": "Build",
+    "destination": "Ziel...",
+    "primaryFile": "Hauptdatei..."
+  },
+  "debug": {
+    "breakpoints": "Haltepunkte",
+    "callStack": "Aufrufstapel",
+    "watches": "Überwachung",
+    "evaluate": "Auswerten/Ändern...",
+    "addWatch": "Überwachung hinzufügen...",
+    "toggleBreakpoint": "Haltepunkt umschalten"
+  },
+  "options": {
+    "compiler": "Compiler...",
+    "linker": "Linker...",
+    "directories": "Verzeichnisse...",
+    "colors": "Farben...",
+    "editor": "Editor...",
+    "mouse": "Maus...",
+    "startup": "Start..."
+  },
+  "status": {
+    "ready": "Bereit",
+    "compiling": "Kompilieren...",
+    "running": "Ausführen...",
+    "error": "Fehler",
+    "line": "Zeile",
+    "col": "Spalte",
+    "insert": "Einfügen",
+    "overwrite": "Überschreiben"
+  },
+  "dialog": {
+    "ok": "OK",
+    "cancel": "Abbrechen",
+    "yes": "Ja",
+    "no": "Nein",
+    "close": "Schließen"
+  }
+}
