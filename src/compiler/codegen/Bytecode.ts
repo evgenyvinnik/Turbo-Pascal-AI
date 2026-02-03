@@ -1,0 +1,261 @@
+/**
+ * Bytecode container class
+ *
+ * Stores all bytecodes for a program, along with accompanying
+ * data such as program constants and typed constants.
+ */
+
+import { inst, Opcode, opcodeToName } from '../types';
+
+/**
+ * Interface for native procedure registry
+ */
+export interface INative {
+  /** Array of native procedure implementations */
+  procedures: Array<(...args: unknown[]) => unknown>;
+}
+
+/**
+ * Represents a compiled bytecode object containing instructions and constants
+ */
+export class Bytecode {
+  /**
+   * Instruction store - array of encoded instructions
+   */
+  public istore: number[] = [];
+
+  /**
+   * Constants store - ordered list of JavaScript constant objects (numbers, strings, etc.)
+   */
+  public constants: Array<number | string | boolean | null> = [];
+
+  /**
+   * Typed constants - copied to the start of dstore when bytecode is loaded
+   */
+  public typedConstants: number[] = [];
+
+  /**
+   * Index into istore where program should start
+   */
+  public startAddress = 0;
+
+  /**
+   * Map from istore address to comment for debugging/disassembly
+   */
+  public comments: Record<number, string> = {};
+
+  /**
+   * Native methods registry
+   */
+  public native: INative | null;
+
+  /**
+   * Creates a new Bytecode container
+   * @param native - Optional native procedures registry
+   */
+  constructor(native?: INative | null) {
+    this.native = native ?? null;
+  }
+
+  /**
+   * Add a constant (of any type), returning the constant index (cindex).
+   * Re-uses existing constants if they match.
+   * @param c - The constant value to add
+   * @returns The index of the constant in the constants array
+   */
+  addConstant(c: number | string | boolean | null): number {
+    // Re-use existing constants. We could use a hash table for this.
+    for (let i = 0; i < this.constants.length; i++) {
+      if (c === this.constants[i]) {
+        return i;
+      }
+    }
+
+    // Add new constant
+    this.constants.push(c);
+    return this.constants.length - 1;
+  }
+
+  /**
+   * Add an array of words to the end of the typed constants.
+   * @param raw - Array of raw constant values
+   * @returns The address of the item that was just added
+   */
+  addTypedConstants(raw: number[]): number {
+    const address = this.typedConstants.length;
+
+    // Append entire "raw" array to the back of the typedConstants array
+    this.typedConstants.push(...raw);
+
+    return address;
+  }
+
+  /**
+   * Add an opcode to the instruction store.
+   * @param opcode - The opcode to add
+   * @param operand1 - First operand (default 0)
+   * @param operand2 - Second operand (default 0)
+   * @param comment - Optional comment for debugging
+   */
+  add(
+    opcode: Opcode | number,
+    operand1 = 0,
+    operand2 = 0,
+    comment?: string
+  ): void {
+    const instruction = inst.make(opcode, operand1, operand2);
+    const address = this.getNextAddress();
+    this.istore.push(instruction);
+    if (comment) {
+      this.addComment(address, comment);
+    }
+  }
+
+  /**
+   * Replace operand2 of the instruction at the given address.
+   * Used for patching forward jumps.
+   * @param address - The address of the instruction to modify
+   * @param operand2 - The new value for operand2
+   */
+  setOperand2(address: number, operand2: number): void {
+    const instruction = this.istore[address]!;
+    const newInstruction = inst.make(
+      inst.getOpcode(instruction),
+      inst.getOperand1(instruction),
+      operand2
+    );
+    this.istore[address] = newInstruction;
+  }
+
+  /**
+   * Return the next address to be added to the instruction store.
+   * @returns The next available address
+   */
+  getNextAddress(): number {
+    return this.istore.length;
+  }
+
+  /**
+   * Set the starting address to the next instruction that will be added.
+   */
+  setStartAddress(): void {
+    this.startAddress = this.getNextAddress();
+  }
+
+  /**
+   * Add a comment to an address (for debugging/disassembly).
+   * @param address - The address to annotate
+   * @param comment - The comment text
+   */
+  addComment(address: number, comment: string): void {
+    const existingComment = this.comments[address];
+    if (existingComment) {
+      // Add to existing comment
+      this.comments[address] = existingComment + '; ' + comment;
+    } else {
+      this.comments[address] = comment;
+    }
+  }
+
+  /**
+   * Return a printable version of the bytecode object.
+   * @returns A formatted string with constants and instructions
+   */
+  print(): string {
+    return this.printConstants() + '\n' + this.printIstore();
+  }
+
+  /**
+   * Return a printable version of the constant table.
+   * @returns A formatted string of constants
+   */
+  printConstants(): string {
+    const lines: string[] = [];
+    for (let i = 0; i < this.constants.length; i++) {
+      const value = this.constants[i];
+      const displayValue = typeof value === 'string' ? `'${value}'` : value;
+      lines.push(`${this.rightAlign(i, 4)}: ${displayValue}`);
+    }
+
+    return 'Constants:\n' + lines.join('\n') + '\n';
+  }
+
+  /**
+   * Return a printable version of the instruction store.
+   * @returns A formatted string of disassembled instructions
+   */
+  printIstore(): string {
+    const lines: string[] = [];
+    for (let address = 0; address < this.istore.length; address++) {
+      const instruction = this.istore[address]!;
+      let line =
+        this.rightAlign(address, 4) +
+        ': ' +
+        this.leftAlign(inst.disassemble(instruction), 11);
+      const comment = this.comments[address];
+      if (comment) {
+        line += ' ; ' + comment;
+      }
+      lines.push(line);
+    }
+
+    return 'Istore:\n' + lines.join('\n') + '\n';
+  }
+
+  /**
+   * Right-align a value in a field of the given width.
+   * @param value - The value to align
+   * @param width - The field width
+   * @returns The padded string
+   */
+  private rightAlign(value: number | string, width: number): string {
+    const s = String(value);
+    return s.padStart(width, ' ');
+  }
+
+  /**
+   * Left-align a value in a field of the given width.
+   * @param value - The value to align
+   * @param width - The field width
+   * @returns The padded string
+   */
+  private leftAlign(value: string, width: number): string {
+    return value.padEnd(width, ' ');
+  }
+
+  /**
+   * Get the instruction at the given address.
+   * @param address - The instruction address
+   * @returns The encoded instruction
+   */
+  getInstruction(address: number): number {
+    return this.istore[address]!;
+  }
+
+  /**
+   * Get the total number of instructions.
+   * @returns The number of instructions
+   */
+  getInstructionCount(): number {
+    return this.istore.length;
+  }
+
+  /**
+   * Get a constant by its index.
+   * @param index - The constant index
+   * @returns The constant value
+   */
+  getConstant(index: number): number | string | boolean | null {
+    return this.constants[index]!;
+  }
+
+  /**
+   * Get the total number of constants.
+   * @returns The number of constants
+   */
+  getConstantCount(): number {
+    return this.constants.length;
+  }
+}
+
+export default Bytecode;

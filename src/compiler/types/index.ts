@@ -8,5 +8,14 @@ export {
   SYMBOLS,
   type IToken,
   type ReservedWord,
-  type Symbol,
+  type Symbol as TokenSymbol,
 } from './token.types';
+
+export {
+  Opcode,
+  Register,
+  TypeCode,
+  MARK_SIZE,
+  opcodeToName,
+  inst,
+} from './inst';
