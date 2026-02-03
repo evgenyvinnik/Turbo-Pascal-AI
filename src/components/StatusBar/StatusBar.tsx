@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { dosColors, dosFonts, dosSpacing } from '@styles/tokens.stylex';
+import { dosColors, dosFonts, dosSpacing } from '../../styles/tokens.stylex';
 import { useEditorStore } from '@stores/editorStore';
 import { useCompilerStore } from '@stores/compilerStore';
 

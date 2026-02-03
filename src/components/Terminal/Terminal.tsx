@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { dosColors, dosFonts } from '@styles/tokens.stylex';
+import { dosColors, dosFonts } from '../../styles/tokens.stylex';
 import { useCompilerStore } from '@stores/compilerStore';
 
 const styles = stylex.create({

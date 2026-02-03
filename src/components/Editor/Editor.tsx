@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { dosColors, dosFonts } from '@styles/tokens.stylex';
+import { dosColors, dosFonts } from '../../styles/tokens.stylex';
 import { useEditorStore } from '@stores/editorStore';
 
 const CHAR_WIDTH = 8.4; // Approximate width of monospace character

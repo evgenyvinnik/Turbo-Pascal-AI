@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { dosColors } from '@styles/tokens.stylex';
+import { dosColors } from '../../styles/tokens.stylex';
 import { useEditorStore } from '@stores/editorStore';
 import { Editor } from './Editor';
 import { TabBar } from './TabBar';

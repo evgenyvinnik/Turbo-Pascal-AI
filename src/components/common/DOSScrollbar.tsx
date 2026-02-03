@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { dosColors, dosFonts, dosShadows } from '@styles/tokens.stylex';
+import { dosColors, dosFonts, dosShadows } from '../../styles/tokens.stylex';
 
 const styles = stylex.create({
   scrollbar: {

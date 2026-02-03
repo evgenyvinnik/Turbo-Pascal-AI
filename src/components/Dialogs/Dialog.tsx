@@ -5,7 +5,7 @@ import {
   dosFonts,
   dosSpacing,
   dosShadows,
-} from '@styles/tokens.stylex';
+} from '../../styles/tokens.stylex';
 
 const styles = stylex.create({
   backdrop: {

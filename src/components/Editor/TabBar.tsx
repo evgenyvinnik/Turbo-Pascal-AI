@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { dosColors, dosFonts } from '@styles/tokens.stylex';
+import { dosColors, dosFonts } from '../../styles/tokens.stylex';
 import { useEditorStore } from '@stores/editorStore';
 
 const styles = stylex.create({

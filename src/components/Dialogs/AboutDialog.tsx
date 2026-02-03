@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { Dialog } from './Dialog';
 import { DOSButton } from '@components/common';
-import { dosColors, dosFonts, dosSpacing } from '@styles/tokens.stylex';
+import { dosColors, dosFonts, dosSpacing } from '../../styles/tokens.stylex';
 
 const styles = stylex.create({
   content: {

@@ -8,6 +8,12 @@ export type DialogType =
   | 'find-replace'
   | 'about'
   | 'goto-line'
+  | 'find'
+  | 'replace'
+  | 'gotoLine'
+  | 'compilerOptions'
+  | 'editorOptions'
+  | 'colors'
   | null;
 
 export interface MenuItem {
@@ -39,6 +45,7 @@ interface UIState {
 interface UIActions {
   openDialog: (type: DialogType, props?: Record<string, unknown>) => void;
   closeDialog: () => void;
+  setDialog: (type: DialogType) => void;
   setMenuOpen: (menuId: string | null) => void;
   showContextMenu: (x: number, y: number, items: MenuItem[]) => void;
   hideContextMenu: () => void;
@@ -68,6 +75,12 @@ export const useUIStore = create<UIState & UIActions>()(
     closeDialog: () =>
       set((state) => {
         state.activeDialog = null;
+        state.dialogProps = {};
+      }),
+
+    setDialog: (type) =>
+      set((state) => {
+        state.activeDialog = type;
         state.dialogProps = {};
       }),
 

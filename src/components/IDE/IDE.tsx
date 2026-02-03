@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { dosColors, dosFonts } from '@styles/tokens.stylex';
+import { dosColors, dosFonts } from '../../styles/tokens.stylex';
 import { MenuBar } from '@components/MenuBar';
 import { StatusBar } from '@components/StatusBar';
 import { EditorPane } from '@components/Editor';

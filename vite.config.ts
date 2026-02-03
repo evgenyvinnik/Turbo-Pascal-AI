@@ -17,9 +17,13 @@ export default defineConfig({
               dev: process.env.NODE_ENV === 'development',
               genConditionalClasses: true,
               treeshakeCompensation: true,
+              aliases: {
+                '@/*': [path.resolve(__dirname, 'src/*')],
+                '@styles/*': [path.resolve(__dirname, 'src/styles/*')],
+              },
               unstable_moduleResolution: {
                 type: 'commonJS',
-                rootDir: __dirname,
+                rootDir: path.resolve(__dirname),
               },
             },
           ],

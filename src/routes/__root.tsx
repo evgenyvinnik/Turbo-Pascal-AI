@@ -1,7 +1,7 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router';
 import { TanStackRouterDevtools } from '@tanstack/router-devtools';
 import * as stylex from '@stylexjs/stylex';
-import { dosColors } from '@styles/tokens.stylex';
+import { dosColors } from '../styles/tokens.stylex';
 
 const styles = stylex.create({
   root: {

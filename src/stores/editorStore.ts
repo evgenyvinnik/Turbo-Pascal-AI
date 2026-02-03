@@ -43,6 +43,7 @@ interface EditorState {
 interface EditorActions {
   openFile: (path: string, name: string, content: string) => void;
   closeFile: (fileId: string) => void;
+  saveFile: (fileId: string) => void;
   updateContent: (fileId: string, content: string) => void;
   setCursorPosition: (fileId: string, position: Position) => void;
   setScrollPosition: (fileId: string, position: { x: number; y: number }) => void;
@@ -102,6 +103,16 @@ export const useEditorStore = create<EditorState & EditorActions>()(
           if (pane.activeFileId === fileId) {
             pane.activeFileId = pane.openFileIds[0] ?? null;
           }
+        }
+      }),
+
+    saveFile: (fileId) =>
+      set((state) => {
+        const file = state.files.get(fileId);
+        if (file) {
+          file.isDirty = false;
+          // TODO: Save to IndexedDB
+          console.log(`Saving file: ${file.path}`);
         }
       }),
 
