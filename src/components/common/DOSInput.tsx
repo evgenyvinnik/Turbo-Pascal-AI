@@ -46,9 +46,10 @@ const styles = stylex.create({
   },
 });
 
-interface DOSInputProps extends InputHTMLAttributes<HTMLInputElement> {
+interface DOSInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
   label?: string;
   hotkey?: string;
+  onChange?: (value: string) => void;
 }
 
 /**
@@ -75,7 +76,13 @@ function renderLabelWithHotkey(label: string, hotkey?: string) {
 }
 
 export const DOSInput = forwardRef<HTMLInputElement, DOSInputProps>(
-  function DOSInput({ label, hotkey, disabled = false, ...props }, ref) {
+  function DOSInput({ label, hotkey, disabled = false, onChange, ...props }, ref) {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (onChange) {
+        onChange(e.target.value);
+      }
+    };
+
     return (
       <div {...stylex.props(styles.container)}>
         {label && (
@@ -87,6 +94,7 @@ export const DOSInput = forwardRef<HTMLInputElement, DOSInputProps>(
           ref={ref}
           {...stylex.props(styles.input, disabled && styles.disabled)}
           disabled={disabled}
+          onChange={handleChange}
           {...props}
         />
       </div>

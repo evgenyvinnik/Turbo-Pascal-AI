@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { Lexer, Stream } from '@compiler/lexer';
+import { Parser } from '@compiler/parser';
+import { Compiler as PascalCompiler, Bytecode } from '@compiler/codegen';
+import { PascalError } from '@compiler/errors';
 
 export type CompilationStatus = 'idle' | 'lexing' | 'parsing' | 'compiling' | 'success' | 'error';
 
@@ -12,7 +16,7 @@ export interface CompilationError {
 }
 
 export interface CompilationResult {
-  bytecode: unknown | null;
+  bytecode: Bytecode | null;
   parseTree: unknown | null;
   errors: CompilationError[];
   warnings: CompilationError[];
@@ -35,36 +39,112 @@ interface CompilerActions {
 }
 
 export const useCompilerStore = create<CompilerState & CompilerActions>()(
-  immer((set, _get) => ({
+  immer((set, get) => ({
     status: 'idle',
     currentFile: null,
     result: null,
     outputLines: [],
 
-    compile: async (_source, filename) => {
+    compile: async (source, filename) => {
+      const startTime = Date.now();
+      const errors: CompilationError[] = [];
+      const warnings: CompilationError[] = [];
+      let bytecode: Bytecode | null = null;
+      let parseTree: unknown = null;
+
+      // Clear previous output
       set((state) => {
-        state.status = 'compiling';
+        state.outputLines = [];
+        state.status = 'lexing';
         state.currentFile = filename;
       });
 
-      // TODO: Implement actual compilation
-      const startTime = Date.now();
+      get().appendOutput(`Compiling ${filename}...`);
 
-      // Placeholder result
-      const result: CompilationResult = {
-        bytecode: null,
-        parseTree: null,
-        errors: [],
-        warnings: [],
-        compilationTime: Date.now() - startTime,
-      };
+      try {
+        // Step 1: Lexing
+        set((state) => {
+          state.status = 'lexing';
+        });
+        get().appendOutput('Lexical analysis...');
 
-      set((state) => {
-        state.status = result.errors.length > 0 ? 'error' : 'success';
-        state.result = result;
-      });
+        const stream = new Stream(source);
+        const lexer = new Lexer(stream);
 
-      return result;
+        // Step 2: Parsing
+        set((state) => {
+          state.status = 'parsing';
+        });
+        get().appendOutput('Parsing...');
+
+        const parser = new Parser(lexer);
+        parseTree = parser.parse();
+
+        // Step 3: Code generation
+        set((state) => {
+          state.status = 'compiling';
+        });
+        get().appendOutput('Generating bytecode...');
+
+        const compiler = new PascalCompiler();
+        bytecode = compiler.compile(parseTree as Parameters<typeof compiler.compile>[0]);
+
+        const compilationTime = Date.now() - startTime;
+        get().appendOutput(`Compiled successfully in ${compilationTime}ms`);
+        get().appendOutput(`Generated ${bytecode.istore.length} instructions`);
+
+        const result: CompilationResult = {
+          bytecode,
+          parseTree,
+          errors,
+          warnings,
+          compilationTime,
+        };
+
+        set((state) => {
+          state.status = 'success';
+          state.result = result;
+        });
+
+        return result;
+      } catch (error) {
+        const compilationTime = Date.now() - startTime;
+
+        if (error instanceof PascalError) {
+          errors.push({
+            message: error.message,
+            line: error.lineNumber,
+            column: error.columnNumber,
+            file: filename,
+            severity: 'error',
+          });
+          get().appendOutput(`Error at line ${error.lineNumber}: ${error.message}`);
+        } else if (error instanceof Error) {
+          errors.push({
+            message: error.message,
+            line: 0,
+            column: 0,
+            file: filename,
+            severity: 'error',
+          });
+          get().appendOutput(`Error: ${error.message}`);
+        }
+
+        const result: CompilationResult = {
+          bytecode: null,
+          parseTree,
+          errors,
+          warnings,
+          compilationTime,
+        };
+
+        set((state) => {
+          state.status = 'error';
+          state.result = result;
+        });
+
+        return result;
+      }
     },
 
     clearErrors: () =>

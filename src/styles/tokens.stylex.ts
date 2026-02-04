@@ -2,7 +2,8 @@ import * as stylex from '@stylexjs/stylex';
 
 /**
  * DOS Color Palette
- * Authentic Turbo Pascal V7 colors
+ * Authentic EGA 16-color palette for Turbo Pascal V7
+ * Standard colors (0-7) and light/bright colors (8-15)
  */
 export const dosColors = stylex.defineVars({
   // Primary DOS Blue theme
@@ -13,19 +14,21 @@ export const dosColors = stylex.defineVars({
   // Grays for menus and borders
   darkGray: '#555555',
   gray: '#AAAAAA',
-  lightGray: '#CCCCCC',
+  lightGray: '#AAAAAA', // Authentic DOS light gray
 
   // Text colors
   white: '#FFFFFF',
   yellow: '#FFFF55',
   black: '#000000',
 
-  // Accent colors
-  cyan: '#55FFFF',
-  green: '#55FF55',
-  red: '#FF5555',
-  magenta: '#FF55FF',
+  // Standard DOS colors (darker)
+  cyan: '#00AAAA',
+  green: '#00AA00',
+  red: '#AA0000',
+  magenta: '#AA00AA',
   brown: '#AA5500',
+
+  // Light/bright DOS colors
   lightRed: '#FF5555',
   lightGreen: '#55FF55',
   lightCyan: '#55FFFF',
@@ -35,13 +38,13 @@ export const dosColors = stylex.defineVars({
   background: '#000055',
   menuBackground: '#AAAAAA',
   menuText: '#000000',
-  editorBackground: '#0000AA',
+  editorBackground: '#00AAAA', // Cyan background like authentic TP7
   terminalBackground: '#000000',
   selectionBackground: '#5555FF',
   cursorColor: '#FFFF55',
-  errorColor: '#FF5555',
+  errorColor: '#AA0000', // Standard red for errors
   warningColor: '#FFFF55',
-  successColor: '#55FF55',
+  successColor: '#00AA00', // Standard green for success
 });
 
 export const dosSpacing = stylex.defineVars({
@@ -63,12 +66,17 @@ export const dosFonts = stylex.defineVars({
 });
 
 export const dosShadows = stylex.defineVars({
+  // Authentic DOS 3D effects with stronger contrast
   inset:
-    'inset 2px 2px 0 rgba(0,0,0,0.5), inset -2px -2px 0 rgba(255,255,255,0.3)',
+    'inset 1px 1px 0 #000000, inset -1px -1px 0 #FFFFFF',
   raised:
-    '2px 2px 0 rgba(0,0,0,0.5), -1px -1px 0 rgba(255,255,255,0.3)',
-  pressed: 'inset 1px 1px 0 rgba(0,0,0,0.5)',
-  window: '4px 4px 0 rgba(0,0,0,0.8)',
+    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #555555, 1px 1px 0 #000000',
+  pressed:
+    'inset 1px 1px 0 #555555, inset -1px -1px 0 #FFFFFF',
+  window:
+    'inset 2px 2px 0 #FFFFFF, inset -2px -2px 0 #555555, 2px 2px 0 #000000',
+  panel:
+    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #555555',
 });
 
 export const dosBorders = stylex.defineVars({

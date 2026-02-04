@@ -15,7 +15,8 @@ const styles = stylex.create({
     fontFamily: dosFonts.mono,
     fontSize: dosFonts.size,
     height: '20px',
-    borderBottom: `1px solid ${dosColors.darkGray}`,
+    borderBottom: `1px solid ${dosColors.black}`,
+    boxShadow: dosShadows.panel,
     position: 'relative',
     zIndex: 1000,
   },
@@ -36,7 +37,7 @@ const styles = stylex.create({
     color: dosColors.white,
   },
   menuItemHighlight: {
-    color: dosColors.red,
+    color: dosColors.lightRed,
   },
   menuItemHighlightActive: {
     color: dosColors.yellow,
@@ -51,7 +52,7 @@ const styles = stylex.create({
     minWidth: '200px',
     backgroundColor: dosColors.menuBackground,
     boxShadow: dosShadows.window,
-    border: `1px solid ${dosColors.darkGray}`,
+    border: `1px solid ${dosColors.black}`,
     zIndex: 1001,
   },
   dropdownItem: {
@@ -72,7 +73,7 @@ const styles = stylex.create({
   },
   dropdownSeparator: {
     height: '1px',
-    backgroundColor: dosColors.darkGray,
+    backgroundColor: dosColors.black,
     margin: `${dosSpacing.xs} 0`,
   },
   shortcut: {
@@ -142,8 +143,7 @@ export function MenuBar() {
           labelKey: 'file.open',
           shortcut: 'F3',
           action: () => {
-            // Open sample file for now
-            openFile('/samples/HELLO.PAS', 'HELLO.PAS', `program Hello;\nbegin\n  WriteLn('Hello, World!');\nend.\n`);
+            setDialog('file-open');
           },
         },
         { id: 'sep1', labelKey: '', separator: true },
@@ -160,7 +160,7 @@ export function MenuBar() {
           id: 'saveAs',
           labelKey: 'file.saveAs',
           shortcut: 'Ctrl+S',
-          action: () => console.log('Save As'),
+          action: () => setDialog('file-save'),
           disabled: !hasOpenFile,
         },
         { id: 'sep2', labelKey: '', separator: true },
@@ -269,7 +269,14 @@ export function MenuBar() {
         {
           id: 'build',
           labelKey: 'compile.build',
-          action: () => console.log('Build'),
+          action: async () => {
+            if (!currentFileId) return;
+            const file = useEditorStore.getState().files.get(currentFileId);
+            if (file) {
+              setStatus('compiling');
+              await compile(file.content, file.name);
+            }
+          },
           disabled: !hasOpenFile,
         },
       ],

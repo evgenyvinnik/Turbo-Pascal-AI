@@ -9,7 +9,9 @@ import { FileExplorer } from '@components/FileExplorer';
 import { Terminal } from '@components/Terminal';
 import { DebugPanel } from '@components/DebugPanel';
 import { GraphicsCanvas } from '@components/GraphicsCanvas';
+import { DialogContainer } from '@components/Dialogs';
 import { useEditorStore } from '@stores/editorStore';
+import { useCompilerStore } from '@stores/compilerStore';
 import { useSettingsStore } from '@stores/settingsStore';
 
 const styles = stylex.create({
@@ -74,44 +76,74 @@ const styles = stylex.create({
 export function IDE() {
   const { t } = useTranslation();
   const panes = useEditorStore((state) => state.panes);
-  const _files = useEditorStore((state) => state.files);
+  const files = useEditorStore((state) => state.files);
   const layout = useEditorStore((state) => state.layout);
   const openFile = useEditorStore((state) => state.openFile);
+  const saveFile = useEditorStore((state) => state.saveFile);
+  const compile = useCompilerStore((state) => state.compile);
   const showFileExplorer = useSettingsStore((state) => state.ui.showFileExplorer);
   const showDebugPanel = useSettingsStore((state) => state.ui.showDebugPanel);
 
   const hasOpenFiles = panes.some((pane) => pane.openFileIds.length > 0);
 
+  // Get current file
+  const currentPane = panes[0];
+  const currentFileId = currentPane?.activeFileId;
+  const currentFile = currentFileId ? files.get(currentFileId) : null;
+
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      // F3 - Open file
-      if (e.key === 'F3') {
+    async (e: KeyboardEvent) => {
+      // F2 - Save
+      if (e.key === 'F2' && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        // TODO: Open file dialog
+        if (currentFileId) {
+          saveFile(currentFileId);
+        }
+        return;
+      }
+
+      // F3 - Open file
+      if (e.key === 'F3' && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
         // For now, open a sample file
         openFile('/samples/HELLO.PAS', 'HELLO.PAS', `program Hello;
 begin
   WriteLn('Hello, World!');
 end.
 `);
+        return;
+      }
+
+      // Ctrl+F9 - Run (check before F9)
+      if (e.ctrlKey && e.key === 'F9') {
+        e.preventDefault();
+        if (currentFile) {
+          await compile(currentFile.content, currentFile.name);
+          // TODO: Run the compiled code
+        }
+        return;
       }
 
       // F9 - Compile
-      if (e.key === 'F9') {
+      if (e.key === 'F9' && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        // TODO: Compile current file
-        console.log('Compile');
+        if (currentFile) {
+          await compile(currentFile.content, currentFile.name);
+        }
+        return;
       }
 
-      // Ctrl+F9 - Run
-      if (e.ctrlKey && e.key === 'F9') {
+      // Alt+F9 - Compile (alternative)
+      if (e.altKey && e.key === 'F9') {
         e.preventDefault();
-        // TODO: Run current file
-        console.log('Run');
+        if (currentFile) {
+          await compile(currentFile.content, currentFile.name);
+        }
+        return;
       }
     },
-    [openFile]
+    [openFile, saveFile, compile, currentFileId, currentFile]
   );
 
   useEffect(() => {
@@ -173,6 +205,7 @@ end.
       </div>
       <StatusBar />
       <GraphicsCanvas />
+      <DialogContainer />
     </div>
   );
 }

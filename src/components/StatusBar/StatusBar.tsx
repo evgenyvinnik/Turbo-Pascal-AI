@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { dosColors, dosFonts, dosSpacing } from '../../styles/tokens.stylex';
+import { dosColors, dosFonts, dosSpacing, dosShadows } from '../../styles/tokens.stylex';
 import { useEditorStore } from '@stores/editorStore';
 import { useCompilerStore } from '@stores/compilerStore';
 
@@ -12,17 +12,21 @@ const styles = stylex.create({
     fontFamily: dosFonts.mono,
     fontSize: dosFonts.size,
     height: '20px',
-    borderTop: `1px solid ${dosColors.darkGray}`,
+    borderTop: `1px solid ${dosColors.black}`,
+    boxShadow: dosShadows.panel,
     padding: `0 ${dosSpacing.sm}`,
   },
   item: {
     display: 'flex',
     alignItems: 'center',
     padding: `0 ${dosSpacing.md}`,
-    borderRight: `1px solid ${dosColors.darkGray}`,
+    borderRight: `1px solid ${dosColors.black}`,
+    boxShadow: dosShadows.panel,
+    marginRight: '1px',
   },
   itemLast: {
     borderRight: 'none',
+    marginRight: 0,
   },
   spacer: {
     flex: 1,
@@ -37,19 +41,31 @@ const styles = stylex.create({
   success: {
     color: dosColors.green,
   },
+  ready: {
+    color: dosColors.green,
+  },
 });
 
 export function StatusBar() {
   const { t } = useTranslation();
   const insertMode = useEditorStore((state) => state.insertMode);
+  const panes = useEditorStore((state) => state.panes);
+  const files = useEditorStore((state) => state.files);
   const status = useCompilerStore((state) => state.status);
+
+  // Get current file's cursor position
+  const currentPane = panes[0];
+  const currentFileId = currentPane?.activeFileId;
+  const currentFile = currentFileId ? files.get(currentFileId) : null;
+  const cursorPosition = currentFile?.cursorPosition ?? { line: 1, column: 1 };
 
   const getStatusColor = () => {
     switch (status) {
       case 'error':
         return styles.error;
       case 'success':
-        return styles.success;
+      case 'idle':
+        return styles.ready;
       default:
         return undefined;
     }
@@ -96,10 +112,10 @@ export function StatusBar() {
       </div>
       <div {...stylex.props(styles.spacer)} />
       <div {...stylex.props(styles.item)}>
-        {t('status.line')}: 1 {t('status.col')}: 1
+        {t('status.line')}: {cursorPosition.line} {t('status.col')}: {cursorPosition.column}
       </div>
       <div {...stylex.props(styles.item)}>
-        {insertMode ? t('status.insert') : t('status.overwrite')}
+        {insertMode ? 'INSERT' : 'OVERWRITE'}
       </div>
       <div {...stylex.props(styles.item, styles.itemLast, getStatusColor())}>
         {getStatusText()}

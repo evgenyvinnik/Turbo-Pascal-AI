@@ -45,10 +45,11 @@ const styles = stylex.create({
 });
 
 interface DOSCheckboxProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> {
   label?: string;
   hotkey?: string;
   checked?: boolean;
+  onChange?: (checked: boolean) => void;
 }
 
 /**
@@ -84,10 +85,13 @@ export function DOSCheckbox({
 }: DOSCheckboxProps) {
   const handleClick = () => {
     if (disabled || !onChange) return;
-    const syntheticEvent = {
-      target: { checked: !checked },
-    } as React.ChangeEvent<HTMLInputElement>;
-    onChange(syntheticEvent);
+    onChange(!checked);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (onChange) {
+      onChange(e.target.checked);
+    }
   };
 
   return (
@@ -102,7 +106,7 @@ export function DOSCheckbox({
         type="checkbox"
         checked={checked}
         disabled={disabled}
-        onChange={onChange}
+        onChange={handleChange}
         {...stylex.props(styles.checkbox)}
         {...props}
       />

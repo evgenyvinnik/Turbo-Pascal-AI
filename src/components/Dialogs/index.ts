@@ -1,2 +1,11 @@
 export { Dialog } from './Dialog';
 export { AboutDialog } from './AboutDialog';
+export { FindDialog } from './FindDialog';
+export { ReplaceDialog } from './ReplaceDialog';
+export { GotoLineDialog } from './GotoLineDialog';
+export { CompilerOptionsDialog } from './CompilerOptionsDialog';
+export { EditorOptionsDialog } from './EditorOptionsDialog';
+export { ColorsDialog } from './ColorsDialog';
+export { FileOpenDialog } from './FileOpenDialog';
+export { FileSaveDialog } from './FileSaveDialog';
+export { DialogContainer } from './DialogContainer';

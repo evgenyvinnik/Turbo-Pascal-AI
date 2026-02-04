@@ -25,6 +25,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     backgroundColor: dosColors.gray,
     boxShadow: dosShadows.window,
+    border: `2px solid ${dosColors.black}`,
     minWidth: '300px',
     maxWidth: '90vw',
     maxHeight: '90vh',
@@ -39,6 +40,7 @@ const styles = stylex.create({
     fontSize: dosFonts.size,
     padding: `${dosSpacing.xs} ${dosSpacing.sm}`,
     userSelect: 'none',
+    borderBottom: `1px solid ${dosColors.black}`,
   },
   title: {
     flex: 1,
@@ -56,7 +58,7 @@ const styles = stylex.create({
     color: dosColors.black,
     fontFamily: dosFonts.mono,
     fontSize: '12px',
-    border: 'none',
+    border: `1px solid ${dosColors.black}`,
     cursor: 'pointer',
     boxShadow: dosShadows.raised,
     ':hover': {
@@ -82,7 +84,7 @@ const styles = stylex.create({
     justifyContent: 'center',
     gap: dosSpacing.md,
     padding: dosSpacing.md,
-    borderTop: `1px solid ${dosColors.darkGray}`,
+    borderTop: `1px solid ${dosColors.black}`,
   },
 });
 

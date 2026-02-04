@@ -11,6 +11,12 @@ export interface EditorSettings {
   autoSave: boolean;
   autoSaveDelay: number;
   screenMode: '80x25' | '80x50';
+  showLineNumbers: boolean;
+  highlightCurrentLine: boolean;
+  syntaxHighlighting: boolean;
+  showWhitespace: boolean;
+  autoIndent: boolean;
+  insertMode: boolean;
 }
 
 export interface CompilerSettings {
@@ -20,6 +26,8 @@ export interface CompilerSettings {
   rangeChecking: boolean;
   stackChecking: boolean;
   ioChecking: boolean;
+  overflowChecking: boolean;
+  debugInfo: boolean;
 }
 
 export interface UISettings {
@@ -53,6 +61,12 @@ const defaultEditorSettings: EditorSettings = {
   autoSave: false,
   autoSaveDelay: 5000,
   screenMode: '80x25',
+  showLineNumbers: true,
+  highlightCurrentLine: true,
+  syntaxHighlighting: true,
+  showWhitespace: false,
+  autoIndent: true,
+  insertMode: true,
 };
 
 const defaultCompilerSettings: CompilerSettings = {
@@ -62,6 +76,8 @@ const defaultCompilerSettings: CompilerSettings = {
   rangeChecking: true,
   stackChecking: true,
   ioChecking: true,
+  overflowChecking: true,
+  debugInfo: true,
 };
 
 const defaultUISettings: UISettings = {
