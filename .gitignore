@@ -44,3 +44,6 @@ dev-dist/
 # Temporary
 *.tmp
 *.temp
+
+# Reference screenshots are third-party images, fetched on demand
+tests/e2e/fidelity/reference/

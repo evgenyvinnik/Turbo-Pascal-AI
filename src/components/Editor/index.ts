@@ -1,3 +1,2 @@
-export { Editor } from './Editor';
-export { TabBar } from './TabBar';
-export { EditorPane } from './EditorPane';
+export { paintEditWindow } from './paintEditor';
+export { highlight, isReserved } from './highlight';

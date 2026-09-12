@@ -7,44 +7,44 @@ import * as stylex from '@stylexjs/stylex';
  */
 export const dosColors = stylex.defineVars({
   // Primary DOS Blue theme
-  blue: '#0000AA',
-  lightBlue: '#5555FF',
-  darkBlue: '#000055',
+  blue: '#0000A8',
+  lightBlue: '#5757FF',
+  darkBlue: '#000000',
 
   // Grays for menus and borders
-  darkGray: '#555555',
-  gray: '#AAAAAA',
-  lightGray: '#AAAAAA', // Authentic DOS light gray
+  darkGray: '#545454',
+  gray: '#A8A8A8',
+  lightGray: '#A8A8A8', // Authentic DOS light gray
 
   // Text colors
   white: '#FFFFFF',
-  yellow: '#FFFF55',
+  yellow: '#FFFF57',
   black: '#000000',
 
   // Standard DOS colors (darker)
-  cyan: '#00AAAA',
-  green: '#00AA00',
-  red: '#AA0000',
-  magenta: '#AA00AA',
-  brown: '#AA5500',
+  cyan: '#00A8A8',
+  green: '#00A800',
+  red: '#A80000',
+  magenta: '#A800A8',
+  brown: '#A85700',
 
   // Light/bright DOS colors
-  lightRed: '#FF5555',
-  lightGreen: '#55FF55',
-  lightCyan: '#55FFFF',
-  lightMagenta: '#FF55FF',
+  lightRed: '#FF5757',
+  lightGreen: '#57FF57',
+  lightCyan: '#57FFFF',
+  lightMagenta: '#FF57FF',
 
   // Semantic colors
-  background: '#000055',
-  menuBackground: '#AAAAAA',
+  background: '#000000',
+  menuBackground: '#A8A8A8',
   menuText: '#000000',
-  editorBackground: '#00AAAA', // Cyan background like authentic TP7
+  editorBackground: '#00A8A8', // Cyan background like authentic TP7
   terminalBackground: '#000000',
-  selectionBackground: '#5555FF',
-  cursorColor: '#FFFF55',
-  errorColor: '#AA0000', // Standard red for errors
-  warningColor: '#FFFF55',
-  successColor: '#00AA00', // Standard green for success
+  selectionBackground: '#5757FF',
+  cursorColor: '#FFFF57',
+  errorColor: '#A80000', // Standard red for errors
+  warningColor: '#FFFF57',
+  successColor: '#00A800', // Standard green for success
 });
 
 export const dosSpacing = stylex.defineVars({
@@ -59,8 +59,8 @@ export const dosSpacing = stylex.defineVars({
 });
 
 export const dosFonts = stylex.defineVars({
-  mono: '"Nouveau IBM", "Courier New", "Lucida Console", monospace',
-  size: '14px',
+  mono: '"Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "DejaVu Sans Mono", Consolas, Menlo, "Courier New", monospace',
+  size: '15px',
   lineHeight: '16px',
   letterSpacing: '0px',
 });
@@ -70,13 +70,13 @@ export const dosShadows = stylex.defineVars({
   inset:
     'inset 1px 1px 0 #000000, inset -1px -1px 0 #FFFFFF',
   raised:
-    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #555555, 1px 1px 0 #000000',
+    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #545454, 1px 1px 0 #000000',
   pressed:
-    'inset 1px 1px 0 #555555, inset -1px -1px 0 #FFFFFF',
+    'inset 1px 1px 0 #545454, inset -1px -1px 0 #FFFFFF',
   window:
-    'inset 2px 2px 0 #FFFFFF, inset -2px -2px 0 #555555, 2px 2px 0 #000000',
+    'inset 2px 2px 0 #FFFFFF, inset -2px -2px 0 #545454, 2px 2px 0 #000000',
   panel:
-    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #555555',
+    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #545454',
 });
 
 export const dosBorders = stylex.defineVars({

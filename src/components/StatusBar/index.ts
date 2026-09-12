@@ -1,1 +1,1 @@
-export { StatusBar } from './StatusBar';
+export { paintStatusKeys, paintStatusHint } from './paintStatusBar';

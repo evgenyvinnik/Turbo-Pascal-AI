@@ -38,6 +38,12 @@ bun run test
 # Run E2E tests
 bun run test:e2e
 
+# Run only the pixel snapshot suite
+bun run test:visual
+
+# Refresh the pixel snapshot baselines
+bun run test:e2e:update
+
 # Lint
 bun run lint
 
@@ -52,6 +58,11 @@ bun run build
 
 ```
 src/
+├── tui/                   # Text-mode engine (80x25 character grid)
+│   ├── palette.ts         # Authentic VGA 16-colour table
+│   ├── chars.ts           # CP437 box drawing, shades, arrows
+│   ├── Screen.ts          # Cell buffer + frame/shadow/scrollbar primitives
+│   └── TextScreen.tsx     # React renderer, scales the grid to the viewport
 ├── compiler/              # Pascal compiler (TypeScript port)
 │   ├── types/             # Type definitions, opcodes
 │   ├── lexer/             # Token, Stream, Lexer
@@ -61,32 +72,38 @@ src/
 │   ├── runtime/           # Machine (VM), Native, Control
 │   ├── stdlib/            # builtin, crt, graph
 │   └── errors/            # PascalError
-├── components/            # React components
-│   ├── IDE/               # Main container
-│   ├── MenuBar/           # Top menu
-│   ├── Editor/            # Code editor with tabs
-│   ├── Terminal/          # Console output
-│   ├── DebugPanel/        # Watches, CallStack
-│   ├── GraphicsCanvas/    # Graphics output overlay
-│   ├── FileExplorer/      # File browser
-│   ├── StatusBar/         # Bottom status bar
-│   ├── Dialogs/           # Modal dialogs
-│   └── common/            # DOS-style UI primitives
+├── components/            # Painters, not widgets: each draws into the Screen
+│   ├── IDE/               # Screen composition, keyboard and mouse routing
+│   ├── MenuBar/           # Menu tree definition + menu painter
+│   ├── Editor/            # Edit window painter + Pascal syntax colouring
+│   ├── Window/            # Turbo Vision frames and tool windows
+│   ├── Dialogs/           # Declarative dialog model + dialog painter
+│   ├── StatusBar/         # Context sensitive key list and hint line
+│   ├── Terminal/          # Output window (re-exports the tool painter)
+│   ├── DebugPanel/        # Watches / Call stack (re-exports the tool painter)
+│   └── GraphicsCanvas/    # Fullscreen graphics overlay
 ├── routes/                # TanStack Router
-├── stores/                # Zustand stores
+├── stores/                # Zustand stores (desktop, menu, dialog, ide, ...)
 ├── services/db/           # IndexedDB via Dexie
 ├── hooks/                 # Custom React hooks
-├── styles/                # StyleX theme tokens
+├── styles/                # StyleX theme tokens + the TP attribute table
 └── i18n/                  # Translations (en, de, ru)
 ```
 
 ## Key Design Decisions
 
-### Custom DOS-Style Editor (No Monaco/CodeMirror)
-- Character-grid based rendering (80x25 or 80x50 modes)
-- Block cursor, insert/overwrite modes
-- Keyboard-driven navigation
-- Custom Pascal syntax highlighting
+### Everything Is Painted Into One 80x25 Character Grid
+The whole IDE - desktop, windows, menus, dialogs, status line - is drawn cell
+by cell into a single `Screen` buffer each frame, the way the original DOS
+program wrote into VGA text memory. React only renders the resulting runs of
+same-coloured cells, so there are no HTML widgets to keep in sync with the
+Turbo Vision look.
+
+- One cell is 9x16 px, so the full screen is 720x400 and scales to the viewport
+- Colours come from `src/styles/tpTheme.ts`, sampled from the reference shots
+- Block cursor, insert/overwrite modes, keyboard-driven navigation
+- Custom Pascal syntax highlighting: reserved words white, comments gray,
+  everything else yellow, exactly as Turbo Pascal 7 shows it
 
 ### Graphics Output
 - Fullscreen canvas overlay (press ESC to return to IDE)
@@ -119,8 +136,17 @@ dosColors = {
 - Prefer functional components with hooks
 - Use Zustand for global state, TanStack Query for async data
 
+## Reference
+
+The UI follows the screenshot gallery at
+https://ui.codexpanse.com/turbo-pascal-71.html. Menu items, shortcuts, hint
+lines, dialog layouts and colours are transcribed from those images.
+
 ## Testing
 
 - Unit tests: Vitest for compiler modules
-- E2E tests: Playwright for UI interactions
-- Test sample Pascal programs: HELLO.PAS, FIBONACCI.PAS, PRIMES.PAS
+- E2E tests: Playwright for UI interactions (`tests/e2e/behaviour.spec.ts`)
+- Visual tests: Playwright pixel snapshots in `tests/e2e/visual.spec.ts`, run by
+  the `visual` project at a 720x400 viewport so one CSS pixel is one VGA pixel.
+  Update baselines with `bun run test:e2e:update`.
+- Test sample Pascal programs: HELLO.PAS, FIBONACCI.PAS, PRIMES.PAS, SQUARE.PAS

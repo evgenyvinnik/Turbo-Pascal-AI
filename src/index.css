@@ -1,11 +1,13 @@
 :root {
-  font-family: 'Nouveau IBM', 'Courier New', monospace;
+  font-family:
+    'Px437 IBM VGA 8x16', 'Perfect DOS VGA 437', 'IBM Plex Mono', 'DejaVu Sans Mono', Consolas,
+    Menlo, 'Courier New', monospace;
   line-height: 1.2;
   font-weight: 400;
 
   color-scheme: dark;
   color: #ffffff;
-  background-color: #000055;
+  background-color: #000000;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -28,8 +30,7 @@ body,
 }
 
 body {
-  display: flex;
-  place-items: center;
+  background-color: #000000;
   min-width: 320px;
   min-height: 100vh;
 }

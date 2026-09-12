@@ -28,6 +28,10 @@ interface CompilerState {
   currentFile: string | null;
   result: CompilationResult | null;
   outputLines: string[];
+  /** Text the running program wrote to the console. */
+  programOutput: string[];
+  /** Tool window messages, newest run last. */
+  messages: string[];
 }
 
 interface CompilerActions {
@@ -35,6 +39,8 @@ interface CompilerActions {
   clearErrors: () => void;
   clearOutput: () => void;
   appendOutput: (line: string) => void;
+  setProgramOutput: (lines: string[]) => void;
+  setMessages: (lines: string[]) => void;
   setStatus: (status: CompilationStatus) => void;
 }
 
@@ -44,6 +50,8 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
     currentFile: null,
     result: null,
     outputLines: [],
+    programOutput: [],
+    messages: [],
 
     compile: async (source, filename) => {
       const startTime = Date.now();
@@ -163,6 +171,16 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
     appendOutput: (line) =>
       set((state) => {
         state.outputLines.push(line);
+      }),
+
+    setProgramOutput: (lines) =>
+      set((state) => {
+        state.programOutput = lines;
+      }),
+
+    setMessages: (lines) =>
+      set((state) => {
+        state.messages = lines;
       }),
 
     setStatus: (status) =>

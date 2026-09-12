@@ -19,10 +19,14 @@ A web-based recreation of the classic Turbo Pascal V7 IDE, bringing the authenti
 
 ## Screenshots
 
-The IDE recreates the classic Turbo Pascal look and feel:
-- Blue background with gray menus
-- Block cursor editor
-- DOS-style dialogs and buttons
+The interface is transcribed from the screenshot gallery at
+[Museum of UI](https://ui.codexpanse.com/turbo-pascal-71.html): menu items,
+shortcuts, hint lines, dialog layouts and the VGA colour attributes all come
+from those images, sampled cell by cell.
+
+Everything is painted into a single 80x25 character grid of 9x16 pixel cells,
+the way the original wrote into VGA text memory, so the whole IDE is 720x400
+and scales to fit the window.
 
 ## Quick Start
 
@@ -90,32 +94,42 @@ end.
 
 ## Keyboard Shortcuts
 
+The original Turbo Pascal key assignments:
+
 | Shortcut | Action |
 |----------|--------|
-| F9 | Compile |
-| Ctrl+F9 | Run |
+| F1 | Help contents |
 | F2 | Save |
 | F3 | Open |
-| Ctrl+N | New File |
-| Ctrl+W | Close File |
-| F1 | Help |
-| F5 | Debug |
-| F7 | Step Into |
-| F8 | Step Over |
-| Ctrl+F | Find |
-| Ctrl+H | Replace |
+| F4 | Go to cursor |
+| F5 | Zoom window |
+| F6 | Next window |
+| F7 | Trace into |
+| F8 | Step over |
+| F9 | Make |
+| F10 | Menu bar |
+| Alt+F9 | Compile |
+| Ctrl+F9 | Run |
+| Alt+F3 | Close window |
+| Alt+F5 | User screen |
+| Ctrl+F3 | Call stack |
+| Ctrl+F7 | Add watch |
+| Alt+0 | Window list |
+| Alt+X | Exit |
+| Alt+*letter* | Open that menu |
 
 ## Project Structure
 
 ```
 src/
+├── tui/               # Text-mode engine: palette, CP437 glyphs, cell buffer
 ├── compiler/          # Pascal compiler
 │   ├── lexer/         # Tokenizer
 │   ├── parser/        # AST parser
 │   ├── codegen/       # Bytecode generator
 │   ├── runtime/       # P-machine VM
 │   └── stdlib/        # Standard library (CRT, Graph)
-├── components/        # React UI components
+├── components/        # Painters that draw into the cell buffer
 ├── stores/            # Zustand state management
 ├── services/          # IndexedDB persistence
 └── i18n/              # Internationalization
@@ -139,6 +153,30 @@ The Pascal compiler is a TypeScript port of [lkesteloot/turbopascal](https://git
 - P-machine bytecode generation
 - Stack-based virtual machine
 - Support for standard units (System, CRT, Graph)
+
+### Known gap
+
+Code generation does not run yet. The parser emits nodes carrying a string
+`type` field, while `codegen/Compiler.ts` switches on a numeric `nodeType` and
+expects semantic annotations (`symbolLookup`, `expressionType`, `symbolTable`)
+that no pass produces. Every compile therefore fails with
+`can't compile unknown node undefined`, and the IDE shows that message in its
+red error banner. Lexing and parsing work, so syntax errors are reported
+correctly. Three Playwright tests covering the success path are marked
+`test.fixme` until the two halves agree on one AST.
+
+## Testing
+
+```bash
+bun run test          # Vitest unit tests
+bun run test:e2e      # Playwright behaviour + visual suites
+bun run test:visual   # Only the pixel snapshots
+bun run test:e2e:update  # Refresh the snapshot baselines
+```
+
+Visual snapshots run in Chromium at a 720x400 viewport so one CSS pixel is one
+VGA pixel, which makes the baselines directly comparable to the reference
+gallery.
 
 ## Contributing
 
