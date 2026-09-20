@@ -1,6 +1,6 @@
 import { Screen, type Rect } from '@/tui/Screen';
 import type { Attr } from '@/tui/palette';
-import { ARROW_UP, ARROW_UP_DOWN, BLOCK_SMALL, SINGLE } from '@/tui/chars';
+import { ARROW_UP, ARROW_UP_DOWN, BLOCK_SMALL, DOUBLE, SINGLE } from '@/tui/chars';
 import { DESKTOP } from '@stores/desktopStore';
 
 export interface ScrollInfo {
@@ -39,7 +39,7 @@ export function paintFrame(scr: Screen, p: FramePaint): void {
   scr.centerTitle(r, p.title, frame);
 
   if (!active) {
-    scr.write(r.x + r.w - 3, r.y, String(p.number), frame);
+    scr.write(r.x + r.w - 7, r.y, String(p.number), frame);
     return;
   }
 
@@ -47,7 +47,7 @@ export function paintFrame(scr: Screen, p: FramePaint): void {
   scr.put(r.x + 3, r.y, BLOCK_SMALL, p.icon);
   scr.write(r.x + 4, r.y, ']', frame);
 
-  const tag = `${String(p.number)}=[`;
+  const tag = `${String(p.number)}${DOUBLE.t}[`;
   const tx = r.x + r.w - 7;
   scr.write(tx, r.y, tag, frame);
   scr.put(tx + tag.length, r.y, isFullSize(r) ? ARROW_UP_DOWN : ARROW_UP, p.icon);

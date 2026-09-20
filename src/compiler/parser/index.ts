@@ -3,4 +3,4 @@
  */
 
 export * from './Node';
-export { Parser } from './Parser';
+export { Parser, type ParserOptions } from './Parser';

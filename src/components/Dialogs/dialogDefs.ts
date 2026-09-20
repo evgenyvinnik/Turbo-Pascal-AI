@@ -44,6 +44,20 @@ const OK_HINT = 'Accept the settings in this dialog box';
 const CANCEL_HINT = 'Close the dialog box without making any changes';
 const HELP_HINT = 'Show help about using this dialog box';
 
+export const printerSetupDialog = (): DialogDef => ({
+  id: 'printer-setup', title: 'Printer Setup', rect: { x: 18, y: 6, w: 43, h: 13 },
+  controls: [
+    label(3, 2, '~F~ilter path', 'filter'),
+    { kind: 'input', id: 'filter', x: 3, y: 3, w: 37, history: false, hint: 'Enter path and filename of printer filter/driver' },
+    label(3, 5, '~C~ommand line', 'command'),
+    { kind: 'input', id: 'command', x: 3, y: 6, w: 37, history: false, hint: 'Enter command line for printer filter/driver' },
+    { kind: 'checks', id: 'highlight', x: 3, y: 8, w: 37, items: items('~S~end highlighting escape codes'), hint: 'Print source text with highlighting' },
+    btn('ok', 7, 10, 8, '~O~K', OK_HINT, { default: true }),
+    btn('cancel', 19, 10, 8, 'Cancel', CANCEL_HINT),
+    btn('help', 31, 10, 8, 'Help', HELP_HINT),
+  ],
+});
+
 /** OK, Cancel and Help in one row, eight cells wide and `gap` apart. */
 const okCancelHelp = (x: number, y: number, step: number, okLabel = 'O~K~'): Control[] => [
   btn('ok', x, y, 8, okLabel, OK_HINT, { default: true }),
@@ -89,7 +103,7 @@ export const findDialog = (): DialogDef => ({
 export const replaceDialog = (): DialogDef => ({
   id: 'replace',
   title: 'Replace',
-  rect: { x: 12, y: 3, w: 55, h: 18 },
+  rect: { x: 12, y: 3, w: 55, h: 19 },
   controls: [
     label(3, 2, '~T~ext to find', 'text'),
     { kind: 'input', id: 'text', x: 16, y: 2, w: 33, hint: 'Enter literal text or regular expression to search for' },
@@ -149,7 +163,7 @@ export const aboutDialog = (): DialogDef => ({
     text(12, 4, 'Version 7.1'),
     text(6, 6, 'Copyright (c) 1983,97 by'),
     text(5, 8, 'Borland International, Inc.'),
-    btn('ok', 14, 10, 8, 'O~K~', 'Close this dialog box', { default: true }),
+    btn('ok', 14, 10, 8, 'O~K~', OK_HINT, { default: true }),
   ],
 });
 
@@ -183,6 +197,33 @@ export const openFileDialog = (files: string[], info: string[]): DialogDef => ({
   ],
 });
 
+export const primaryFileDialog = (files: string[], info: string[]): DialogDef => ({
+  ...openFileDialog(files, info), id: 'primary', title: 'Primary File',
+  controls: [
+    label(3, 2, '~P~rimary program file', 'name'),
+    { kind: 'input', id: 'name', x: 3, y: 3, w: 28, hint: 'Enter directory path and file mask' },
+    label(3, 5, '~F~iles', 'files'), fileList('files', files, 'Select the primary program file'),
+    btn('ok', 36, 3, 9, 'O~K~', OK_HINT, { default: true }),
+    btn('clear', 36, 6, 9, 'C~l~ear', 'Clear the primary program file'),
+    btn('cancel', 36, 11, 9, 'Cancel', CANCEL_HINT), btn('help', 36, 14, 9, 'Help', HELP_HINT),
+    { kind: 'info', x: 1, y: 16, w: 47, h: 2, lines: info },
+  ],
+});
+
+export const findProcedureDialog = (): DialogDef => ({
+  id: 'findproc', title: 'Find Procedure', rect: { x: 22, y: 8, w: 36, h: 8 },
+  controls: [label(3, 2, '~P~rocedure name', 'name'),
+    { kind: 'input', id: 'name', x: 3, y: 3, w: 27, hint: 'Enter name of procedure or function to locate' },
+    ...okCancelHelp(3, 5, 11)],
+});
+
+export const findErrorDialog = (): DialogDef => ({
+  id: 'finderror', title: 'Find Error', rect: { x: 22, y: 9, w: 36, h: 7 },
+  controls: [label(3, 2, '~E~rror address', 'address'),
+    { kind: 'input', id: 'address', x: 17, y: 2, w: 13, hint: 'Find source location corresponding to error address' },
+    ...okCancelHelp(3, 4, 11)],
+});
+
 export const saveAsDialog = (files: string[], info: string[]): DialogDef => ({
   id: 'saveas',
   title: 'Save File As',
@@ -196,6 +237,19 @@ export const saveAsDialog = (files: string[], info: string[]): DialogDef => ({
     btn('cancel', 36, 11, 9, 'Cancel', CANCEL_HINT),
     btn('help', 36, 14, 9, 'Help', HELP_HINT),
     { kind: 'info', x: 1, y: 16, w: 47, h: 2, lines: info },
+  ],
+});
+
+export const optionsFileDialog = (save: boolean, files: string[]): DialogDef => ({
+  ...saveAsDialog(files, ['C:\\TPASCAL\\*.TP', '..           Directory Aug  1, 2017   6:23pm']),
+  id: save ? 'save-options' : 'open-options', title: save ? 'Save Options As' : 'Open Options',
+  controls: [
+    label(3, 2, '~O~ptions file name', 'name'),
+    { kind: 'input', id: 'name', x: 3, y: 3, w: 28, hint: `Specify disk file name for ${save ? 'saving' : 'loading'} configuration options` },
+    label(3, 5, '~F~iles', 'files'), fileList('files', files, 'Select an options configuration file'),
+    btn('ok', 36, 3, 9, 'O~K~', OK_HINT, { default: true }),
+    btn('cancel', 36, 11, 9, 'Cancel', CANCEL_HINT), btn('help', 36, 14, 9, 'Help', HELP_HINT),
+    { kind: 'info', x: 1, y: 16, w: 47, h: 2, lines: ['C:\\TPASCAL\\*.TP', '..           Directory Aug  1, 2017   6:23pm'], attr: { fg: C.Cyan, bg: C.Blue } },
   ],
 });
 
@@ -219,10 +273,11 @@ export const changeDirDialog = (tree: string[], selected: number): DialogDef => 
 export const windowListDialog = (windows: string[]): DialogDef => ({
   id: 'windowlist',
   title: 'Window List',
+  focus: windows.length ? 'windows' : 'delete',
   rect: { x: 14, y: 5, w: 52, h: 15 },
   controls: [
     label(3, 2, '~W~indows', 'windows'),
-    { kind: 'list', id: 'windows', x: 3, y: 3, w: 37, h: 10, items: windows, hint: 'Use cursor keys to select a window', scroll: 'v' },
+    { kind: 'list', id: 'windows', x: 3, y: 3, w: 37, h: 10, items: windows, hint: 'Use cursor keys to examine windows in window list', scroll: 'v' },
     btn('ok', 41, 3, 8, 'O~K~', 'Make the selected window active', { default: true }),
     btn('delete', 41, 6, 8, '~D~elete', 'Remove the selected entry from the window list'),
     btn('cancel', 41, 9, 8, 'Cancel', CANCEL_HINT),
@@ -243,7 +298,7 @@ export const compilerOptionsDialog = (): DialogDef => ({
       y: 3,
       w: 54,
       columns: 2,
-      colWidth: 28,
+      colWidth: 27,
       hint: 'Set code generation options',
       items: [
         { label: '~F~orce far calls', hint: 'Force all procedures and functions to use far call model' },
@@ -556,7 +611,7 @@ export const editorOptionsDialog = (): DialogDef => ({
       y: 3,
       w: 50,
       columns: 2,
-      colWidth: 26,
+      colWidth: 25,
       hint: 'Set editor options',
       items: [
         { label: 'Create backup ~f~iles', hint: 'Create a backup (.BAK) file whenever you save' },
@@ -684,7 +739,7 @@ export const colorsDialog = (): DialogDef => ({
   focus: 'item',
   controls: [
     label(3, 2, '~G~roup', 'group'),
-    { kind: 'list', id: 'group', x: 3, y: 3, w: 16, h: 11, items: COLOR_GROUPS, hint: 'Use cursor keys to select a group of screen items', scroll: 'v' },
+    { kind: 'list', id: 'group', x: 3, y: 3, w: 16, h: 11, items: COLOR_GROUPS, hint: 'Use cursor keys to select an IDE group and customize its colors', scroll: 'v' },
     label(21, 2, '~I~tem', 'item'),
     { kind: 'list', id: 'item', x: 21, y: 3, w: 21, h: 11, items: COLOR_ITEMS, hint: 'Use cursor keys to select an item and customize its colors', scroll: 'v' },
     {

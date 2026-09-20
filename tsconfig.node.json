@@ -14,6 +14,7 @@
     "declarationDir": "./node_modules/.tmp/tsconfig-node"
   },
   "include": [
+    "scripts/dosRuntimePlugin.ts",
     "vite.config.ts",
     "playwright.config.ts",
     "eslint.config.js"

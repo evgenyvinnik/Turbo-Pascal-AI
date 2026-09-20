@@ -16,11 +16,13 @@ export interface FidelityState {
 }
 
 const squareView = async (ide: Ide) => {
+  await ide.press('Alt+F3');
   await ide.openFile('SQUARE.PAS');
   await ide.markModified();
 };
 
 const helloView = async (ide: Ide, line = 4, col = 12) => {
+  await ide.press('Alt+F3');
   await ide.openFile('HELLO.PAS');
   await ide.markModified();
   await ide.moveTo(line, col);
@@ -63,7 +65,7 @@ export const STATES: FidelityState[] = [
       ref: `Context-menu-${name[0]!.toUpperCase()}${name.slice(1)}`,
       drive: (ide) => ide.openMenu(key),
       ignore: [TITLE],
-    }),
+    })
   ),
   {
     name: 'menu-options-environment',
@@ -80,25 +82,40 @@ export const STATES: FidelityState[] = [
     name: 'about',
     ref: 'About',
     drive: (ide) => menuPath(ide, 'H', 'a'),
-    ignore: [TITLE],
+    // The gallery's status hint contains a machine-specific "CD Not Found"
+    // startup error. Keep checking the bar colour without reproducing it.
+    ignore: [TITLE, { x: 11, y: 24, w: 68, h: 1, mode: 'text' }],
   },
   {
     name: 'open-file',
     ref: 'Open-a-File',
     drive: (ide) => ide.press('F3'),
-    ignore: [TITLE, { x: 18, y: 9, w: 31, h: 8, mode: 'text' }, { x: 16, y: 19, w: 47, h: 2, mode: 'text' }],
+    ignore: [
+      TITLE,
+      { x: 18, y: 9, w: 31, h: 8, mode: 'text' },
+      { x: 16, y: 19, w: 47, h: 2, mode: 'text' },
+    ],
   },
   {
     name: 'save-as',
     ref: 'Save-File-As',
-    drive: (ide) => menuPath(ide, 'F', 'a'),
-    ignore: [TITLE, { x: 18, y: 9, w: 31, h: 8, mode: 'text' }, { x: 16, y: 19, w: 47, h: 2, mode: 'text' }],
+    drive: async (ide) => {
+      await menuPath(ide, 'F', 'a');
+      // The gallery has a blank filename field rather than the selected default.
+      await ide.press('Backspace');
+    },
+    ignore: [
+      TITLE,
+      { x: 18, y: 9, w: 31, h: 8, mode: 'text' },
+      { x: 16, y: 19, w: 47, h: 2, mode: 'text' },
+    ],
   },
   {
     name: 'change-dir',
     ref: 'Change-Directory',
     drive: (ide) => menuPath(ide, 'F', 'c'),
-    ignore: [TITLE],
+    // Tree entries describe the original DOS drive, rather than this virtual disk.
+    ignore: [TITLE, { x: 19, y: 10, w: 29, h: 9, mode: 'text' }],
   },
   {
     name: 'find',
@@ -123,7 +140,7 @@ export const STATES: FidelityState[] = [
     ref: 'Go-to-Line-Number',
     drive: async (ide) => {
       await helloView(ide);
-      await menuPath(ide, 'S', 'o');
+      await menuPath(ide, 'S', 'g');
     },
     ignore: [TITLE],
   },
@@ -287,7 +304,7 @@ export const STATES: FidelityState[] = [
     ref: 'Help-contents',
     drive: async (ide) => {
       await squareView(ide);
-      await ide.press('F1');
+      await menuPath(ide, 'H', 'c');
     },
     ignore: [TITLE],
   },
@@ -305,7 +322,16 @@ export const STATES: FidelityState[] = [
     ref: 'Watches',
     drive: async (ide) => {
       await squareView(ide);
-      await menuPath(ide, 'D', 'w');
+      // Reach a real paused VM state at the caller's WriteLn after Square returns.
+      await ide.moveTo(14, 1);
+      await ide.press('F4');
+      await ide.waitForDialog('Compiling');
+      await ide.press('Enter');
+      await ide.page.waitForTimeout(150);
+      await menuPath(ide, 'D', 'a');
+      await ide.type('Res');
+      await ide.press('Enter');
+      await ide.clickCell(2, 19);
     },
     ignore: [TITLE, { x: 1, y: 18, w: 78, h: 5, mode: 'text' }],
   },
@@ -314,6 +340,12 @@ export const STATES: FidelityState[] = [
     ref: 'Call-stack',
     drive: async (ide) => {
       await squareView(ide);
+      // Pause inside Square so the stack is backed by real procedure frames.
+      await ide.moveTo(6, 1);
+      await ide.press('F4');
+      await ide.waitForDialog('Compiling');
+      await ide.press('Enter');
+      await ide.page.waitForTimeout(150);
       await ide.press('Control+F3');
     },
     ignore: [TITLE, { x: 1, y: 18, w: 78, h: 5, mode: 'text' }],
@@ -323,7 +355,12 @@ export const STATES: FidelityState[] = [
     ref: 'Messages',
     drive: async (ide) => {
       await squareView(ide);
-      await menuPath(ide, 'T', 'm');
+      // Populate the list through the real Grep action shown in the gallery.
+      await ide.press('Shift+F2');
+      await ide.waitForDialog('Program Arguments');
+      await ide.press('Enter');
+      await ide.waitForText('Grep: program');
+      await ide.clickCell(2, 18);
     },
     ignore: [TITLE, { x: 1, y: 18, w: 78, h: 5, mode: 'text' }],
   },

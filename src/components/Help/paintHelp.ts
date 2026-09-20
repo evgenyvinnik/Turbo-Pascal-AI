@@ -3,6 +3,8 @@ import { DOUBLE } from '@/tui/chars';
 import { TP } from '@styles/tpTheme';
 import { paintFrame, clientRect } from '@components/Window/paintWindow';
 import type { TPWindow } from '@stores/desktopStore';
+import { helpEmphasis, isReferenceHelp, helpCaretColumn } from '@components/IDE/helpNavigation';
+import { C } from '@/tui/palette';
 
 const LEFT = ['Built-in Assembler', 'Command Line', 'Debugging', 'Directives', 'Error Messages', 'ObjectBrowser', 'ObjectWindows'];
 const RIGHT = ['Reserved Words', 'Sample Programs', 'Start-Up Options', 'Turbo Vision', 'Units', 'Glossary', 'Windows API'];
@@ -58,7 +60,7 @@ export function paintHelpWindow(
   active: boolean,
   topic: string,
   lines: string[],
-): void {
+): { col: number; row: number; fat: false } | null {
   paintFrame(scr, {
     rect: win.rect,
     title: 'Help',
@@ -68,16 +70,28 @@ export function paintHelpWindow(
     icon: TP.toolIcon,
     scroll: TP.toolScroll,
     grip: TP.toolGrip,
-    vScroll: { pos: win.scroll, max: Math.max(1, lines.length - 1) },
+    vScroll: { pos: win.scroll, max: Math.max(1, lines.length - (win.rect.h - 2)) },
     hScroll: { pos: 0, max: 1 },
   });
   const client = clientRect(win.rect);
-  scr.fill(client, ' ', TP.helpText);
+  scr.fill(client, ' ', { fg: C.Black, bg: C.Cyan });
+  scr.shadow(win.rect);
   if (topic === 'contents') {
     paintContents(scr, client.x, client.y);
-    return;
+  } else {
+    const inset = isReferenceHelp(topic) ? 0 : 1;
+    paintHelpText(scr, client.x + inset, client.y, client.w - inset, client.h, lines, topic, win.scroll);
   }
-  lines.slice(win.scroll, win.scroll + client.h).forEach((l, i) => {
-    scr.write(client.x + 1, client.y + i, l.slice(0, client.w - 2), TP.helpText);
-  });
+  return active ? { col: client.x + (isReferenceHelp(topic) ? 0 : 1) + helpCaretColumn(topic, win.selected), row: client.y + Math.max(0, Math.min(client.h - 1, win.selected - win.scroll)), fat: false } : null;
+}
+
+/** Ordinary prose is black; yellow and white spans identify Help keywords. */
+export function paintHelpText(scr: Screen, x: number, y: number, width: number, height: number, lines: string[], topic: string, scroll: number): void {
+  const body = { fg: C.Black, bg: C.Cyan };
+  scr.fill({ x, y, w: width, h: height }, ' ', body);
+  lines.slice(scroll, scroll + height).forEach((line, row) => scr.write(x, y + row, line.slice(0, width), body));
+  for (const [row, col, length, color] of helpEmphasis(topic)) {
+    if (row < scroll || row >= scroll + height || col >= width) continue;
+    scr.write(x + col, y + row - scroll, (lines[row] ?? '').slice(col, Math.min(width, col + length)), { fg: color, bg: C.Cyan });
+  }
 }

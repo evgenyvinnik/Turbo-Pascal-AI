@@ -12,8 +12,8 @@ export class Ide {
     await page.goto('/');
     await page.waitForSelector('[data-testid="tp-screen"] [data-row="0"]');
     await expect(ide.row(0)).toContainText('File');
-    // The first Edit window is created in an effect, after the first paint.
-    await expect(ide.row(1)).toContainText('NONAME00.PAS');
+    // Restored workspaces can have several windows, or an intentionally empty desktop.
+    await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-workspace-ready', 'true');
     // The editor blinks its caret; freeze it so snapshots are stable.
     await page.addStyleTag({ content: '*{animation:none !important}' });
     return ide;
@@ -95,7 +95,7 @@ export class Ide {
   /** Moves the caret with Search > Go to line number and the arrow keys. */
   async moveTo(line: number, col: number): Promise<void> {
     await this.openMenu('S');
-    await this.chooseItem('o');
+    await this.chooseItem('g');
     await this.waitForDialog('Go to Line Number');
     await this.page.keyboard.type(String(line));
     await this.press('Enter');

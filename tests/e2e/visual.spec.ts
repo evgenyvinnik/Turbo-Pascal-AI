@@ -70,7 +70,7 @@ test.describe('Turbo Pascal 7.1 screens', () => {
   test('go to line number', async ({ page }) => {
     const ide = await Ide.open(page);
     await ide.openMenu('S');
-    await ide.chooseItem('o');
+    await ide.chooseItem('g');
     await expect(page).toHaveScreenshot('dialog-goto-line.png');
   });
 
@@ -101,8 +101,7 @@ test.describe('Turbo Pascal 7.1 screens', () => {
     await expect(page).toHaveScreenshot('editor-source.png');
   });
 
-  // Unreachable until the parser and the code generator agree on the AST shape.
-  test.fixme('successful compile', async ({ page }) => {
+  test('successful compile', async ({ page }) => {
     const ide = await Ide.open(page);
     await ide.openFile('HELLO.PAS');
     await ide.press('Alt+F9');
@@ -112,10 +111,20 @@ test.describe('Turbo Pascal 7.1 screens', () => {
 
   test('compiler error banner', async ({ page }) => {
     const ide = await Ide.open(page);
-    await ide.openFile('HELLO.PAS');
+    await ide.typeSource('program Broken;\nbegin\n  missing := 1;\nend.');
     await ide.press('Alt+F9');
     await ide.waitForText('Error');
     await expect(page).toHaveScreenshot('editor-error.png');
+  });
+
+  test('program input', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.openFile('HELLO.PAS');
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForDialog('Program input');
+    await expect(page).toHaveScreenshot('dialog-program-input.png');
   });
 
   test('output window', async ({ page }) => {

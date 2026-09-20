@@ -15,6 +15,35 @@ export interface INative {
   procedures: Array<(...args: unknown[]) => unknown>;
 }
 
+export interface DebugType {
+  kind: string;
+  size: number;
+  byteSize?: number;
+  capacity?: number;
+  low?: number;
+  high?: number;
+  element?: DebugType;
+  base?: DebugType;
+  fields?: Record<string, { offset: number; type: DebugType }>;
+}
+export interface DebugScope {
+  id: number;
+  parentId: number | null;
+  name: string;
+  level: number;
+  start: number;
+  end: number;
+  frameSize: number;
+  variables: {
+    name: string;
+    offset: number;
+    reference: boolean;
+    parameter?: boolean;
+    type: DebugType;
+  }[];
+  constants: { name: string; value: number | string | boolean | null; type: DebugType }[];
+}
+
 /**
  * Represents a compiled bytecode object containing instructions and constants
  */
@@ -43,6 +72,17 @@ export class Bytecode {
    * Map from istore address to comment for debugging/disassembly
    */
   public comments: Record<number, string> = {};
+
+  /** Source line for each instruction, used to report runtime errors. */
+  public sourceLines: Record<number, number> = {};
+  public sourceFiles: Record<number, string> = {};
+  public sources: Record<string, string> = {};
+  public statementLines: Record<number, number> = {};
+  /** Per-call Pascal I/O checking directive; omitted entries default to checked. */
+  public ioChecks: Record<number, boolean> = {};
+  /** Resume after generated input checks when unchecked I/O fails. */
+  public ioErrorTargets: Record<number, number> = {};
+  public debugScopes: DebugScope[] = [];
 
   /**
    * Native methods registry
@@ -97,12 +137,7 @@ export class Bytecode {
    * @param operand2 - Second operand (default 0)
    * @param comment - Optional comment for debugging
    */
-  add(
-    opcode: Opcode | number,
-    operand1 = 0,
-    operand2 = 0,
-    comment?: string
-  ): void {
+  add(opcode: Opcode | number, operand1 = 0, operand2 = 0, comment?: string): void {
     const instruction = inst.make(opcode, operand1, operand2);
     const address = this.getNextAddress();
     this.istore.push(instruction);
@@ -189,9 +224,7 @@ export class Bytecode {
     for (let address = 0; address < this.istore.length; address++) {
       const instruction = this.istore[address]!;
       let line =
-        this.rightAlign(address, 4) +
-        ': ' +
-        this.leftAlign(inst.disassemble(instruction), 11);
+        this.rightAlign(address, 4) + ': ' + this.leftAlign(inst.disassemble(instruction), 11);
       const comment = this.comments[address];
       if (comment) {
         line += ' ; ' + comment;

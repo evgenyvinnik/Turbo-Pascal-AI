@@ -136,6 +136,8 @@ export enum BuiltinProcedure {
   HI = 63,
   LO = 64,
   SWAP = 65,
+  HIGH = 66,
+  LOW = 67,
 }
 
 /**
@@ -177,6 +179,22 @@ export const IO_BUILTINS: BuiltinDef[] = [
     minArgs: 0,
     description: 'Read values from standard input and skip to end of line',
     procedureIndex: BuiltinProcedure.READLN,
+  },
+  {
+    name: 'Eof',
+    isFunction: true,
+    returnType: TypeKind.BOOLEAN,
+    params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR, optional: true }],
+    description: 'Test whether the supplied standard input has been consumed',
+    procedureIndex: BuiltinProcedure.EOF,
+  },
+  {
+    name: 'Eoln',
+    isFunction: true,
+    returnType: TypeKind.BOOLEAN,
+    params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR, optional: true }],
+    description: 'Test whether standard input is at the end of a line',
+    procedureIndex: BuiltinProcedure.EOLN,
   },
 ];
 
@@ -456,6 +474,12 @@ export const STRING_BUILTINS: BuiltinDef[] = [
  * Built-in memory management procedures
  */
 export const MEMORY_BUILTINS: BuiltinDef[] = [
+  ...(['High', 'Low'] as const).map(name => ({
+    name, isFunction: true, returnType: TypeKind.INTEGER,
+    params: [{ name: 'X', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
+    description: `Return the ${name === 'High' ? 'upper' : 'lower'} bound of an ordinal, array, or string`,
+    procedureIndex: name === 'High' ? BuiltinProcedure.HIGH : BuiltinProcedure.LOW,
+  })),
   {
     name: 'New',
     isFunction: false,
@@ -539,6 +563,19 @@ export const RANDOM_BUILTINS: BuiltinDef[] = [
   },
 ];
 
+/** Standard file services operate on the browser's Pascal virtual drive. */
+export const FILE_BUILTINS: BuiltinDef[] = [
+  { name: 'Assign', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Name', type: TypeKind.STRING, mode: ParamMode.VALUE }], description: 'Associate a file variable with a file name', procedureIndex: 46 },
+  ...(['Reset', 'Rewrite', 'Append', 'Close'] as const).map((name, offset): BuiltinDef => ({ name, isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, ...(offset < 2 ? [{ name: 'RecordSize', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true }] : [])], description: `${name} a file`, procedureIndex: 47 + offset })),
+  ...(['FilePos', 'FileSize'] as const).map((name, offset): BuiltinDef => ({ name, isFunction: true, returnType: TypeKind.INTEGER, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }], description: `${name} in records`, procedureIndex: 66 + offset })),
+  { name: 'Seek', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Position', type: TypeKind.INTEGER, mode: ParamMode.VALUE }], description: 'Move to a file record', procedureIndex: 68 },
+  { name: 'Erase', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }], description: 'Remove a closed file', procedureIndex: 69 },
+  { name: 'Rename', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Name', type: TypeKind.STRING, mode: ParamMode.VALUE }], description: 'Rename a closed file', procedureIndex: 74 },
+  { name: 'IOResult', isFunction: true, returnType: TypeKind.INTEGER, params: [], description: 'Return the last I/O result', procedureIndex: 75 },
+  { name: 'Truncate', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }], description: 'Truncate a file at its current position', procedureIndex: 76 },
+  ...(['BlockRead', 'BlockWrite'] as const).map((name, offset): BuiltinDef => ({ name, isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Buffer', type: TypeKind.INTEGER, mode: ParamMode.VAR }, { name: 'Count', type: TypeKind.INTEGER, mode: ParamMode.VALUE }, { name: 'Result', type: TypeKind.INTEGER, mode: ParamMode.VAR, optional: true }], description: `${name} binary records`, procedureIndex: 80 + offset })),
+];
+
 /**
  * All built-in procedures and functions
  */
@@ -551,6 +588,7 @@ export const ALL_BUILTINS: BuiltinDef[] = [
   ...MEMORY_BUILTINS,
   ...CONTROL_BUILTINS,
   ...RANDOM_BUILTINS,
+  ...FILE_BUILTINS,
 ];
 
 /**

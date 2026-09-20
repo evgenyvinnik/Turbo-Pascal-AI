@@ -17,7 +17,7 @@ import {
 
 export const DESKTOP: Rect = { x: 0, y: 1, w: 80, h: 23 };
 
-export type WindowKind = 'edit' | 'output' | 'watches' | 'callstack' | 'messages' | 'help';
+export type WindowKind = 'edit' | 'output' | 'watches' | 'callstack' | 'messages' | 'help' | 'registers';
 
 export interface Buffer {
   id: string;
@@ -82,7 +82,8 @@ const TOOL_RECT: Record<Exclude<WindowKind, 'edit'>, Rect> = {
   watches: { x: 0, y: 17, w: 80, h: 7 },
   callstack: { x: 0, y: 17, w: 80, h: 7 },
   messages: { x: 0, y: 17, w: 80, h: 7 },
-  help: { x: 4, y: 2, w: 72, h: 20 },
+  help: { x: 15, y: 3, w: 50, h: 18 },
+  registers: { x: 61, y: 1, w: 19, h: 11 },
 };
 
 const TOOL_TITLE: Record<Exclude<WindowKind, 'edit'>, string> = {
@@ -91,6 +92,7 @@ const TOOL_TITLE: Record<Exclude<WindowKind, 'edit'>, string> = {
   callstack: 'Call stack',
   messages: 'Messages',
   help: 'Help',
+  registers: 'CPU',
 };
 
 interface DesktopActions {

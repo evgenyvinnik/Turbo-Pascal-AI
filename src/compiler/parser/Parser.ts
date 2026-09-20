@@ -3,21 +3,23 @@
  * Parses token stream into Abstract Syntax Tree (AST)
  */
 
+import { applyCompilerSwitches, DEFAULT_SWITCHES, type CompilerSwitches } from '../directives';
 import { Lexer, Token } from '../lexer';
-import { TokenType } from '../types';
 import { PascalError } from '../errors';
-import {
-  Node,
-  NodeType,
-  createNode,
-  BlockNode,
-  ProgramNode,
-} from './Node';
+import { Node, NodeType, createNode, BlockNode, ProgramNode, UnitNode } from './Node';
+
+export type ParserOptions = Partial<CompilerSwitches>;
 
 /**
  * Parser class that implements a recursive descent parser for Pascal
  */
 export class Parser {
+  private switches: CompilerSwitches = { ...DEFAULT_SWITCHES };
+  private interfaceDeclarations = false;
+  private ioChecking = true;
+  private overflowChecking = false;
+  private lastCompoundEndLine = 1;
+  private lastCompoundBeginLine = 1;
   /** The lexer providing tokens */
   private readonly lexer: Lexer;
 
@@ -28,11 +30,18 @@ export class Parser {
    * Creates a new Parser
    * @param lexer - The lexer to read tokens from
    */
-  constructor(lexer: Lexer) {
+  constructor(lexer: Lexer, options: ParserOptions = {}) {
+    this.switches = { ...DEFAULT_SWITCHES, ...options };
+    this.ioChecking = options.ioChecking ?? true;
+    this.overflowChecking = options.overflowChecking ?? false;
     this.lexer = lexer;
     this.currentToken = this.lexer.next();
     // Skip any initial comments
     this.skipComments();
+  }
+
+  private node(type: NodeType, props: Record<string, unknown> = {}, lineNumber?: number): Node {
+    return createNode(type, { ...this.switches, ...props }, lineNumber);
   }
 
   /**
@@ -40,7 +49,39 @@ export class Parser {
    * @returns The root AST node
    */
   parse(): ProgramNode {
-    return this.parseProgram();
+    const program = this.parseProgram();
+    if (!this.currentToken.isEof()) {
+      throw new PascalError(
+        `Unexpected token after program: '${this.currentToken.value}'`,
+        this.lineNumber
+      );
+    }
+    return program;
+  }
+
+  /** Parse a separately compiled unit; interface declarations are signatures. */
+  parseUnit(): UnitNode {
+    const line = this.lineNumber;
+    this.expectReservedWord('unit');
+    const name = this.expectIdentifier();
+    this.expectSymbol(';');
+    this.expectReservedWord('interface');
+    const interfaceUses = this.isReservedWord('uses') ? this.parseUsesClause() : [];
+    this.interfaceDeclarations = true;
+    const interfaceSection = this.parseDeclarations();
+    this.interfaceDeclarations = false;
+    this.expectReservedWord('implementation');
+    const implementationUses = this.isReservedWord('uses') ? this.parseUsesClause() : [];
+    const implementationSection = this.parseDeclarations();
+    const beginLineNumber = this.lineNumber;
+    const statements = this.isReservedWord('begin') ? this.parseCompoundStatement() : [];
+    if (!statements.length && this.isReservedWord('end')) this.advance();
+    this.expectSymbol('.');
+    if (!this.currentToken.isEof()) throw new PascalError('Unexpected token after unit', this.lineNumber);
+    return { type: NodeType.UNIT, name, interfaceUses, implementationUses,
+      interfaceSection, implementationSection, lineNumber: line,
+      initialization: { type: NodeType.BLOCK, declarations: [], statements, beginLineNumber,
+        endLineNumber: this.lastCompoundEndLine, lineNumber: beginLineNumber } };
   }
 
   /**
@@ -63,6 +104,9 @@ export class Parser {
    */
   private skipComments(): void {
     while (this.currentToken.isComment()) {
+      applyCompilerSwitches(this.currentToken.value, this.switches);
+      this.ioChecking = this.switches.ioChecking;
+      this.overflowChecking = this.switches.overflowChecking;
       this.currentToken = this.lexer.next();
     }
   }
@@ -91,7 +135,7 @@ export class Parser {
   private expectReservedWord(word: string): void {
     if (!this.isReservedWord(word)) {
       throw new PascalError(
-        `Expected '${word}', found '${this.currentToken.value}'`,
+        this.currentToken.isEof() ? 'Unexpected end of file' : `Expected '${word}', found '${this.currentToken.value}'`,
         this.lineNumber
       );
     }
@@ -106,7 +150,7 @@ export class Parser {
   private expectSymbol(symbol: string): void {
     if (!this.isSymbol(symbol)) {
       throw new PascalError(
-        `Expected '${symbol}', found '${this.currentToken.value}'`,
+        this.currentToken.isEof() ? 'Unexpected end of file' : `Expected '${symbol}', found '${this.currentToken.value}'`,
         this.lineNumber
       );
     }
@@ -121,7 +165,7 @@ export class Parser {
   private expectIdentifier(): string {
     if (!this.currentToken.isIdentifier()) {
       throw new PascalError(
-        `Expected identifier, found '${this.currentToken.value}'`,
+        this.currentToken.isEof() ? 'Unexpected end of file' : `Expected identifier, found '${this.currentToken.value}'`,
         this.lineNumber
       );
     }
@@ -143,12 +187,7 @@ export class Parser {
     // Optional program parameters (e.g., program test(input, output);)
     if (this.isSymbol('(')) {
       this.advance();
-      while (!this.isSymbol(')')) {
-        this.expectIdentifier();
-        if (this.isSymbol(',')) {
-          this.advance();
-        }
-      }
+      this.parseIdentifierList();
       this.expectSymbol(')');
     }
 
@@ -205,6 +244,8 @@ export class Parser {
       declarations,
       statements,
       lineNumber: line,
+      endLineNumber: this.lastCompoundEndLine,
+      beginLineNumber: this.lastCompoundBeginLine,
     };
   }
 
@@ -216,13 +257,28 @@ export class Parser {
     const declarations: Node[] = [];
 
     // Parse declaration sections in any order (Turbo Pascal allows this)
-    while (true) {
-      if (this.isReservedWord('const')) {
+    for (;;) {
+      if (this.isReservedWord('label')) {
+        const line = this.lineNumber;
+        this.advance();
+        const labels: string[] = [];
+        do {
+          if (this.isSymbol(',')) this.advance();
+          if (!this.currentToken.isIdentifier() && !this.currentToken.isNumber())
+            throw new PascalError('Label expected', this.lineNumber);
+          labels.push(this.currentToken.value);
+          this.advance();
+        } while (this.isSymbol(','));
+        this.expectSymbol(';');
+        declarations.push(this.node(NodeType.LABEL_DECLARATION, { labels }, line));
+      } else if (this.isReservedWord('const')) {
         declarations.push(...this.parseConstSection());
       } else if (this.isReservedWord('type')) {
         declarations.push(...this.parseTypeSection());
       } else if (this.isReservedWord('var')) {
         declarations.push(...this.parseVarSection());
+      } else if (this.isReservedWord('constructor') || this.isReservedWord('destructor')) {
+        declarations.push(this.parseProcedureDeclaration());
       } else if (this.isReservedWord('procedure')) {
         declarations.push(this.parseProcedureDeclaration());
       } else if (this.isReservedWord('function')) {
@@ -250,7 +306,7 @@ export class Parser {
       const value = this.parseExpression();
       this.expectSymbol(';');
 
-      constants.push(createNode(NodeType.CONST_DECLARATION, { name, value }, line));
+      constants.push(this.node(NodeType.CONST_DECLARATION, { name, value }, line));
     }
 
     return constants;
@@ -271,7 +327,7 @@ export class Parser {
       const typeValue = this.parseType();
       this.expectSymbol(';');
 
-      types.push(createNode(NodeType.TYPE_DECLARATION, { name, typeValue }, line));
+      types.push(this.node(NodeType.TYPE_DECLARATION, { name, typeValue }, line));
     }
 
     return types;
@@ -292,7 +348,7 @@ export class Parser {
       const varType = this.parseType();
       this.expectSymbol(';');
 
-      variables.push(createNode(NodeType.VAR_DECLARATION, { names, varType }, line));
+      variables.push(this.node(NodeType.VAR_DECLARATION, { names, varType }, line));
     }
 
     return variables;
@@ -320,26 +376,39 @@ export class Parser {
   private parseType(): Node {
     const line = this.lineNumber;
 
+    if (this.isReservedWord('procedure') || this.isReservedWord('function')) {
+      const isFunction = this.isReservedWord('function'); this.advance();
+      const parameters = this.isSymbol('(') ? this.parseParameterList() : [];
+      let returnType: Node | undefined;
+      if (isFunction) { this.expectSymbol(':'); returnType = this.parseType(); }
+      return this.node(NodeType.PROCEDURAL_TYPE, { parameters, returnType }, line);
+    }
+    if (this.isReservedWord('packed')) {
+      this.advance();
+      return this.parseType();
+    }
+
     // Simple type identifiers
     if (this.isReservedWord('integer') || this.currentToken.value.toLowerCase() === 'integer') {
       this.advance();
-      return createNode(NodeType.INTEGER_TYPE, {}, line);
+      return this.node(NodeType.INTEGER_TYPE, {}, line);
     }
     if (this.currentToken.value.toLowerCase() === 'real') {
       this.advance();
-      return createNode(NodeType.REAL_TYPE, {}, line);
+      return this.node(NodeType.REAL_TYPE, {}, line);
     }
     if (this.currentToken.value.toLowerCase() === 'boolean') {
       this.advance();
-      return createNode(NodeType.BOOLEAN_TYPE, {}, line);
+      return this.node(NodeType.BOOLEAN_TYPE, {}, line);
     }
     if (this.currentToken.value.toLowerCase() === 'char') {
       this.advance();
-      return createNode(NodeType.CHAR_TYPE, {}, line);
+      return this.node(NodeType.CHAR_TYPE, {}, line);
     }
 
     // String type (may have length specifier)
     if (this.isReservedWord('string')) {
+      const stringSwitches = { ...this.switches };
       this.advance();
       let length: number | undefined;
       if (this.isSymbol('[')) {
@@ -350,13 +419,15 @@ export class Parser {
         }
         this.expectSymbol(']');
       }
-      return createNode(NodeType.STRING_TYPE, { length }, line);
+      return this.node(NodeType.STRING_TYPE, { length, ...stringSwitches }, line);
     }
 
     // Array type
     if (this.isReservedWord('array')) {
       return this.parseArrayType();
     }
+
+    if (this.isReservedWord('object')) return this.parseObjectType();
 
     // Record type
     if (this.isReservedWord('record')) {
@@ -377,7 +448,7 @@ export class Parser {
     if (this.isSymbol('^')) {
       this.advance();
       const baseType = this.parseType();
-      return createNode(NodeType.POINTER_TYPE, { baseType }, line);
+      return this.node(NodeType.POINTER_TYPE, { baseType }, line);
     }
 
     // Enumeration type
@@ -387,34 +458,34 @@ export class Parser {
 
     // Subrange or identifier type
     if (this.currentToken.isIdentifier()) {
-      const name = this.expectIdentifier();
+      let name = this.expectIdentifier();
+      if (this.isSymbol('.')) { this.advance(); name += '.' + this.expectIdentifier(); }
 
       // Check for subrange
       if (this.isSymbol('..')) {
         this.advance();
-        const low = createNode(NodeType.IDENTIFIER, { name }, line);
+        const low = this.node(NodeType.IDENTIFIER, { name }, line);
         const high = this.parseSimpleExpression();
-        return createNode(NodeType.SUBRANGE_TYPE, { low, high }, line);
+        return this.node(NodeType.SUBRANGE_TYPE, { low, high }, line);
       }
 
-      return createNode(NodeType.IDENTIFIER, { name }, line);
+      return this.node(NodeType.IDENTIFIER, { name }, line);
     }
 
-    // Numeric subrange
-    if (this.currentToken.isNumber()) {
+    // Ordinal subranges may start with a signed integer or character literal.
+    if (
+      this.currentToken.isNumber() ||
+      this.currentToken.isString() ||
+      this.isSymbol('-') ||
+      this.isSymbol('+')
+    ) {
       const low = this.parseSimpleExpression();
-      if (this.isSymbol('..')) {
-        this.advance();
-        const high = this.parseSimpleExpression();
-        return createNode(NodeType.SUBRANGE_TYPE, { low, high }, line);
-      }
-      return low;
+      this.expectSymbol('..');
+      const high = this.parseSimpleExpression();
+      return this.node(NodeType.SUBRANGE_TYPE, { low, high }, line);
     }
 
-    throw new PascalError(
-      `Expected type, found '${this.currentToken.value}'`,
-      this.lineNumber
-    );
+    throw new PascalError(`Expected type, found '${this.currentToken.value}'`, this.lineNumber);
   }
 
   /**
@@ -438,7 +509,7 @@ export class Parser {
     this.expectReservedWord('of');
     const elementType = this.parseType();
 
-    return createNode(NodeType.ARRAY_TYPE, { indexTypes, elementType }, line);
+    return this.node(NodeType.ARRAY_TYPE, { indexTypes, elementType }, line);
   }
 
   /**
@@ -457,7 +528,7 @@ export class Parser {
         this.expectSymbol(':');
         const varType = this.parseType();
 
-        fields.push(createNode(NodeType.VAR_DECLARATION, { names, varType }, fieldLine));
+        fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType }, fieldLine));
 
         if (this.isSymbol(';')) {
           this.advance();
@@ -468,7 +539,7 @@ export class Parser {
     }
 
     this.expectReservedWord('end');
-    return createNode(NodeType.RECORD_TYPE, { fields }, line);
+    return this.node(NodeType.RECORD_TYPE, { fields }, line);
   }
 
   /**
@@ -480,7 +551,7 @@ export class Parser {
     this.expectReservedWord('set');
     this.expectReservedWord('of');
     const baseType = this.parseType();
-    return createNode(NodeType.SET_TYPE, { baseType }, line);
+    return this.node(NodeType.SET_TYPE, { baseType }, line);
   }
 
   /**
@@ -497,7 +568,7 @@ export class Parser {
       componentType = this.parseType();
     }
 
-    return createNode(NodeType.FILE_TYPE, { componentType }, line);
+    return this.node(NodeType.FILE_TYPE, { componentType }, line);
   }
 
   /**
@@ -511,65 +582,72 @@ export class Parser {
     const values = this.parseIdentifierList();
 
     this.expectSymbol(')');
-    return createNode(NodeType.ENUM_TYPE, { values }, line);
+    return this.node(NodeType.ENUM_TYPE, { values }, line);
   }
 
   /**
    * Parses a procedure declaration
    */
-  private parseProcedureDeclaration(): Node {
+  private parseObjectType(): Node {
     const line = this.lineNumber;
-    this.expectReservedWord('procedure');
-    const name = this.expectIdentifier();
-
-    let parameters: Node[] = [];
-    if (this.isSymbol('(')) {
-      parameters = this.parseParameterList();
+    this.expectReservedWord('object');
+    let ancestor: Node | undefined;
+    if (this.isSymbol('(')) { this.advance(); ancestor = this.parseType(); this.expectSymbol(')'); }
+    const fields: Node[] = [], methods: Node[] = [];
+    let privateMember = false;
+    while (!this.isReservedWord('end')) {
+      if (['private', 'public'].includes(this.currentToken.value.toLowerCase())) {
+        privateMember = this.currentToken.value.toLowerCase() === 'private'; this.advance(); continue;
+      }
+      if (['procedure', 'function', 'constructor', 'destructor'].some(word => this.isReservedWord(word))) {
+        const old = this.interfaceDeclarations;
+        this.interfaceDeclarations = true;
+        const method = this.isReservedWord('function') ? this.parseFunctionDeclaration() : this.parseProcedureDeclaration();
+        this.interfaceDeclarations = old;
+        if (this.currentToken.value.toLowerCase() === 'virtual') {
+          this.advance(); method.virtual = true;
+          if (!this.isSymbol(';')) method.dynamicIndex = this.parseExpression();
+          this.expectSymbol(';');
+        }
+        method.privateMember = privateMember;
+        methods.push(method);
+      } else {
+        const fieldLine = this.lineNumber, names = this.parseIdentifierList();
+        this.expectSymbol(':');
+        const varType = this.parseType(); this.expectSymbol(';');
+        fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType, privateMember }, fieldLine));
+      }
     }
-
-    this.expectSymbol(';');
-
-    // Check for forward declaration
-    if (this.isReservedWord('forward')) {
-      this.advance();
-      this.expectSymbol(';');
-      return createNode(NodeType.PROCEDURE, { name, parameters, isForward: true }, line);
-    }
-
-    const block = this.parseBlock();
-    this.expectSymbol(';');
-
-    return createNode(NodeType.PROCEDURE, { name, parameters, block }, line);
+    this.expectReservedWord('end');
+    return this.node(NodeType.OBJECT_TYPE, { ancestor, fields, methods }, line);
   }
 
-  /**
-   * Parses a function declaration
-   */
-  private parseFunctionDeclaration(): Node {
-    const line = this.lineNumber;
-    this.expectReservedWord('function');
-    const name = this.expectIdentifier();
+  private parseProcedureDeclaration(): Node { return this.parseRoutineDeclaration(false); }
+  private parseFunctionDeclaration(): Node { return this.parseRoutineDeclaration(true); }
 
-    let parameters: Node[] = [];
-    if (this.isSymbol('(')) {
-      parameters = this.parseParameterList();
-    }
-
-    this.expectSymbol(':');
-    const returnType = this.parseType();
+  private parseRoutineDeclaration(isFunction: boolean): Node {
+    const line = this.lineNumber, routineKind = this.currentToken.value.toLowerCase();
+    const headerFarCalls = this.switches.farCalls;
+    this.advance();
+    let name = this.expectIdentifier();
+    if (this.isSymbol('.')) { this.advance(); name += '.' + this.expectIdentifier(); }
+    const parameters = this.isSymbol('(') ? this.parseParameterList() : [];
+    let returnType: Node | undefined;
+    if (isFunction && this.isSymbol(':')) { this.advance(); returnType = this.parseType(); }
     this.expectSymbol(';');
-
-    // Check for forward declaration
+    const type = isFunction ? NodeType.FUNCTION : NodeType.PROCEDURE;
+    let farCalls = headerFarCalls || this.interfaceDeclarations;
+    while (['far', 'near'].includes(this.currentToken.value.toLowerCase())) {
+      farCalls = this.currentToken.value.toLowerCase() === 'far'; this.advance(); this.expectSymbol(';');
+    }
+    const props = { name, parameters, returnType, routineKind, farCalls };
+    if (this.interfaceDeclarations) return this.node(type, { ...props, isForward: true }, line);
     if (this.isReservedWord('forward')) {
-      this.advance();
-      this.expectSymbol(';');
-      return createNode(NodeType.FUNCTION, { name, parameters, returnType, isForward: true }, line);
+      this.advance(); this.expectSymbol(';');
+      return this.node(type, { ...props, isForward: true }, line);
     }
-
-    const block = this.parseBlock();
-    this.expectSymbol(';');
-
-    return createNode(NodeType.FUNCTION, { name, parameters, returnType, block }, line);
+    const block = this.parseBlock(); this.expectSymbol(';');
+    return this.node(type, { ...props, block }, line);
   }
 
   /**
@@ -599,6 +677,7 @@ export class Parser {
    */
   private parseParameterDeclaration(): Node[] {
     const line = this.lineNumber;
+    const switches = { ...this.switches };
     const isVar = this.isReservedWord('var');
     if (isVar) {
       this.advance();
@@ -609,7 +688,7 @@ export class Parser {
     const paramType = this.parseType();
 
     const nodeType = isVar ? NodeType.VAR_PARAMETER : NodeType.PARAMETER;
-    return [createNode(nodeType, { names, paramType }, line)];
+    return [this.node(nodeType, { names, paramType, ...switches }, line)];
   }
 
   /**
@@ -617,8 +696,11 @@ export class Parser {
    * compound-statement ::= 'begin' statement-list 'end'
    */
   private parseCompoundStatement(): Node[] {
+    const beginLine = this.lineNumber;
     this.expectReservedWord('begin');
     const statements = this.parseStatementList();
+    this.lastCompoundBeginLine = beginLine;
+    this.lastCompoundEndLine = this.lineNumber;
     this.expectReservedWord('end');
     return statements;
   }
@@ -665,10 +747,29 @@ export class Parser {
       return null;
     }
 
+    if (this.isReservedWord('goto')) {
+      this.advance();
+      if (!this.currentToken.isIdentifier() && !this.currentToken.isNumber())
+        throw new PascalError('Label expected', this.lineNumber);
+      const label = this.currentToken.value;
+      this.advance();
+      return this.node(NodeType.GOTO_STATEMENT, { label }, line);
+    }
+    if (this.currentToken.isNumber()) {
+      const label = this.currentToken.value;
+      this.advance();
+      this.expectSymbol(':');
+      return this.node(
+        NodeType.LABELED_STATEMENT,
+        { label, statement: this.parseStatement() },
+        line
+      );
+    }
+
     // Compound statement
     if (this.isReservedWord('begin')) {
       const statements = this.parseCompoundStatement();
-      return createNode(NodeType.BLOCK, { declarations: [], statements }, line);
+      return this.node(NodeType.BLOCK, { declarations: [], statements }, line);
     }
 
     // If statement
@@ -704,7 +805,14 @@ export class Parser {
     // Exit statement
     if (this.currentToken.value.toLowerCase() === 'exit') {
       this.advance();
-      return createNode(NodeType.EXIT, {}, line);
+      return this.node(NodeType.EXIT, {}, line);
+    }
+
+    if (this.isReservedWord('inherited')) {
+      this.advance();
+      const call = this.parseAssignmentOrCall();
+      call.inherited = true;
+      return call;
     }
 
     // Assignment or procedure call
@@ -735,7 +843,7 @@ export class Parser {
       elseBranch = this.parseStatement() ?? undefined;
     }
 
-    return createNode(NodeType.IF_STATEMENT, { condition, thenBranch, elseBranch }, line);
+    return this.node(NodeType.IF_STATEMENT, { condition, thenBranch, elseBranch }, line);
   }
 
   /**
@@ -752,11 +860,11 @@ export class Parser {
 
     while (!this.isReservedWord('end') && !this.isReservedWord('else')) {
       const labels: Node[] = [];
-      labels.push(this.parseExpression());
+      labels.push(this.parseSetElement());
 
       while (this.isSymbol(',')) {
         this.advance();
-        labels.push(this.parseExpression());
+        labels.push(this.parseSetElement());
       }
 
       this.expectSymbol(':');
@@ -778,7 +886,7 @@ export class Parser {
     }
 
     this.expectReservedWord('end');
-    return createNode(NodeType.CASE_STATEMENT, { selector, cases, elseClause }, line);
+    return this.node(NodeType.CASE_STATEMENT, { selector, cases, elseClause }, line);
   }
 
   /**
@@ -792,7 +900,7 @@ export class Parser {
     this.expectReservedWord('do');
     const body = this.parseStatement();
 
-    return createNode(NodeType.WHILE_STATEMENT, { condition, body }, line);
+    return this.node(NodeType.WHILE_STATEMENT, { condition, body }, line);
   }
 
   /**
@@ -806,7 +914,7 @@ export class Parser {
     this.expectReservedWord('until');
     const condition = this.parseExpression();
 
-    return createNode(NodeType.REPEAT_STATEMENT, { statements, condition }, line);
+    return this.node(NodeType.REPEAT_STATEMENT, { statements, condition }, line);
   }
 
   /**
@@ -838,7 +946,7 @@ export class Parser {
     this.expectReservedWord('do');
     const body = this.parseStatement();
 
-    return createNode(NodeType.FOR_STATEMENT, { variable, start, end, direction, body }, line);
+    return this.node(NodeType.FOR_STATEMENT, { variable, start, end, direction, body }, line);
   }
 
   /**
@@ -860,7 +968,7 @@ export class Parser {
     this.expectReservedWord('do');
     const body = this.parseStatement();
 
-    return createNode(NodeType.WITH_STATEMENT, { records, body }, line);
+    return this.node(NodeType.WITH_STATEMENT, { records, body }, line);
   }
 
   /**
@@ -868,13 +976,23 @@ export class Parser {
    */
   private parseAssignmentOrCall(): Node {
     const line = this.lineNumber;
+    const switches = { ...this.switches };
     const target = this.parseVariable();
+
+    if (target.type === NodeType.IDENTIFIER && this.isSymbol(':')) {
+      this.advance();
+      return this.node(
+        NodeType.LABELED_STATEMENT,
+        { label: target.name, statement: this.parseStatement() },
+        line
+      );
+    }
 
     // Assignment
     if (this.isSymbol(':=')) {
       this.advance();
       const value = this.parseExpression();
-      return createNode(NodeType.ASSIGNMENT, { target, value }, line);
+      return this.node(NodeType.ASSIGNMENT, { target, value, ...switches }, line);
     }
 
     // If target is an identifier with arguments, it's already a call
@@ -885,9 +1003,24 @@ export class Parser {
     // Otherwise it's a procedure call without arguments
     if (target.type === NodeType.IDENTIFIER) {
       const identNode = target as unknown as { name: string };
-      return createNode(NodeType.CALL, { name: identNode.name, arguments: [] }, line);
+      return this.node(
+        NodeType.CALL,
+        {
+          name: identNode.name,
+          arguments: [],
+          ...switches,
+          ioChecking: target.ioChecking,
+          overflowChecking: target.overflowChecking,
+        },
+        line
+      );
     }
 
+    if (target.type === NodeType.FIELD_ACCESS) return this.node(NodeType.CALL, {
+      name: target.field, receiver: target.record, arguments: [], ioChecking: this.ioChecking,
+      overflowChecking: this.overflowChecking }, line);
+    if ([NodeType.ARRAY_ACCESS, NodeType.POINTER_DEREF].includes(target.type)) return this.node(NodeType.CALL, {
+      name: '$indirect', callee: target, arguments: [] }, line);
     return target;
   }
 
@@ -896,29 +1029,37 @@ export class Parser {
    */
   private parseVariable(): Node {
     const line = this.lineNumber;
+    const switches = { ...this.switches };
+    const ioChecking = this.ioChecking;
+    const overflowChecking = this.overflowChecking;
     const name = this.expectIdentifier();
 
-    let node: Node = createNode(NodeType.IDENTIFIER, { name }, line);
+    let node: Node = this.node(NodeType.IDENTIFIER, { name, ...switches, ioChecking, overflowChecking }, line);
 
     // Check for function/procedure call
     if (this.isSymbol('(')) {
       this.advance();
       const args: Node[] = [];
+      const allowFormatting = ['write', 'writeln', 'str'].includes(name.toLowerCase());
 
       if (!this.isSymbol(')')) {
-        args.push(this.parseExpression());
+        args.push(this.parseCallArgument(allowFormatting));
         while (this.isSymbol(',')) {
           this.advance();
-          args.push(this.parseExpression());
+          args.push(this.parseCallArgument(allowFormatting));
         }
       }
 
       this.expectSymbol(')');
-      node = createNode(NodeType.CALL, { name, arguments: args }, line);
+      node = this.node(
+        NodeType.CALL,
+        { name, arguments: args, ...switches, ioChecking, overflowChecking },
+        line
+      );
     }
 
     // Handle array access, field access, pointer dereference
-    while (true) {
+    for (;;) {
       if (this.isSymbol('[')) {
         this.advance();
         const indices: Node[] = [];
@@ -930,20 +1071,46 @@ export class Parser {
         }
 
         this.expectSymbol(']');
-        node = createNode(NodeType.ARRAY_ACCESS, { array: node, indices }, line);
+        node = this.node(NodeType.ARRAY_ACCESS, { array: node, indices, ...switches }, line);
       } else if (this.isSymbol('.')) {
         this.advance();
         const field = this.expectIdentifier();
-        node = createNode(NodeType.FIELD_ACCESS, { record: node, field }, line);
+        node = this.node(NodeType.FIELD_ACCESS, { record: node, field, ...switches }, line);
+      } else if (this.isSymbol('(')) {
+        this.advance();
+        const args: Node[] = [];
+        if (!this.isSymbol(')')) {
+          args.push(this.parseExpression());
+          while (this.isSymbol(',')) { this.advance(); args.push(this.parseExpression()); }
+        }
+        this.expectSymbol(')');
+        node = node.type === NodeType.FIELD_ACCESS
+          ? this.node(NodeType.CALL, { name: node.field, receiver: node.record, arguments: args, ...switches, ioChecking, overflowChecking }, line)
+          : this.node(NodeType.CALL, { name: '$indirect', callee: node, arguments: args, ...switches, ioChecking, overflowChecking }, line);
       } else if (this.isSymbol('^')) {
         this.advance();
-        node = createNode(NodeType.POINTER_DEREF, { pointer: node }, line);
+        node = this.node(NodeType.POINTER_DEREF, { pointer: node }, line);
       } else {
         break;
       }
     }
 
     return node;
+  }
+
+  /** Write/WriteLn arguments can specify a field width and real precision. */
+  private parseCallArgument(allowFormatting: boolean): Node {
+    const line = this.lineNumber;
+    const value = this.parseExpression();
+    if (!allowFormatting || !this.isSymbol(':')) return value;
+    this.advance();
+    const width = this.parseExpression();
+    let precision: Node | undefined;
+    if (this.isSymbol(':')) {
+      this.advance();
+      precision = this.parseExpression();
+    }
+    return this.node(NodeType.FORMATTED_ARGUMENT, { value, width, precision }, line);
   }
 
   /**
@@ -954,12 +1121,13 @@ export class Parser {
     const line = this.lineNumber;
     let left = this.parseSimpleExpression();
 
-    const relOps = ['=', '<>', '<', '>', '<=', '>=', 'in'];
-    while (this.isRelationalOperator()) {
+    if (this.isRelationalOperator()) {
       const operator = this.currentToken.value.toLowerCase();
+      const switches = { ...this.switches };
+      const overflowChecking = this.overflowChecking;
       this.advance();
       const right = this.parseSimpleExpression();
-      left = createNode(NodeType.BINARY_OP, { operator, left, right }, line);
+      left = this.node(NodeType.BINARY_OP, { operator, left, right, ...switches, overflowChecking }, line);
     }
 
     return left;
@@ -989,6 +1157,7 @@ export class Parser {
 
     // Handle unary sign
     let sign: string | null = null;
+    const overflowChecking = this.overflowChecking;
     if (this.isSymbol('+') || this.isSymbol('-')) {
       sign = this.currentToken.value;
       this.advance();
@@ -998,15 +1167,21 @@ export class Parser {
 
     // Apply unary sign
     if (sign === '-') {
-      left = createNode(NodeType.UNARY_OP, { operator: '-', operand: left }, line);
+      left = this.node(
+        NodeType.UNARY_OP,
+        { operator: '-', operand: left, overflowChecking },
+        line
+      );
     }
 
     // Handle adding operators
     while (this.isAddingOperator()) {
       const operator = this.currentToken.value.toLowerCase();
+      const switches = { ...this.switches };
+      const overflowChecking = this.overflowChecking;
       this.advance();
       const right = this.parseTerm();
-      left = createNode(NodeType.BINARY_OP, { operator, left, right }, line);
+      left = this.node(NodeType.BINARY_OP, { operator, left, right, ...switches, overflowChecking }, line);
     }
 
     return left;
@@ -1019,7 +1194,8 @@ export class Parser {
     return (
       this.isSymbol('+') ||
       this.isSymbol('-') ||
-      this.isReservedWord('or')
+      this.isReservedWord('or') ||
+      this.isReservedWord('xor')
     );
   }
 
@@ -1033,9 +1209,11 @@ export class Parser {
 
     while (this.isMultiplyingOperator()) {
       const operator = this.currentToken.value.toLowerCase();
+      const switches = { ...this.switches };
+      const overflowChecking = this.overflowChecking;
       this.advance();
       const right = this.parseFactor();
-      left = createNode(NodeType.BINARY_OP, { operator, left, right }, line);
+      left = this.node(NodeType.BINARY_OP, { operator, left, right, ...switches, overflowChecking }, line);
     }
 
     return left;
@@ -1050,6 +1228,8 @@ export class Parser {
       this.isSymbol('/') ||
       this.isReservedWord('div') ||
       this.isReservedWord('mod') ||
+      this.isReservedWord('shl') ||
+      this.isReservedWord('shr') ||
       this.isReservedWord('and')
     );
   }
@@ -1061,49 +1241,64 @@ export class Parser {
   private parseFactor(): Node {
     const line = this.lineNumber;
 
+    if (this.isReservedWord('inherited')) {
+      this.advance();
+      const target = this.parseVariable();
+      if (target.type === NodeType.CALL) { target.inherited = true; return target; }
+      return this.node(NodeType.CALL, { name: target.name, arguments: [], inherited: true }, line);
+    }
+    if (this.isReservedWord('string')) return this.parseType();
+
     // Number literal
     if (this.currentToken.isNumber()) {
       const value = parseFloat(this.currentToken.value);
-      const isReal = this.currentToken.value.includes('.') || this.currentToken.value.toLowerCase().includes('e');
+      const isReal =
+        this.currentToken.value.includes('.') ||
+        this.currentToken.value.toLowerCase().includes('e');
       this.advance();
-      return createNode(NodeType.NUMBER, { value, isReal }, line);
+      return this.node(NodeType.NUMBER, { value, isReal }, line);
     }
 
     // String literal
     if (this.currentToken.isString()) {
-      const value = this.currentToken.value;
+      let value = this.currentToken.value;
       this.advance();
-      return createNode(NodeType.STRING, { value }, line);
+      while (this.currentToken.isString()) {
+        value += this.currentToken.value;
+        this.advance();
+      }
+      return this.node(NodeType.STRING, { value }, line);
     }
 
     // Nil
     if (this.isReservedWord('nil')) {
       this.advance();
-      return createNode(NodeType.NIL, {}, line);
+      return this.node(NodeType.NIL, {}, line);
     }
 
     // Boolean literals (true/false are typically identifiers in Pascal)
     if (this.currentToken.value.toLowerCase() === 'true') {
       this.advance();
-      return createNode(NodeType.BOOLEAN, { value: true }, line);
+      return this.node(NodeType.BOOLEAN, { value: true }, line);
     }
     if (this.currentToken.value.toLowerCase() === 'false') {
       this.advance();
-      return createNode(NodeType.BOOLEAN, { value: false }, line);
+      return this.node(NodeType.BOOLEAN, { value: false }, line);
     }
 
     // Not operator
     if (this.isReservedWord('not')) {
+      const overflowChecking = this.overflowChecking;
       this.advance();
       const operand = this.parseFactor();
-      return createNode(NodeType.UNARY_OP, { operator: 'not', operand }, line);
+      return this.node(NodeType.UNARY_OP, { operator: 'not', operand, overflowChecking }, line);
     }
 
     // Address-of operator
     if (this.isSymbol('@')) {
       this.advance();
       const operand = this.parseVariable();
-      return createNode(NodeType.ADDRESS_OF, { operand }, line);
+      return this.node(NodeType.ADDRESS_OF, { operand }, line);
     }
 
     // Parenthesized expression
@@ -1150,7 +1345,7 @@ export class Parser {
     }
 
     this.expectSymbol(']');
-    return createNode(NodeType.SET_LITERAL, { elements }, line);
+    return this.node(NodeType.SET_LITERAL, { elements }, line);
   }
 
   /**
@@ -1164,7 +1359,7 @@ export class Parser {
     if (this.isSymbol('..')) {
       this.advance();
       const high = this.parseExpression();
-      return createNode(NodeType.RANGE, { low, high }, line);
+      return this.node(NodeType.RANGE, { low, high }, line);
     }
 
     return low;

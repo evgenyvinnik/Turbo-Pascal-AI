@@ -45,6 +45,8 @@ export enum ExecutionEvent {
   ERROR = 'error',
   /** Output was generated */
   OUTPUT = 'output',
+  /** Program is waiting for console input. */
+  INPUT = 'input',
 }
 
 /**
@@ -111,6 +113,7 @@ export class ExecutionController {
 
   /** Last output length for detecting new output */
   private lastOutputLength: number = 0;
+  private lastOutputLine = '';
 
   /**
    * Creates a new ExecutionController
@@ -127,8 +130,8 @@ export class ExecutionController {
    * Start or resume execution
    */
   run(): void {
-    if (this.machine.getState() === MachineState.STOPPED) {
-      this.machine.reset();
+    if (this.machine.getState() === MachineState.STOPPED || this.machine.getState() === MachineState.ERROR) {
+      this.reset();
     }
 
     this.paused = false;
@@ -179,6 +182,7 @@ export class ExecutionController {
     }
 
     try {
+      if (!this.machine.wake()) return false;
       const canContinue = this.machine.step();
       this.checkForNewOutput();
       this.emit(ExecutionEvent.STEP, this.getEventData());
@@ -216,6 +220,7 @@ export class ExecutionController {
     this.machine.reset();
     this.paused = false;
     this.lastOutputLength = 0;
+    this.lastOutputLine = '';
   }
 
   /**
@@ -362,6 +367,13 @@ export class ExecutionController {
     this.machine.setInput(lines);
   }
 
+  provideInput(line: string, echo = false): void {
+    const waiting = this.machine.getState() === MachineState.WAITING;
+    this.machine.provideInput(line, echo);
+    this.checkForNewOutput();
+    if (waiting && !this.paused) this.startRunLoop();
+  }
+
   /**
    * Get the number of instructions executed
    */
@@ -421,7 +433,7 @@ export class ExecutionController {
 
     this.runIntervalId = setInterval(() => {
       this.runTick();
-    }, 0);
+    }, 4);
   }
 
   /**
@@ -444,6 +456,7 @@ export class ExecutionController {
     }
 
     try {
+      if (!this.machine.wake()) return;
       for (let i = 0; i < this.instructionsPerTick; i++) {
         const pc = this.machine.getPC();
 
@@ -465,8 +478,9 @@ export class ExecutionController {
         this.checkForNewOutput();
 
         if (!canContinue) {
+          if (this.machine.getState() === MachineState.SLEEPING) return;
           this.stopRunLoop();
-          this.emit(ExecutionEvent.STOP, this.getEventData());
+          this.emit(this.machine.getState() === MachineState.WAITING ? ExecutionEvent.INPUT : ExecutionEvent.STOP, this.getEventData());
           return;
         }
       }
@@ -484,8 +498,10 @@ export class ExecutionController {
    */
   private checkForNewOutput(): void {
     const output = this.machine.getOutput();
-    if (output.length > this.lastOutputLength) {
+    const lastLine = output.at(-1) ?? '';
+    if (output.length !== this.lastOutputLength || lastLine !== this.lastOutputLine) {
       this.lastOutputLength = output.length;
+      this.lastOutputLine = lastLine;
       this.emit(ExecutionEvent.OUTPUT, {
         ...this.getEventData(),
         output,

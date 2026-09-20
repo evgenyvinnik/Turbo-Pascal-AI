@@ -7,12 +7,21 @@
  */
 
 import { INative } from '../codegen/Bytecode';
+import { BuiltinProcedure } from '../stdlib/builtin';
+import { PascalError } from '../errors/PascalError';
 
 /**
  * Native procedure function signature
  * Uses unknown[] for compatibility with INative interface
  */
 export type NativeProcedure = (...args: unknown[]) => unknown;
+
+/** VM services used by generated code, outside the public Pascal routines. */
+export enum InternalProcedure {
+  STRING_CHARACTER_ADDRESS = 900,
+  COPY_AGGREGATE_CELL = 901,
+  LOAD_AGGREGATE_CELL = 902,
+}
 
 /**
  * Native procedure definition
@@ -103,9 +112,9 @@ export enum StandardProcedure {
   /** Upcase - convert to uppercase */
   UPCASE = 38,
   /** Random - random number */
-  RANDOM = 50,
+  RANDOM = 51,
   /** Randomize - seed random */
-  RANDOMIZE = 51,
+  RANDOMIZE = 52,
 }
 
 /**
@@ -177,8 +186,15 @@ export class NativeRegistry implements INative {
     });
 
     this.register(StandardProcedure.ROUND, 'Round', 1, true, (x) => {
-      return Math.round(this.toNumber(x));
+      const value = this.toNumber(x);
+      return Math.sign(value) * Math.floor(Math.abs(value) + 0.5);
     });
+
+    this.register(BuiltinProcedure.FRAC, 'Frac', 1, true, (x) => {
+      const value = this.toNumber(x);
+      return value - Math.trunc(value);
+    });
+    this.register(BuiltinProcedure.INT, 'Int', 1, true, (x) => Math.trunc(this.toNumber(x)));
 
     // Ordinal functions
     this.register(StandardProcedure.ORD, 'Ord', 1, true, (x) => {
@@ -192,7 +208,9 @@ export class NativeRegistry implements INative {
     });
 
     this.register(StandardProcedure.CHR, 'Chr', 1, true, (x) => {
-      return String.fromCharCode(this.toNumber(x));
+      const code = this.toNumber(x);
+      if (!Number.isInteger(code) || code < 0 || code > 255) throw new PascalError('Character code out of range');
+      return String.fromCharCode(code);
     });
 
     this.register(StandardProcedure.SUCC, 'Succ', 1, true, (x) => {
@@ -222,7 +240,8 @@ export class NativeRegistry implements INative {
       const str = String(s ?? '');
       const i = this.toNumber(index);
       const c = this.toNumber(count);
-      return str.substring(i - 1, i - 1 + c);
+      if (i < 1 || c <= 0) return '';
+      return str.slice(i - 1, i - 1 + c);
     });
 
     this.register(StandardProcedure.CONCAT, 'Concat', -1, true, (...args) => {
@@ -237,15 +256,14 @@ export class NativeRegistry implements INative {
     });
 
     this.register(StandardProcedure.UPCASE, 'Upcase', 1, true, (c) => {
-      return String(c ?? '').toUpperCase();
+      return String(c ?? '').replace(/[a-z]/g, (letter) => letter.toUpperCase());
     });
 
     // Random functions
     this.register(StandardProcedure.RANDOM, 'Random', 1, true, (n) => {
+      if (n === undefined) return Math.random();
       const max = this.toNumber(n);
-      if (max === 0) {
-        return Math.random();
-      }
+      if (!Number.isInteger(max) || max < 0) throw new PascalError('Invalid random range');
       return Math.floor(Math.random() * max);
     });
 

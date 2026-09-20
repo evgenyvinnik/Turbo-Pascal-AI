@@ -1,3 +1,5 @@
+import { selectionRange, type Buffer } from '@stores/desktopStore';
+
 /**
  * The Turbo Pascal 7.1 menu tree, transcribed from the reference screenshots.
  * `~` brackets the accelerator letter, the same notation Turbo Vision used.
@@ -20,6 +22,38 @@ export type MenuNode = MenuEntry | MenuSeparator;
 
 export const isSeparator = (n: MenuNode): n is MenuSeparator =>
   (n as MenuSeparator).separator;
+
+export interface MenuContext {
+  buffer: Buffer | null;
+  clipboard: string;
+  runtimeActive?: boolean;
+  hasBytecode?: boolean;
+  hasMessages?: boolean;
+}
+
+/** Edit commands use the same availability for painting and activation. */
+export const isMenuItemDisabled = (node: MenuEntry, context?: MenuContext): boolean => {
+  if (node.id === 'tools.next' || node.id === 'tools.prev') return !context?.hasMessages;
+  if (node.id === 'run.reset') return !context?.runtimeActive;
+  if (node.id === 'search.findproc') return !context?.runtimeActive && !context?.hasBytecode;
+  if (node.disabled) return true;
+  if (!context) return false;
+  const { buffer, clipboard } = context;
+  switch (node.id) {
+    case 'edit.undo':
+      return !buffer?.undo.length;
+    case 'edit.redo':
+      return !buffer?.redo.length;
+    case 'edit.cut':
+    case 'edit.copy':
+    case 'edit.clear':
+      return !buffer || selectionRange(buffer) === null;
+    case 'edit.paste':
+      return !buffer || !clipboard;
+    default:
+      return false;
+  }
+};
 
 export interface MenuDef {
   id: string;
@@ -75,10 +109,10 @@ export const MENUS: MenuDef[] = [
       { id: 'search.replace', label: '~R~eplace...', hint: 'Search for text and replace it' },
       { id: 'search.again', label: '~S~earch again', hint: 'Repeat the last search or replace' },
       SEP,
-      { id: 'search.goto', label: 'G~o~ to line number...', hint: 'Move cursor to specified line number in file' },
+      { id: 'search.goto', label: '~G~o to line number...', hint: 'Move cursor to specified line number in file' },
       { id: 'search.lasterror', label: 'Show last compiler error', hint: 'Show the position of the last compiler error', disabled: true },
       { id: 'search.finderror', label: 'Find ~e~rror...', hint: 'Find the source position of a runtime error' },
-      { id: 'search.findproc', label: 'Find procedure...', hint: 'Find a procedure while debugging', disabled: true },
+      { id: 'search.findproc', label: 'Find ~p~rocedure...', hint: 'Find a procedure while debugging' },
     ],
   },
   {
@@ -135,7 +169,7 @@ export const MENUS: MenuDef[] = [
       { id: 'tools.grep', label: '~G~rep', shortcut: 'Shift+F2', hint: 'Search files for a text pattern' },
       { id: 'tools.tasm', label: 'Turbo ~A~ssembler', shortcut: 'Shift+F3', hint: 'Run Turbo Assembler' },
       { id: 'tools.tdebug', label: 'Turbo ~D~ebugger', shortcut: 'Shift+F4', hint: 'Run Turbo Debugger' },
-      { id: 'tools.tprof', label: 'Turbo ~P~rofiler', shortcut: 'Shift+F5', hint: 'Run Turbo Profiler' },
+      { id: 'tools.tprof', label: 'Turbo P~r~ofiler', shortcut: 'Shift+F5', hint: 'Run Turbo Profiler' },
     ],
   },
   {
@@ -172,8 +206,8 @@ export const MENUS: MenuDef[] = [
     label: '~W~indow',
     items: [
       { id: 'window.tile', label: '~T~ile', hint: 'Arrange windows on desktop by tiling' },
-      { id: 'window.cascade', label: '~C~ascade', hint: 'Arrange windows on desktop by cascading' },
-      { id: 'window.closeall', label: 'C~l~ose all', hint: 'Close all the windows on the desktop' },
+      { id: 'window.cascade', label: 'C~a~scade', hint: 'Arrange windows on desktop by cascading' },
+      { id: 'window.closeall', label: 'Cl~o~se all', hint: 'Close all the windows on the desktop' },
       { id: 'window.refresh', label: '~R~efresh display', hint: 'Redraw the whole screen' },
       SEP,
       { id: 'window.sizemove', label: '~S~ize/Move', shortcut: 'Ctrl+F5', hint: 'Change the size or position of the active window' },
@@ -197,7 +231,7 @@ export const MENUS: MenuDef[] = [
       { id: 'help.files', label: '~F~iles...', hint: 'Choose the Help files to use' },
       SEP,
       { id: 'help.directives', label: 'Compiler ~d~irectives', hint: 'Show Help on compiler directives' },
-      { id: 'help.procedures', label: '~P~rocedures and functions', hint: 'Show Help on the standard procedures and functions' },
+      { id: 'help.procedures', label: 'Pr~o~cedures and functions', hint: 'Show Help on the standard procedures and functions' },
       { id: 'help.reserved', label: '~R~eserved words', hint: 'Show Help on the reserved words' },
       { id: 'help.units', label: 'Standard ~u~nits', hint: 'Show Help on the standard units' },
       { id: 'help.language', label: 'Turbo Pascal ~L~anguage', hint: 'Show Help on the Turbo Pascal language' },

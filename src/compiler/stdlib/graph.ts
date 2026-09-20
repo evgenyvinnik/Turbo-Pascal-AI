@@ -661,6 +661,18 @@ export const GRAPH_TEXT_PROCS: BuiltinDef[] = [
     procedureIndex: GraphProcedure.SETTEXTJUSTIFY,
   },
   {
+    name: 'SetUserCharSize',
+    isFunction: false,
+    params: [
+      { name: 'MultX', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+      { name: 'DivX', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+      { name: 'MultY', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+      { name: 'DivY', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+    ],
+    description: 'Set custom horizontal and vertical stroke font scaling',
+    procedureIndex: GraphProcedure.SETUSERCHARSIZE,
+  },
+  {
     name: 'TextWidth',
     isFunction: true,
     returnType: TypeKind.INTEGER,

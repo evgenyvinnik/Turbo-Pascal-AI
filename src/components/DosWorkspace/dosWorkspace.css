@@ -1,0 +1,11 @@
+.dos-workspace { position: absolute; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: #000; color: #aaa; font: 14px/1.3 monospace; }
+.dos-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; background: #aaa; color: #000; padding: 5px 10px; }
+.dos-toolbar strong { margin-right: auto; }
+.dos-toolbar button { border: 0; border-radius: 0; padding: 3px 8px; background: #aaa; color: #000; font: inherit; cursor: pointer; box-shadow: 2px 2px #000; }
+.dos-toolbar button:focus, .dos-toolbar button:hover { outline: 0; background: #00aaaa; }
+.dos-toolbar button:disabled { color: #555; cursor: default; box-shadow: none; }
+.dos-display { position: relative; min-height: 0; flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.dos-display canvas { max-width: 100%; max-height: 100%; width: auto; height: 100%; object-fit: contain; image-rendering: pixelated; outline: none; }
+.dos-loading { position: absolute; inset: 45% 0 auto; text-align: center; }
+.dos-status { padding: 5px 10px; background: #aaa; color: #000; min-height: 18px; }
+.dos-transcript { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: pre; }

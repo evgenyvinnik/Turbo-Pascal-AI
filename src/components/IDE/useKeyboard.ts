@@ -1,9 +1,15 @@
+import { currentMenus } from '@components/MenuBar/currentMenus';
+import { configuredToolShortcut } from '@components/MenuBar/toolMenus';
+import { useIdeStore } from '@stores/ideStore';
+import { followModalHelp } from './helpNavigation';
 import { Screen } from '@/tui/Screen';
-import { MENUS, isSeparator } from '@components/MenuBar/menuDefs';
+import { isMenuItemDisabled, isSeparator } from '@components/MenuBar/menuDefs';
 import { dialogFocusables, focusedControl, useDialogStore } from '@stores/dialogStore';
 import { useDesktopStore } from '@stores/desktopStore';
+import { useCompilerStore } from '@stores/compilerStore';
 import { useMenuStore } from '@stores/menuStore';
 import { runCommand } from './commands';
+import { openInputHistory } from './popupControls';
 
 /** Function-key and Alt/Ctrl accelerators, exactly as the IDE shows them. */
 export const SHORTCUTS: Record<string, string> = {
@@ -17,16 +23,13 @@ export const SHORTCUTS: Record<string, string> = {
   F8: 'run.stepover',
   F9: 'compile.make',
   'shift+F1': 'help.index',
-  'shift+F2': 'tools.grep',
-  'shift+F3': 'tools.tasm',
-  'shift+F4': 'tools.tdebug',
-  'shift+F5': 'tools.tprof',
   'shift+F6': 'window.previous',
   'ctrl+F1': 'help.topic',
   'ctrl+F2': 'run.reset',
   'ctrl+F3': 'debug.callstack',
   'ctrl+F4': 'debug.evaluate',
   'ctrl+F7': 'debug.addwatch',
+  'ctrl+F8': 'debug.togglebreak',
   'ctrl+F9': 'run.run',
   'alt+F1': 'help.previous',
   'alt+F3': 'window.close',
@@ -35,9 +38,12 @@ export const SHORTCUTS: Record<string, string> = {
   'alt+F8': 'tools.next',
   'alt+F9': 'compile.compile',
   'alt+F10': 'menu.local',
+  'alt+Backspace': 'edit.undo',
   'alt+x': 'file.exit',
   'alt+0': 'window.list',
 };
+
+export const commandForShortcut = (key: string): string | undefined => configuredToolShortcut(key, useIdeStore.getState().tools) ?? SHORTCUTS[key];
 
 export const shortcutKey = (e: KeyboardEvent): string => {
   const mods = `${e.altKey ? 'alt+' : ''}${e.ctrlKey || e.metaKey ? 'ctrl+' : ''}${e.shiftKey ? 'shift+' : ''}`;
@@ -48,8 +54,11 @@ export const shortcutKey = (e: KeyboardEvent): string => {
 /** Menu navigation while a menu is dropped down. */
 export function handleMenuKey(e: KeyboardEvent): boolean {
   const m = useMenuStore.getState();
-  const menu = MENUS[m.menuIndex];
+  const menu = currentMenus()[m.menuIndex];
   if (!menu) return false;
+  const desktop = useDesktopStore.getState();
+  const runtimeStatus = useCompilerStore.getState().runtimeStatus;
+  const context = { buffer: desktop.activeBuffer(), clipboard: desktop.clipboard, runtimeActive: runtimeStatus === 'running' || runtimeStatus === 'waiting' || runtimeStatus === 'paused', hasBytecode: Boolean(useCompilerStore.getState().result?.bytecode), hasMessages: useCompilerStore.getState().messages.some((message) => /\(\d+\):/.test(message)) };
 
   switch (e.key) {
     case 'Escape':
@@ -76,7 +85,7 @@ export function handleMenuKey(e: KeyboardEvent): boolean {
       return true;
     case 'Enter': {
       const node = m.current();
-      if (!node || node.disabled) return true;
+      if (!node || isMenuItemDisabled(node, context)) return true;
       if (node.submenu && !m.subOpen) {
         m.openSub();
         return true;
@@ -97,7 +106,7 @@ export function handleMenuKey(e: KeyboardEvent): boolean {
     const idx = items.findIndex((n) => !isSeparator(n) && Screen.hotKey(n.label) === ch);
     if (idx >= 0) {
       const node = items[idx];
-      if (node && !isSeparator(node) && !node.disabled) {
+      if (node && !isSeparator(node) && !isMenuItemDisabled(node, context)) {
         if (node.submenu) {
           m.setItem(idx);
           m.openSub();
@@ -126,6 +135,38 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
   const controls = dialogFocusables(top.def);
   const control = focusedControl(top);
 
+  if (e.altKey && e.key.length === 1) {
+    const hotkey = e.key.toLowerCase();
+    for (const caption of top.def.controls) {
+      if (caption.kind !== 'label' || Screen.hotKey(caption.text) !== hotkey) continue;
+      const index = controls.findIndex((candidate) => 'id' in candidate && candidate.id === caption.for);
+      if (index >= 0) { store.setFocus(index); return true; }
+    }
+    for (const [index, candidate] of controls.entries()) {
+      if (candidate.kind !== 'checks' && candidate.kind !== 'radios') continue;
+      const item = candidate.items.findIndex((entry) => Screen.hotKey(entry.label) === hotkey);
+      if (item < 0) continue;
+      store.setFocus(index);
+      store.setClusterRow(item);
+      if (candidate.kind === 'radios') store.setValue(candidate.id, item);
+      else {
+        const flags = [...((top.values[candidate.id] as boolean[] | undefined) ?? [])];
+        flags[item] = !flags[item];
+        store.setValue(candidate.id, flags);
+      }
+      return true;
+    }
+  }
+
+  if (control?.kind === 'help') {
+    if (e.key === 'Enter') { followModalHelp(); return true; }
+    const offsets: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: control.h - 2, PageUp: 2 - control.h, Home: -100_000, End: 100_000 };
+    const offset = offsets[e.key];
+    if (offset !== undefined) { store.setValue(control.id, Math.max(0, Math.min(Math.max(0, control.lines.length - (control.h - 2)), Number(top.values[control.id] ?? 0) + offset))); return true; }
+  }
+
+  if (control?.kind === 'input' && e.key === 'ArrowDown' && openInputHistory(control)) return true;
+
   if (e.key === 'Escape') {
     store.close('cancel');
     return true;
@@ -137,7 +178,8 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
   }
 
   if (e.key === 'Enter') {
-    if (control?.kind === 'button') store.close(control.result);
+    if (control?.kind === 'button' && control.result === 'help') runCommand('help.context');
+    else if (control?.kind === 'button') store.close(control.result);
     else {
       const def = controls.find((c) => c.kind === 'button' && c.default);
       store.close(def && def.kind === 'button' ? def.result : 'ok');
@@ -164,8 +206,8 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
       return true;
     }
     if (e.key === 'Delete') {
-      store.setValue(control.id, value.slice(0, top.caret) + value.slice(top.caret + 1));
-      store.setCaret(top.caret);
+      store.setValue(control.id, top.selectAll ? '' : value.slice(0, top.caret) + value.slice(top.caret + 1));
+      store.setCaret(top.selectAll ? 0 : top.caret);
       return true;
     }
     if (e.key === 'ArrowLeft') {
@@ -209,11 +251,31 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
   }
 
   if (control?.kind === 'list') {
+    if (control.scroll === 'h' && control.divider !== undefined) {
+      const rows = Math.max(1, control.h - 1);
+      const selected = Number(top.values[control.id] ?? 0);
+      const offsets: Record<string, number> = { ArrowLeft: -rows, ArrowRight: rows, ArrowUp: -1, ArrowDown: 1, PageUp: -rows * 2, PageDown: rows * 2, Home: -selected, End: control.items.length - 1 - selected };
+      const offset = offsets[e.key];
+      if (offset !== undefined) {
+        store.setValue(control.id, Math.max(0, Math.min(control.items.length - 1, selected + offset)));
+        return true;
+      }
+    }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       const dir = e.key === 'ArrowDown' ? 1 : -1;
       const n = control.items.length;
       const next = Math.max(0, Math.min(n - 1, Number(top.values[control.id] ?? 0) + dir));
       store.setValue(control.id, next);
+      return true;
+    }
+  }
+
+  if (control?.kind === 'swatches') {
+    const moves: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -control.cols, ArrowDown: control.cols };
+    const delta = moves[e.key];
+    if (delta !== undefined) {
+      const selected = Number(top.values[control.id] ?? 0);
+      store.setValue(control.id, Math.max(0, Math.min(control.colors.length - 1, selected + delta)));
       return true;
     }
   }
@@ -227,7 +289,8 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
     if (idx >= 0) {
       const c = controls[idx];
       if (c?.kind === 'button') {
-        store.close(c.result);
+        if (c.result === 'help') runCommand('help.context');
+        else store.close(c.result);
         return true;
       }
     }
@@ -319,11 +382,18 @@ export function handleEditorKey(e: KeyboardEvent, pageSize: number, pageCols: nu
 
   if (ctrl && e.key.toLowerCase() === 'y') {
     d.edit((b) => {
+      if (b.lines.length === 1 && b.lines[0] === '') return;
+      b.undo.push({ lines: [...b.lines], cursor: { ...b.cursor } });
+      if (b.undo.length > 200) b.undo.shift();
+      b.redo = [];
       if (b.lines.length > 1) b.lines.splice(b.cursor.line, 1);
       else b.lines[0] = '';
       b.cursor = { line: Math.min(b.cursor.line, b.lines.length - 1), col: 0 };
+      b.anchor = null;
+      b.error = null;
       b.modified = true;
     });
+    after();
     return true;
   }
 

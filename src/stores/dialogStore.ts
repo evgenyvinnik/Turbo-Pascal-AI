@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { isFocusable, type Control, type DialogDef } from '@components/Dialogs/types';
+import { usePopupStore, historyGroup } from './popupStore';
+import { COLOR_ITEMS } from '@components/Dialogs/dialogDefs';
 
 export type DialogValues = Record<string, string | number | boolean[]>;
 
@@ -43,7 +45,7 @@ export const useDialogStore = create<DialogState & DialogActions>()(
   immer((set, get) => ({
     stack: [],
 
-    open: (def, values = {}, onClose) =>
+    open: (def, values = {}, onClose) => {
       set((s) => {
         const initial: DialogValues = {};
         for (const c of def.controls) {
@@ -65,10 +67,15 @@ export const useDialogStore = create<DialogState & DialogActions>()(
           clusterRow: first?.kind === 'radios' ? Number(merged[first.id] ?? 0) : 0,
           onClose,
         });
-      }),
+      });
+    },
 
     close: (result) => {
       const top = get().stack[get().stack.length - 1];
+      if (top && result !== 'cancel' && result !== 'help')
+        for (const control of top.def.controls) if (control.kind === 'input' && control.history !== false && !control.readOnly)
+          usePopupStore.getState().remember(historyGroup(top.def.id, control.id), String(top.values[control.id] ?? ''));
+      usePopupStore.getState().close();
       set((s) => {
         s.stack.pop();
       });
@@ -85,7 +92,21 @@ export const useDialogStore = create<DialogState & DialogActions>()(
     setValue: (id, value) =>
       { set((s) => {
         const top = s.stack[s.stack.length - 1];
-        if (top) top.values[id] = value;
+        if (top) {
+          top.values[id] = value;
+          if (top.def.id === 'colors' && (id === 'group' || id === 'item')) {
+            const group = Number(top.values.group ?? 4);
+            if (id === 'group') {
+              top.values.item = 0;
+              const list = top.def.controls.find((control) => control.kind === 'list' && control.id === 'item');
+              if (list?.kind === 'list') list.items = group === 2 ? ['Frame passive', 'Frame active', 'Frame icons', 'Normal text', 'Status line'] : group === 4 ? [...COLOR_ITEMS] : COLOR_ITEMS.slice(0, 7);
+            }
+            const item = Number(top.values.item ?? 0);
+            const color = group === 4 ? [[7, 1], [15, 1], [10, 1], [1, 3], [1, 3], [14, 1], [0, 3], [14, 4], [15, 4], [0, 3]][item] : group === 2 ? [0, 7] : [1, 3];
+            top.values.foreground = color?.[0] ?? 7;
+            top.values.background = color?.[1] ?? 1;
+          }
+        }
       }); },
 
     setFocus: (index) =>

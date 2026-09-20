@@ -61,7 +61,12 @@ export function paintToolWindow(
     grip: pal.grip,
     ...(scrollbars
       ? {
-          vScroll: { pos: win.scroll, max: Math.max(1, rows.length - 1) },
+          vScroll: {
+            pos: selectable ? win.selected : win.scroll,
+            // Watches has an extra insertion row; a one-frame call stack has
+            // no second item to select and therefore no scrollbar thumb.
+            max: Math.max(0, rows.length - (win.kind === 'watches' ? 0 : 1)),
+          },
           hScroll: { pos: 0, max: 80 },
         }
       : {}),
@@ -70,8 +75,8 @@ export function paintToolWindow(
   scr.fill(client, ' ', pal.text);
   for (let i = 0; i < client.h; i += 1) {
     const index = win.scroll + i;
-    // The selection bar shows even on the empty slot after the last entry.
-    const isSel = selectable && active && index === win.selected;
+    // Watches keeps an insertion row; other lists only select actual entries.
+    const isSel = selectable && active && index === win.selected && (rows[index] !== undefined || win.kind === 'watches');
     if (isSel) scr.fill({ x: client.x, y: client.y + i, w: client.w, h: 1 }, ' ', pal.selected);
     const row = rows[index];
     if (!row) continue;

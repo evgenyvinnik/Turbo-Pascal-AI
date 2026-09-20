@@ -2,6 +2,7 @@ import { TokenType, RESERVED_WORDS, SYMBOLS } from '../types';
 import { PascalError } from '../errors/PascalError';
 import { Stream } from './Stream';
 import { Token } from './Token';
+import { encodeDosText } from '../encoding';
 
 /**
  * Lexer for Pascal source code
@@ -34,9 +35,7 @@ export class Lexer {
     this.debugPrintTokens = debugPrintTokens;
 
     // Create set of reserved words (lowercase for case-insensitive comparison)
-    this.reservedWordSet = new Set(
-      RESERVED_WORDS.map((word) => word.toLowerCase())
-    );
+    this.reservedWordSet = new Set(RESERVED_WORDS.map((word) => word.toLowerCase()));
 
     // Sort symbols by length (longest first) for proper matching
     this.sortedSymbols = [...SYMBOLS].sort((a, b) => b.length - a.length);
@@ -108,6 +107,9 @@ export class Lexer {
       return this.readString(lineNumber);
     }
 
+    if (ch === '$') return this.readHexNumber(lineNumber);
+    if (ch === '#') return this.readCharacterCode(lineNumber);
+
     // Number
     if (this.isDigit(ch)) {
       return this.readNumber(lineNumber);
@@ -125,18 +127,14 @@ export class Lexer {
     }
 
     // Unknown character
-    throw new PascalError(
-      `Unexpected character: "${ch}"`,
-      lineNumber,
-      this.stream.getPosition()
-    );
+    throw new PascalError(`Unexpected character: "${ch}"`, lineNumber, this.stream.getPosition());
   }
 
   /**
    * Skips whitespace characters (space, tab, newline, carriage return)
    */
   private skipWhitespace(): void {
-    while (true) {
+    for (;;) {
       const ch = this.stream.peek();
       if (ch === null) {
         break;
@@ -191,7 +189,7 @@ export class Lexer {
     // Skip opening brace
     this.stream.next();
 
-    while (true) {
+    for (;;) {
       const ch = this.stream.next();
       if (ch === null) {
         throw new PascalError('Unterminated comment', lineNumber);
@@ -217,7 +215,7 @@ export class Lexer {
     this.stream.next(); // (
     this.stream.next(); // *
 
-    while (true) {
+    for (;;) {
       const ch = this.stream.next();
       if (ch === null) {
         throw new PascalError('Unterminated comment', lineNumber);
@@ -247,9 +245,9 @@ export class Lexer {
     // Skip opening quote
     this.stream.next();
 
-    while (true) {
+    for (;;) {
       const ch = this.stream.next();
-      if (ch === null) {
+      if (ch === null || ch === '\n' || ch === '\r') {
         throw new PascalError('Unterminated string', lineNumber);
       }
       if (ch === "'") {
@@ -267,7 +265,7 @@ export class Lexer {
       }
     }
 
-    return this.createToken(content, TokenType.STRING, lineNumber);
+    return this.createToken(encodeDosText(content), TokenType.STRING, lineNumber);
   }
 
   /**
@@ -275,16 +273,41 @@ export class Lexer {
    * @param lineNumber - The starting line number
    * @returns A number token
    */
+  private readHexNumber(lineNumber: number): Token {
+    this.stream.next();
+    let digits = '';
+    while (this.stream.peek() !== null && /[0-9a-f]/i.test(this.stream.peek() ?? ''))
+      digits += this.stream.next() ?? '';
+    if (!digits || digits.length > 8)
+      throw new PascalError('Invalid hexadecimal integer', lineNumber);
+    return this.createToken(String(parseInt(digits, 16) | 0), TokenType.NUMBER, lineNumber);
+  }
+
+  private readCharacterCode(lineNumber: number): Token {
+    this.stream.next();
+    let code: number;
+    if (this.stream.peek() === '$') code = Number(this.readHexNumber(lineNumber).value);
+    else {
+      let digits = '';
+      while (this.stream.peek() !== null && /[0-9]/.test(this.stream.peek() ?? ''))
+        digits += this.stream.next() ?? '';
+      if (!digits) throw new PascalError('Character code expected', lineNumber);
+      code = Number(digits);
+    }
+    if (code < 0 || code > 255) throw new PascalError('Character code out of range', lineNumber);
+    return this.createToken(String.fromCharCode(code), TokenType.STRING, lineNumber);
+  }
+
   private readNumber(lineNumber: number): Token {
     let value = '';
 
     // Read integer part
-    while (true) {
+    for (;;) {
       const ch = this.stream.peek();
       if (ch === null || !this.isDigit(ch)) {
         break;
       }
-      value += this.stream.next();
+      value += this.stream.next() ?? '';
     }
 
     // Check for decimal point
@@ -293,15 +316,15 @@ export class Lexer {
       // Look ahead to make sure it's not '..'
       const afterDot = this.peekAhead(1);
       if (afterDot !== null && afterDot !== '.') {
-        value += this.stream.next(); // consume '.'
+        value += this.stream.next() ?? ''; // consume '.'
 
         // Read fractional part
-        while (true) {
+        for (;;) {
           const ch = this.stream.peek();
           if (ch === null || !this.isDigit(ch)) {
             break;
           }
-          value += this.stream.next();
+          value += this.stream.next() ?? '';
         }
       }
     }
@@ -309,22 +332,22 @@ export class Lexer {
     // Check for exponent
     const expCh = this.stream.peek();
     if (expCh !== null && (expCh === 'e' || expCh === 'E')) {
-      value += this.stream.next(); // consume 'e' or 'E'
+      value += this.stream.next() ?? ''; // consume 'e' or 'E'
 
       // Check for sign
       const signCh = this.stream.peek();
       if (signCh === '+' || signCh === '-') {
-        value += this.stream.next();
+        value += this.stream.next() ?? '';
       }
 
       // Read exponent digits
       let hasExponentDigits = false;
-      while (true) {
+      for (;;) {
         const ch = this.stream.peek();
         if (ch === null || !this.isDigit(ch)) {
           break;
         }
-        value += this.stream.next();
+        value += this.stream.next() ?? '';
         hasExponentDigits = true;
       }
 
@@ -344,12 +367,12 @@ export class Lexer {
   private readIdentifierOrReservedWord(lineNumber: number): Token {
     let value = '';
 
-    while (true) {
+    for (;;) {
       const ch = this.stream.peek();
       if (ch === null || !this.isIdentifierChar(ch)) {
         break;
       }
-      value += this.stream.next();
+      value += this.stream.next() ?? '';
     }
 
     // Check if it's a reserved word (case-insensitive)
@@ -433,11 +456,7 @@ export class Lexer {
    * @returns true if the character can start an identifier
    */
   private isIdentifierStart(ch: string): boolean {
-    return (
-      (ch >= 'a' && ch <= 'z') ||
-      (ch >= 'A' && ch <= 'Z') ||
-      ch === '_'
-    );
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_';
   }
 
   /**

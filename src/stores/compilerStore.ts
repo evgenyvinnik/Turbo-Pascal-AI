@@ -1,14 +1,17 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { Lexer, Stream } from '@compiler/lexer';
-import { Parser } from '@compiler/parser';
 import { Compiler as PascalCompiler, Bytecode } from '@compiler/codegen';
-import { PascalError } from '@compiler/errors';
+import { PascalError, describePascalDiagnostic, formatPascalDiagnostic } from '@compiler/errors';
+import { NativePascalRequired, parseProject, type ProjectOptions } from '@compiler/project';
+import { NodeType, type Node } from '@compiler/parser/Node';
 
 export type CompilationStatus = 'idle' | 'lexing' | 'parsing' | 'compiling' | 'success' | 'error';
+export type RuntimeStatus = 'idle' | 'running' | 'paused' | 'waiting' | 'completed' | 'stopped' | 'error';
 
 export interface CompilationError {
   message: string;
+  code?: number;
+  detail?: string;
   line: number;
   column: number;
   file: string;
@@ -16,8 +19,10 @@ export interface CompilationError {
 }
 
 export interface CompilationResult {
+  isUnit?: boolean;
+  nativeRequired?: boolean;
   bytecode: Bytecode | null;
-  parseTree: unknown | null;
+  parseTree: Node | null;
   errors: CompilationError[];
   warnings: CompilationError[];
   compilationTime: number;
@@ -30,16 +35,19 @@ interface CompilerState {
   outputLines: string[];
   /** Text the running program wrote to the console. */
   programOutput: string[];
+  runtimeStatus: RuntimeStatus;
+  runtimeError: string | null;
   /** Tool window messages, newest run last. */
   messages: string[];
 }
 
 interface CompilerActions {
-  compile: (source: string, filename: string) => Promise<CompilationResult>;
+  compile: (source: string, filename: string, options?: ProjectOptions) => Promise<CompilationResult>;
   clearErrors: () => void;
   clearOutput: () => void;
   appendOutput: (line: string) => void;
   setProgramOutput: (lines: string[]) => void;
+  setRuntime: (status: RuntimeStatus, error?: string | null) => void;
   setMessages: (lines: string[]) => void;
   setStatus: (status: CompilationStatus) => void;
 }
@@ -51,14 +59,16 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
     result: null,
     outputLines: [],
     programOutput: [],
+    runtimeStatus: 'idle',
+    runtimeError: null,
     messages: [],
 
-    compile: async (source, filename) => {
+    compile: async (source, filename, options) => {
       const startTime = Date.now();
       const errors: CompilationError[] = [];
       const warnings: CompilationError[] = [];
       let bytecode: Bytecode | null = null;
-      let parseTree: unknown = null;
+      let parseTree: Node | null = null;
 
       // Clear previous output
       set((state) => {
@@ -68,6 +78,7 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
       });
 
       get().appendOutput(`Compiling ${filename}...`);
+      await Promise.resolve();
 
       try {
         // Step 1: Lexing
@@ -76,17 +87,14 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
         });
         get().appendOutput('Lexical analysis...');
 
-        const stream = new Stream(source);
-        const lexer = new Lexer(stream);
-
         // Step 2: Parsing
         set((state) => {
           state.status = 'parsing';
         });
         get().appendOutput('Parsing...');
 
-        const parser = new Parser(lexer);
-        parseTree = parser.parse();
+        const project = parseProject(source, filename, options);
+        parseTree = project.tree;
 
         // Step 3: Code generation
         set((state) => {
@@ -95,13 +103,15 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
         get().appendOutput('Generating bytecode...');
 
         const compiler = new PascalCompiler();
-        bytecode = compiler.compile(parseTree as Parameters<typeof compiler.compile>[0]);
+        bytecode = compiler.compile(project.tree, { resolveUnit: project.resolveUnit });
+        bytecode.sources = project.sources;
 
         const compilationTime = Date.now() - startTime;
-        get().appendOutput(`Compiled successfully in ${compilationTime}ms`);
-        get().appendOutput(`Generated ${bytecode.istore.length} instructions`);
+        get().appendOutput(`Compiled successfully in ${String(compilationTime)}ms`);
+        get().appendOutput(`Generated ${String(bytecode.istore.length)} instructions`);
 
         const result: CompilationResult = {
+          isUnit: project.tree.type === NodeType.UNIT,
           bytecode,
           parseTree,
           errors,
@@ -117,16 +127,24 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
         return result;
       } catch (error) {
         const compilationTime = Date.now() - startTime;
+        if (error instanceof NativePascalRequired) {
+          const result = { bytecode: null, parseTree: null, errors: [], warnings: [], compilationTime, nativeRequired: true };
+          set(state => { state.status = 'idle'; state.result = result; });
+          return result;
+        }
 
         if (error instanceof PascalError) {
+          const diagnostic = describePascalDiagnostic(error, 'compiler');
           errors.push({
-            message: error.message,
-            line: error.lineNumber,
-            column: error.columnNumber,
-            file: filename,
+            message: diagnostic.message,
+            ...(diagnostic.code === undefined ? {} : { code: diagnostic.code }),
+            detail: diagnostic.detail,
+            line: diagnostic.lineNumber,
+            column: diagnostic.columnNumber,
+            file: diagnostic.sourceFile ?? filename,
             severity: 'error',
           });
-          get().appendOutput(`Error at line ${error.lineNumber}: ${error.message}`);
+          get().appendOutput(`${diagnostic.sourceFile ?? filename}(${String(diagnostic.lineNumber)}): ${formatPascalDiagnostic(diagnostic)}`);
         } else if (error instanceof Error) {
           errors.push({
             message: error.message,
@@ -156,36 +174,43 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
     },
 
     clearErrors: () =>
-      set((state) => {
+      { set((state) => {
         if (state.result) {
           state.result.errors = [];
           state.result.warnings = [];
         }
-      }),
+      }); },
 
     clearOutput: () =>
-      set((state) => {
+      { set((state) => {
         state.outputLines = [];
-      }),
+      }); },
 
     appendOutput: (line) =>
-      set((state) => {
+      { set((state) => {
         state.outputLines.push(line);
-      }),
+      }); },
 
     setProgramOutput: (lines) =>
-      set((state) => {
+      { set((state) => {
         state.programOutput = lines;
-      }),
+      }); },
+
+    setRuntime: (status, error = null) => {
+      set((state) => {
+        state.runtimeStatus = status;
+        state.runtimeError = error;
+      });
+    },
 
     setMessages: (lines) =>
-      set((state) => {
+      { set((state) => {
         state.messages = lines;
-      }),
+      }); },
 
     setStatus: (status) =>
-      set((state) => {
+      { set((state) => {
         state.status = status;
-      }),
+      }); },
   }))
 );

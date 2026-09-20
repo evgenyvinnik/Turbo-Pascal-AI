@@ -1,0 +1,111 @@
+import { expect, test } from '@playwright/test';
+import { Ide } from './ide';
+
+test('context help preserves its dialog and supports index and previous topic', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.openMenu('O');
+  await ide.chooseItem('c');
+  await ide.press('F1');
+  await ide.waitForDialog('Turbo Help');
+  await ide.waitForText('Help on the Compiler Options dialog box');
+  await expect(ide.row(24)).toContainText('Alt+F1 Previous topic');
+  await ide.press('Shift+F1');
+  await ide.waitForText('Turbo Help Index');
+  await ide.press('Alt+F1');
+  await ide.waitForText('Help on the Compiler Options dialog box');
+  await ide.press('Escape');
+  await expect(ide.row(1)).toContainText('Compiler Options');
+  await ide.press('Escape');
+  await expect(ide.row(1)).toContainText('NONAME00.PAS');
+  await ide.openMenu('S');
+  await ide.chooseItem('f');
+  await ide.press('F1');
+  await ide.waitForText('Help on the Find dialog box');
+});
+
+test('editor context and identifier help open different real topics', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource('program HelpDemo;\nbegin\nend.');
+  await ide.press('F1');
+  await ide.waitForText('Edit Window');
+  await ide.press('PageDown');
+  await ide.waitForText('For More Information');
+  await ide.press('Home');
+  await ide.waitForText('The Edit Window');
+  await ide.press('Escape');
+  await ide.moveTo(1, 1);
+  await ide.press('Control+F1');
+  await ide.waitForText('program (reserved word)');
+  await ide.press('Shift+F1');
+  await ide.waitForText('Turbo Help Index');
+  await ide.press('Alt+F1');
+  await ide.waitForText('program (reserved word)');
+  await ide.press('Escape');
+  await ide.openMenu('O');
+  await ide.chooseItem('e');
+  await ide.chooseItem('e');
+  await ide.press('F1');
+  await ide.waitForText('Help on the Editor Options Dialog Box');
+});
+
+test('Find Procedure navigates to a declaration and Find Error resolves bytecode addresses', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.openFile('SQUARE.PAS');
+  await ide.press('F7');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  await ide.openMenu('S');
+  await ide.chooseItem('p');
+  await ide.waitForDialog('Find Procedure');
+  await ide.type('Square');
+  await ide.press('Enter');
+  await expect(ide.row(23)).toContainText('3:1');
+  await ide.openMenu('S');
+  await ide.chooseItem('e');
+  await ide.waitForDialog('Find Error');
+  await ide.type('0000:0000');
+  await ide.press('Enter');
+  await expect(ide.row(23)).toContainText('4:1');
+});
+
+test('Primary File selects the program compiled while another editor is active', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.openFile('HELLO.PAS');
+  await ide.openMenu('C');
+  await ide.chooseItem('p');
+  await ide.waitForDialog('Primary File');
+  await ide.type('HELLO.PAS');
+  await ide.press('Enter');
+  await ide.openMenu('F');
+  await ide.chooseItem('n');
+  await ide.type('This is intentionally not Pascal');
+  await ide.press('F9');
+  await ide.waitForDialog('Compiling');
+  await ide.waitForText('Main file: HELLO.PAS');
+  await ide.waitForText('Compile successful');
+});
+
+test('Options files save and restore real configuration values', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.openMenu('O');
+  await ide.chooseItem('m');
+  await ide.type('12345');
+  await ide.press('Enter');
+  await ide.openMenu('O');
+  await ide.chooseItem('a');
+  await ide.waitForDialog('Save Options As');
+  await ide.type('CUSTOM.TP');
+  await ide.press('Enter');
+  await ide.openMenu('O');
+  await ide.chooseItem('m');
+  await ide.type('54321');
+  await ide.press('Enter');
+  await ide.openMenu('O');
+  await ide.chooseItem('o');
+  await ide.waitForDialog('Open Options');
+  await ide.type('CUSTOM.TP');
+  await ide.press('Enter');
+  await ide.openMenu('O');
+  await ide.chooseItem('m');
+  await ide.waitForText('12345');
+});

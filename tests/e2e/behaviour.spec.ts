@@ -83,7 +83,7 @@ test.describe('editor', () => {
     const ide = await Ide.open(page);
     await ide.type('one\ntwo\nthree\nfour');
     await ide.openMenu('S');
-    await ide.chooseItem('o');
+    await ide.chooseItem('g');
     await ide.type('2');
     await ide.press('Enter');
     expect(await ide.text(23)).toContain('2:1');
@@ -103,7 +103,7 @@ test.describe('windows', () => {
     await ide.openMenu('F');
     await ide.chooseItem('n');
     expect(await ide.text(1)).toContain('NONAME01.PAS');
-    expect(await ide.text(1)).toContain('2=[');
+    expect(await ide.text(1)).toContain('2═[');
   });
 
   test('Window > Tile splits the desktop', async ({ page }) => {
@@ -209,10 +209,7 @@ test.describe('dialogs', () => {
 });
 
 test.describe('compiler', () => {
-  // The bundled code generator reads `node.nodeType` while the parser emits
-  // `node.type`, so every program fails in code generation. Until the two
-  // halves of src/compiler agree, the success path cannot be reached.
-  test.fixme('a good program reports success', async ({ page }) => {
+  test('a good program reports success', async ({ page }) => {
     const ide = await Ide.open(page);
     await ide.openFile('HELLO.PAS');
     await ide.press('Alt+F9');
@@ -223,12 +220,12 @@ test.describe('compiler', () => {
     expect(screen).toContain('Press any key');
   });
 
-  test('a code generation failure reaches the error banner', async ({ page }) => {
+  test('an undeclared variable reaches the error banner', async ({ page }) => {
     const ide = await Ide.open(page);
-    await ide.openFile('HELLO.PAS');
+    await ide.typeSource('program Broken;\nbegin\n  missing := 1;\nend.');
     await ide.press('Alt+F9');
     await ide.waitForText('Error');
-    expect(await ide.text(2)).toContain('Error');
+    expect(await ide.text(2)).toMatch(/Error 3:.*missing/i);
   });
 
   test('a broken program shows the red error banner', async ({ page }) => {
@@ -241,13 +238,102 @@ test.describe('compiler', () => {
     expect(await ide.text(2)).toMatch(/Error/);
   });
 
-  test.fixme('running a program fills the Output window', async ({ page }) => {
+  test('running a program writes real output and waits for ReadLn', async ({ page }) => {
     const ide = await Ide.open(page);
     await ide.openFile('HELLO.PAS');
     await ide.press('Control+F9');
     await ide.waitForDialog('Compiling');
     await ide.press('Enter');
-    await ide.waitForText('Output');
+    await ide.waitForDialog('Program input');
+    await expect(ide.row(18)).toContainText('Hello, world!');
+    await ide.press('Enter');
     expect(await ide.text(17)).toContain('Output');
+    expect(await ide.find('Program input')).toBe(-1);
+    // Program input must never be inserted into the source editor.
+    await ide.press('Alt+F3');
+    expect(await ide.text(4)).toContain("writeln('Hello, world!');");
+  });
+
+  test('Fibonacci accepts a number, calculates its sequence and resumes after input', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.openFile('FIBONACCI.PAS');
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForDialog('Program input');
+    await ide.waitForText('Enter how many Fibonacci numbers to display:');
+    await ide.type('10');
+    await ide.press('Enter');
+    await ide.waitForText('Press any key to exit...');
+    await ide.press('Enter');
+    await ide.press('F5');
+    await ide.press('Home');
+    const output = (await ide.screenText()).join('\n');
+    expect(output).toContain('Enter how many Fibonacci numbers to display: 10');
+    expect(output).toContain('F(1) = 0');
+    expect(output).toContain('F(7) = 8');
+    expect(output).toContain('F(10) = 34');
+    expect(output).not.toContain('Runtime error');
+  });
+
+  test('a procedure writes its var parameter back to the caller', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.openFile('SQUARE.PAS');
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForDialog('Program input');
+    expect(await ide.text(18)).toContain('----- SQUARE OF 7 -----');
+    expect(await ide.text(19)).toContain('49');
+    await ide.press('Enter');
+  });
+
+  test('division by zero reports a runtime error with its source line', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.typeSource('program Divide; var divisor: Integer;\nbegin\n  divisor := 0; WriteLn(1 div divisor);\nend.');
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForDialog('Runtime error');
+    const screen = (await ide.screenText()).join('\n');
+    expect(screen).toContain('NONAME00.PAS, line 3');
+    expect(screen).toMatch(/division by zero/i);
+  });
+
+  test('an infinite loop yields to the UI and can be reset', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.typeSource("program Forever;\nbegin\n  WriteLn('Started');\n  while True do begin end;\nend.");
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForText('Started');
+    await ide.openMenu('R');
+    await ide.chooseItem('p');
+    await ide.waitForText('[Program stopped]');
+    expect(await ide.find('Runtime error')).toBe(-1);
+    await ide.press('Alt+F3');
+    await ide.openMenu('F');
+    await ide.chooseItem('n');
+    await ide.typeSource("program AfterReset;\nbegin\n  WriteLn('Still working');\nend.");
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForText('Still working');
+    expect(await ide.find('[Program stopped]')).toBe(-1);
+  });
+
+  test('Ctrl+F2 cancels pending input without changing the source', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.openFile('HELLO.PAS');
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForDialog('Program input');
+    await ide.type('must not enter source');
+    await ide.press('Control+F2');
+    await ide.waitForText('[Program stopped]');
+    expect(await ide.find('Program input')).toBe(-1);
+    await ide.press('Alt+F3');
+    expect((await ide.screenText()).join('\n')).not.toContain('must not enter source');
   });
 });

@@ -15,7 +15,7 @@ export const VGA_PALETTE = [
   '#A800A8', // 5  magenta
   '#A85700', // 6  brown
   '#A8A8A8', // 7  light gray
-  '#545454', // 8  dark gray
+  '#575757', // 8  dark gray
   '#5757FF', // 9  light blue
   '#57FF57', // 10 light green
   '#57FFFF', // 11 light cyan

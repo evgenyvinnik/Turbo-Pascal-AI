@@ -51,6 +51,16 @@ export interface BreakpointRecord {
   hitCount: number;
 }
 
+/** The payload schema is owned and validated by the workspace state layer. */
+export interface WorkspaceRecord {
+  id: string;
+  schemaVersion: number;
+  payload: unknown;
+  updatedAt: number;
+  revision: number;
+  writerId?: string;
+}
+
 export class TurboPascalDB extends Dexie {
   files!: Table<FileRecord, string>;
   directories!: Table<DirectoryRecord, string>;
@@ -58,6 +68,7 @@ export class TurboPascalDB extends Dexie {
   sessions!: Table<SessionRecord, number>;
   recentFiles!: Table<RecentFileRecord, string>;
   breakpoints!: Table<BreakpointRecord, string>;
+  workspaces!: Table<WorkspaceRecord, string>;
 
   constructor() {
     super('TurboPascalIDE');
@@ -69,6 +80,12 @@ export class TurboPascalDB extends Dexie {
       sessions: '++id, name, updatedAt',
       recentFiles: 'path, accessedAt',
       breakpoints: 'id, filePath'
+    });
+
+    // Dexie retains the version 1 stores and their contents when adding this
+    // store. Existing saved files, sessions, and settings are left intact.
+    this.version(2).stores({
+      workspaces: 'id, updatedAt',
     });
   }
 }

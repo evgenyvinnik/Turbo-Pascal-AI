@@ -77,6 +77,17 @@ export interface InfoControl extends At {
   w: number;
   h: number;
   lines: string[];
+  attr?: Attr;
+}
+
+export interface HelpControl extends At {
+  kind: 'help';
+  id: string;
+  w: number;
+  h: number;
+  lines: string[];
+  topic?: string;
+  hint: string;
 }
 
 export interface BarControl extends At {
@@ -119,6 +130,7 @@ export type Control =
   | ListControl
   | ButtonControl
   | InfoControl
+  | HelpControl
   | BarControl
   | SliderControl
   | SwatchControl
@@ -144,6 +156,7 @@ export const isFocusable = (c: Control): boolean => {
     case 'checks':
     case 'radios':
     case 'list':
+    case 'help':
     case 'swatches':
       return true;
     case 'button':

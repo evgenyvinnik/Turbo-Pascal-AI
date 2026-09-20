@@ -13,6 +13,13 @@
 import { Opcode, TypeCode, Register, MARK_SIZE, inst } from '../types/inst';
 import { Bytecode } from '../codegen/Bytecode';
 import { PascalError } from '../errors/PascalError';
+import { InternalProcedure, NativeRegistry } from './Native';
+import { BuiltinProcedure } from '../stdlib/builtin';
+import { CrtProcedure } from '../stdlib/crt';
+import { RuntimeServices } from './RuntimeServices';
+import { VirtualFileSystem } from './VirtualFileSystem';
+import { roundReal48 } from '../codegen/numeric';
+import { encodeDosText, decodeDosText } from '../encoding';
 
 /**
  * Stack value type - can hold numbers, strings, or booleans
@@ -29,6 +36,9 @@ export enum MachineState {
   RUNNING = 'running',
   /** Machine is paused */
   PAUSED = 'paused',
+  /** Execution is suspended until more console input is supplied. */
+  WAITING = 'waiting',
+  SLEEPING = 'sleeping',
   /** Machine has stopped */
   STOPPED = 'stopped',
   /** Machine encountered an error */
@@ -47,6 +57,10 @@ export interface MachineConfig {
   maxInstructions?: number;
   /** Enable debug tracing */
   debug?: boolean;
+  /** Limit captured console output to keep runaway programs bounded. */
+  maxOutputChars?: number;
+  fileSystem?: VirtualFileSystem;
+  onSound?: (frequency: number) => void;
 }
 
 /**
@@ -58,9 +72,11 @@ export class Machine {
 
   /** Data store (stack and heap combined) */
   private dstore: StackValue[];
+  private stringCharacters = new Map<number, { address: number; index: number; capacity: number }>();
+  private stringBacking = new Map<number, string>();
 
   /** Stack pointer - points to top of stack */
-  private sp: number = 0;
+  private sp: number = -1;
 
   /** Mark pointer - points to base of current stack frame */
   private mp: number = 0;
@@ -79,12 +95,22 @@ export class Machine {
 
   /** Output buffer for Write/WriteLn */
   private output: string[] = [];
+  private outputLine = '';
+  private outputChars = 0;
 
   /** Input buffer for Read/ReadLn */
   private input: string[] = [];
 
   /** Current input position */
   private inputPos: number = 0;
+  private inputColumn = 0;
+  /** DOS keyboard bytes are independent of the line-oriented Read/ReadLn buffer. */
+  private keyQueue = '';
+  private readonly native = new NativeRegistry();
+  private readonly services: RuntimeServices;
+  private wakeTime = 0;
+  private allocations = new Map<number, number>();
+  private freeBlocks: { address: number; words: number }[] = [];
 
   /** Number of instructions executed */
   private instructionCount: number = 0;
@@ -107,11 +133,14 @@ export class Machine {
       heapSize: config.heapSize ?? 65536,
       maxInstructions: config.maxInstructions ?? 0,
       debug: config.debug ?? false,
+      maxOutputChars: config.maxOutputChars ?? 1_048_576,
+      fileSystem: config.fileSystem ?? new VirtualFileSystem(),
+      onSound: config.onSound ?? (() => undefined),
     };
 
     // Initialize data store with combined stack and heap size
     const totalSize = this.config.stackSize + this.config.heapSize;
-    this.dstore = new Array(totalSize).fill(0);
+    this.dstore = new Array<StackValue>(totalSize).fill(0);
 
     // Initialize heap pointer to top of memory
     this.np = totalSize;
@@ -120,22 +149,42 @@ export class Machine {
     for (let i = 0; i < bytecode.typedConstants.length; i++) {
       this.dstore[i] = bytecode.typedConstants[i]!;
     }
+    this.pc = bytecode.startAddress;
+    this.mp = bytecode.typedConstants.length;
+    this.sp = this.mp - 1;
+    this.services = new RuntimeServices({
+      read: (address) => this.peek(address),
+      write: (address, value) => { this.poke(address, value); },
+      allocate: (words, defaults) => this.allocate(words, defaults),
+      free: (address) => { this.free(address); },
+      sound: this.config.onSound,
+    }, this.config.fileSystem);
   }
 
   /**
    * Reset the machine to its initial state
    */
   reset(): void {
-    this.sp = 0;
-    this.mp = 0;
+    this.mp = this.bytecode.typedConstants.length;
+    this.sp = this.mp - 1;
     this.pc = this.bytecode.startAddress;
     this.ep = 0;
     this.np = this.config.stackSize + this.config.heapSize;
     this.state = MachineState.READY;
     this.output = [];
+    this.outputLine = '';
+    this.outputChars = 0;
     this.inputPos = 0;
+    this.inputColumn = 0;
+    this.keyQueue = '';
     this.instructionCount = 0;
     this.trace = [];
+    this.wakeTime = 0;
+    this.allocations.clear();
+    this.freeBlocks = [];
+    this.stringCharacters.clear();
+    this.stringBacking.clear();
+    this.services.reset();
 
     // Re-initialize dstore
     this.dstore.fill(0);
@@ -148,21 +197,19 @@ export class Machine {
    * Run the program until completion or error
    */
   run(): void {
-    this.pc = this.bytecode.startAddress;
-    this.state = MachineState.RUNNING;
-
-    while (this.state === MachineState.RUNNING) {
-      this.step();
-
-      // Check instruction limit
-      if (
-        this.config.maxInstructions > 0 &&
-        this.instructionCount >= this.config.maxInstructions
-      ) {
-        this.state = MachineState.ERROR;
-        throw new PascalError('Maximum instruction count exceeded');
-      }
+    while (this.state === MachineState.READY || this.state === MachineState.PAUSED || this.state === MachineState.RUNNING) {
+      this.runSlice();
     }
+  }
+
+  /** Execute a bounded slice, preserving registers when paused or awaiting input. */
+  runSlice(budget = 10_000): void {
+    if (!Number.isInteger(budget) || budget <= 0) throw new RangeError('Invalid instruction budget');
+    if (this.state === MachineState.WAITING || this.state === MachineState.STOPPED || this.state === MachineState.ERROR) return;
+    if (!this.wake()) return;
+    this.state = MachineState.RUNNING;
+    for (let i = 0; i < budget && this.getState() === MachineState.RUNNING; i += 1) this.step();
+    if (this.getState() === MachineState.RUNNING) this.state = MachineState.PAUSED;
   }
 
   /**
@@ -170,13 +217,14 @@ export class Machine {
    * @returns true if execution should continue, false if stopped
    */
   step(): boolean {
-    if (this.state !== MachineState.RUNNING && this.state !== MachineState.PAUSED) {
+    if (this.state !== MachineState.RUNNING && this.state !== MachineState.PAUSED && this.state !== MachineState.READY) {
       return false;
     }
+    this.state = MachineState.RUNNING;
 
     if (this.pc < 0 || this.pc >= this.bytecode.istore.length) {
-      this.state = MachineState.STOPPED;
-      return false;
+      this.state = MachineState.ERROR;
+      throw new PascalError('Invalid instruction address', this.getSourceLine());
     }
 
     const instruction = this.bytecode.istore[this.pc]!;
@@ -186,7 +234,7 @@ export class Machine {
 
     if (this.config.debug) {
       this.trace.push(
-        `PC=${this.pc} SP=${this.sp} MP=${this.mp}: ${inst.disassemble(instruction)}`
+        `PC=${String(this.pc)} SP=${String(this.sp)} MP=${String(this.mp)}: ${inst.disassemble(instruction)}`
       );
     }
 
@@ -194,13 +242,20 @@ export class Machine {
     this.instructionCount++;
 
     try {
-      this.execute(opcode, p, q);
+      if (this.config.maxInstructions > 0 && this.instructionCount > this.config.maxInstructions) {
+        throw new PascalError('Maximum instruction count exceeded');
+      }
+      this.execute(opcode as Opcode, p, q);
     } catch (error) {
       this.state = MachineState.ERROR;
+      if (error instanceof PascalError) {
+        if (error.lineNumber < 1) Object.assign(error, { lineNumber: this.getSourceLine() });
+        if (!('sourceFile' in error) && this.getSourceFile()) Object.assign(error, { sourceFile: this.getSourceFile() });
+      }
       throw error;
     }
 
-    return this.state === MachineState.RUNNING;
+    return this.getState() === MachineState.RUNNING;
   }
 
   /**
@@ -209,13 +264,14 @@ export class Machine {
    * @param p - First operand (typically level or type)
    * @param q - Second operand (typically offset or address)
    */
-  private execute(opcode: number, p: number, q: number): void {
+  private execute(opcode: Opcode, p: number, q: number): void {
     switch (opcode) {
       // ==================== Subprogram Linkage ====================
 
       case Opcode.CUP:
         // Call user procedure
         // p = parameter size, q = procedure address
+        this.mp = this.sp - MARK_SIZE - p + 1;
         this.dstore[this.mp + 4] = this.pc; // Save return address
         this.pc = q;
         break;
@@ -229,9 +285,10 @@ export class Machine {
       case Opcode.ENT:
         // Entry - set up registers
         // p = register (0=SP, 2=MP), q = amount
-        if (p === Register.SP) {
+        if ((p as Register) === Register.SP) {
+          if (this.mp + q > Math.min(this.np, this.config.stackSize)) throw new PascalError('Stack overflow');
           this.sp = this.mp + q - 1;
-        } else if (p === Register.EP) {
+        } else if ((p as Register) === Register.EP) {
           this.ep = this.sp + q;
           if (this.ep >= this.np) {
             throw new PascalError('Stack overflow');
@@ -242,12 +299,15 @@ export class Machine {
       case Opcode.MST:
         // Mark stack - prepare for procedure call
         // p = static link level difference
-        this.push(0); // Return value slot
-        this.push(this.base(p)); // Static link
-        this.push(this.mp); // Dynamic link
-        this.push(0); // Extreme pointer (unused)
-        this.push(0); // Return address (filled by CUP)
-        this.mp = this.sp - MARK_SIZE + 1;
+        {
+          const staticLink = this.base(p);
+          this.push(0); // Return value slot
+          this.push(staticLink);
+          this.push(this.mp); // Dynamic link
+          this.push(0); // Extreme pointer (unused)
+          this.push(0); // Return address (filled by CUP)
+          // Arguments are evaluated in the caller; CUP installs the new frame.
+        }
         break;
 
       case Opcode.RTN:
@@ -255,12 +315,12 @@ export class Machine {
         // p = return type
         {
           const returnValue =
-            p !== TypeCode.P ? (this.dstore[this.mp] ?? 0) : 0;
+            (p as TypeCode) !== TypeCode.P ? (this.dstore[this.mp] ?? 0) : 0;
           const oldMp = this.mp;
           this.sp = oldMp - 1;
           this.pc = this.dstore[oldMp + 4] as number;
           this.mp = this.dstore[oldMp + 2] as number;
-          if (p !== TypeCode.P) {
+          if ((p as TypeCode) !== TypeCode.P) {
             this.push(returnValue);
           }
         }
@@ -289,8 +349,8 @@ export class Machine {
       case Opcode.GRT:
         // Greater than comparison
         {
-          const b = this.popNumber();
-          const a = this.popNumber();
+          const b = this.popComparable(p);
+          const a = this.popComparable(p);
           this.push(a > b ? 1 : 0);
         }
         break;
@@ -298,8 +358,8 @@ export class Machine {
       case Opcode.GEQ:
         // Greater than or equal comparison
         {
-          const b = this.popNumber();
-          const a = this.popNumber();
+          const b = this.popComparable(p);
+          const a = this.popComparable(p);
           this.push(a >= b ? 1 : 0);
         }
         break;
@@ -307,8 +367,8 @@ export class Machine {
       case Opcode.LES:
         // Less than comparison
         {
-          const b = this.popNumber();
-          const a = this.popNumber();
+          const b = this.popComparable(p);
+          const a = this.popComparable(p);
           this.push(a < b ? 1 : 0);
         }
         break;
@@ -316,8 +376,8 @@ export class Machine {
       case Opcode.LEQ:
         // Less than or equal comparison
         {
-          const b = this.popNumber();
-          const a = this.popNumber();
+          const b = this.popComparable(p);
+          const a = this.popComparable(p);
           this.push(a <= b ? 1 : 0);
         }
         break;
@@ -577,6 +637,12 @@ export class Machine {
 
       case Opcode.UJP:
         // Unconditional jump
+        if (p > 0) {
+          const target = this.bytecode.debugScopes.find((scope) => q >= scope.start && q < scope.end);
+          if (!target) throw new PascalError('Invalid nonlocal label');
+          this.mp = this.base(p);
+          this.sp = this.mp + target.frameSize - 1;
+        }
         this.pc = q;
         break;
 
@@ -657,7 +723,8 @@ export class Machine {
         // p = type
         {
           const address = this.popNumber();
-          this.push(this.dstore[address] ?? 0);
+          this.checkAddress(address);
+          this.push(this.peek(address));
         }
         break;
 
@@ -671,6 +738,7 @@ export class Machine {
         // p = level, q = offset
         {
           const address = this.base(p) + q;
+          this.checkAddress(address);
           this.push(this.dstore[address] ?? 0);
         }
         break;
@@ -681,7 +749,8 @@ export class Machine {
         {
           const value = this.pop();
           const address = this.popNumber();
-          this.dstore[address] = value;
+          this.checkAddress(address);
+          this.poke(address, value);
         }
         break;
 
@@ -689,14 +758,14 @@ export class Machine {
         // Indexed address
         // q = element size (stride)
         {
-          const address = this.popNumber();
           const index = this.popNumber();
+          const address = this.popNumber();
           this.push(address + index * q);
         }
         break;
 
       default:
-        throw new PascalError(`Unknown opcode: 0x${opcode.toString(16)}`);
+        throw new PascalError(`Unknown opcode: 0x${Number(opcode).toString(16)}`);
     }
   }
 
@@ -704,8 +773,11 @@ export class Machine {
    * Push a value onto the stack
    */
   private push(value: StackValue): void {
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+      throw new PascalError('Invalid numeric result');
+    }
     this.sp++;
-    if (this.sp >= this.np) {
+    if (this.sp >= Math.min(this.np, this.config.stackSize)) {
       throw new PascalError('Stack overflow');
     }
     this.dstore[this.sp] = value;
@@ -740,6 +812,16 @@ export class Machine {
     return 0;
   }
 
+  private popComparable(type: number): number | string {
+    return (type as TypeCode) === TypeCode.S || (type as TypeCode) === TypeCode.C ? String(this.pop()) : this.popNumber();
+  }
+
+  private checkAddress(address: number): void {
+    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacters.has(address))) {
+      throw new PascalError('Invalid memory address');
+    }
+  }
+
   /**
    * Find the base address at a given static level
    * @param level - Number of static levels to traverse
@@ -747,7 +829,8 @@ export class Machine {
   private base(level: number): number {
     let b = this.mp;
     while (level > 0) {
-      b = (this.dstore[b + 1] as number) ?? 0;
+      const link = this.dstore[b + 1];
+      b = typeof link === 'number' ? link : 0;
       level--;
     }
     return b;
@@ -758,66 +841,199 @@ export class Machine {
    * @param argCount - Number of arguments
    * @param procIndex - Procedure index
    */
-  private callStandardProcedure(argCount: number, procIndex: number): void {
-    // Check if there's a native procedure registered
-    if (this.bytecode.native?.procedures[procIndex]) {
-      const args: StackValue[] = [];
-      for (let i = 0; i < argCount; i++) {
-        args.unshift(this.pop());
+  private callStandardProcedure(argCount: number, procedureIndex: number): void {
+    const procIndex = procedureIndex as BuiltinProcedure | CrtProcedure;
+    if ([BuiltinProcedure.READ, BuiltinProcedure.READLN, BuiltinProcedure.WRITE, BuiltinProcedure.WRITELN].includes(procIndex as BuiltinProcedure) && this.services.files.pendingError) {
+      const callAddress = this.pc - 1;
+      if (this.bytecode.ioChecks[callAddress] ?? true) throw new PascalError(`I/O error ${String(this.services.files.pendingError)}`);
+      this.sp -= argCount;
+      this.pc = this.bytecode.ioErrorTargets[callAddress] ?? this.pc;
+      return;
+    }
+    if (procIndex === BuiltinProcedure.READ || procIndex === BuiltinProcedure.READLN) {
+      const callAddress = this.pc - 1;
+      const checked = this.bytecode.ioChecks[callAddress] ?? true;
+      try {
+        if (!this.readInput(argCount, procIndex === BuiltinProcedure.READLN)) {
+          // Retry this instruction with its arguments intact when input arrives.
+          this.pc -= 1;
+          this.instructionCount -= 1;
+          this.state = MachineState.WAITING;
+        }
+      } catch (error) {
+        this.services.files.recordError(error, checked, true);
+        this.sp -= argCount;
+        this.inputPos++;
+        this.inputColumn = 0;
+        this.pc = this.bytecode.ioErrorTargets[callAddress] ?? this.pc;
       }
-      const result = this.bytecode.native.procedures[procIndex]!(...args);
+      return;
+    }
+    if ((procIndex === CrtProcedure.KEYPRESSED || procIndex === CrtProcedure.READKEY) && !this.services.console.active)
+      this.services.console.touch();
+    if (procIndex === CrtProcedure.READKEY && !this.keyQueue.length && this.inputPos >= this.input.length) {
+      this.pc -= 1;
+      this.instructionCount -= 1;
+      this.state = MachineState.WAITING;
+      return;
+    }
+    const args: StackValue[] = [];
+    for (let i = 0; i < argCount; i += 1) args.unshift(this.pop());
+
+    if (procedureIndex === (InternalProcedure.STRING_CHARACTER_ADDRESS as number)) {
+      this.push(this.stringCharacterAddress(Number(args[0]), Number(args[1]), Number(args[2])));
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.COPY_AGGREGATE_CELL as number) ||
+      procedureIndex === (InternalProcedure.LOAD_AGGREGATE_CELL as number)) {
+      const loading = procedureIndex === (InternalProcedure.LOAD_AGGREGATE_CELL as number);
+      const source = Number(args[loading ? 0 : 1]);
+      this.checkAddress(source);
+      const value = this.peek(source);
+      const bytes = typeof value === 'string' ? this.stringBytes(source) : undefined;
+      const destination = loading ? this.sp + 1 : Number(args[0]);
+      if (loading) this.push(value);
+      else this.poke(destination, value);
+      if (bytes === undefined) this.stringBacking.delete(destination);
+      else this.stringBacking.set(destination, bytes);
+      return;
+    }
+
+    switch (procIndex) {
+      case BuiltinProcedure.WRITE:
+      case BuiltinProcedure.WRITELN:
+        this.writeOutput(args.map((value) => typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') : String(value ?? '')).join(''));
+        if (procIndex === BuiltinProcedure.WRITELN) this.writeOutput('\n');
+        return;
+      case BuiltinProcedure.HALT:
+        this.halt();
+        return;
+      case BuiltinProcedure.EOF:
+        if (args.length) break;
+        this.push(this.inputPos >= this.input.length ? 1 : 0);
+        return;
+      case BuiltinProcedure.EOLN:
+        if (args.length) break;
+        this.push(this.inputPos >= this.input.length || this.inputColumn >= (this.input[this.inputPos]?.length ?? 0) ? 1 : 0);
+        return;
+      case CrtProcedure.CLRSCR:
+        this.output = [];
+        this.outputLine = '';
+        this.outputChars = 0;
+        this.services.console.clear();
+        return;
+      case CrtProcedure.KEYPRESSED:
+        this.push(this.keyQueue.length || this.inputPos < this.input.length ? 1 : 0);
+        return;
+      case CrtProcedure.READKEY: {
+        if (this.keyQueue.length) {
+          this.push(this.keyQueue.charAt(0));
+          this.keyQueue = this.keyQueue.slice(1);
+          return;
+        }
+        const line = this.input[this.inputPos] ?? '';
+        this.push(line[this.inputColumn] ?? '\r');
+        this.inputColumn += 1;
+        if (this.inputColumn >= line.length) {
+          this.inputPos += 1;
+          this.inputColumn = 0;
+        }
+        return;
+      }
+    }
+    const service = this.services.invoke(procedureIndex, args, this.bytecode.ioChecks[this.pc - 1] ?? true);
+    if (service) {
+      if (service.ioError) this.pc = this.bytecode.ioErrorTargets[this.pc - 1] ?? this.pc;
+      if (service.result !== undefined) this.push(service.result);
+      if (service.delay !== undefined && service.delay > 0) {
+        this.wakeTime = Date.now() + service.delay;
+        this.state = MachineState.SLEEPING;
+      }
+      return;
+    }
+    // Check if there's a native procedure registered
+    const procedure = this.bytecode.native?.procedures[procIndex] ?? this.native.procedures[procIndex];
+    if (procedure) {
+      const result = procedure(...args);
+      if (typeof result === 'number' && !Number.isFinite(result)) throw new PascalError('Invalid numeric result');
       if (result !== undefined && result !== null) {
         this.push(result as StackValue);
       }
       return;
     }
+    throw new PascalError(`Unsupported standard procedure: ${String(procIndex)}`);
+  }
 
-    // Built-in standard procedures
-    // These are common Pascal standard library procedures
-    switch (procIndex) {
-      case 0:
-        // WriteLn
-        {
-          const values: string[] = [];
-          for (let i = 0; i < argCount; i++) {
-            values.unshift(String(this.pop()));
-          }
-          this.output.push(values.join(''));
-        }
-        break;
-
-      case 1:
-        // Write
-        {
-          const values: string[] = [];
-          for (let i = 0; i < argCount; i++) {
-            values.unshift(String(this.pop()));
-          }
-          if (this.output.length === 0) {
-            this.output.push('');
-          }
-          this.output[this.output.length - 1] += values.join('');
-        }
-        break;
-
-      case 2:
-        // ReadLn
-        this.inputPos++;
-        break;
-
-      case 3:
-        // Read
-        // Pop the address and store the next input value there
-        if (argCount > 0) {
-          const address = this.popNumber();
-          const value = this.input[this.inputPos] ?? '';
-          this.dstore[address] = value;
-        }
-        break;
-
-      default:
-        throw new PascalError(`Unknown standard procedure: ${procIndex}`);
+  private writeOutput(text: string): void {
+    if (this.outputChars + text.length > this.config.maxOutputChars) throw new PascalError('Maximum output size exceeded');
+    this.outputChars += text.length;
+    this.services.console.write(text);
+    const parts = decodeDosText(text).replace(/\r\n/g, '\n').split('\n');
+    this.outputLine += parts[0] ?? '';
+    for (let i = 1; i < parts.length; i += 1) {
+      this.output.push(this.outputLine);
+      this.outputLine = parts[i] ?? '';
     }
+  }
+
+  /** Read address/type pairs atomically so a suspended read never loses arguments. */
+  private readInput(argCount: number, wholeLine: boolean): boolean {
+    if (argCount % 2 !== 0) throw new PascalError('Invalid input argument list');
+    let pos = this.inputPos;
+    let col = this.inputColumn;
+    const values: { address: number; value: StackValue }[] = [];
+    for (let i = 0; i < argCount; i += 2) {
+      const address = Number(this.dstore[this.sp - argCount + i + 1]);
+      const type = Number(this.dstore[this.sp - argCount + i + 2]) as TypeCode;
+      this.checkAddress(address);
+      if (pos >= this.input.length) return false;
+      let line = this.input[pos] ?? '';
+      let value: StackValue;
+      if (type === TypeCode.S) {
+        value = line.slice(col);
+        col = line.length;
+      } else if (type === TypeCode.C) {
+        value = line[col] ?? '\n';
+        col += 1;
+        if (col > line.length) { pos += 1; col = 0; }
+      } else {
+        for (;;) {
+          while (col < line.length && /\s/.test(line[col] ?? '')) col += 1;
+          if (col < line.length) break;
+          pos += 1;
+          col = 0;
+          if (pos >= this.input.length) return false;
+          line = this.input[pos] ?? '';
+        }
+        const start = col;
+        while (col < line.length && !/\s/.test(line[col] ?? '')) col += 1;
+        const token = line.slice(start, col);
+        if (type === TypeCode.I) {
+          if (!/^[+-]?\d+$/.test(token)) throw new PascalError(`Invalid integer input: ${token}`);
+          value = Number(token);
+          if (!Number.isSafeInteger(value) || value < -2147483648 || value > 2147483647) throw new PascalError('Integer input out of range');
+        } else if (type === TypeCode.R) {
+          if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(token)) throw new PascalError(`Invalid real input: ${token}`);
+          value = Number(token);
+          if (!Number.isFinite(value)) throw new PascalError('Real input out of range');
+          value = roundReal48(value);
+        } else if (type === TypeCode.B) {
+          if (!/^(true|false)$/i.test(token)) throw new PascalError(`Invalid boolean input: ${token}`);
+          value = token.toLowerCase() === 'true' ? 1 : 0;
+        } else throw new PascalError('Unsupported input type');
+      }
+      values.push({ address, value });
+    }
+    if (wholeLine) {
+      if (pos >= this.input.length) return false;
+      pos += 1;
+      col = 0;
+    }
+    for (const { address, value } of values) this.poke(address, value);
+    this.sp -= argCount;
+    this.inputPos = pos;
+    this.inputColumn = col;
+    return true;
   }
 
   /**
@@ -825,15 +1041,36 @@ export class Machine {
    * @param lines - Array of input lines
    */
   setInput(lines: string[]): void {
-    this.input = lines;
+    this.input = lines.map(encodeDosText);
     this.inputPos = 0;
+    this.inputColumn = 0;
+    if (this.state === MachineState.WAITING) this.state = MachineState.PAUSED;
+  }
+
+  /** Supply one interactive line without resetting execution or earlier input. */
+  provideInput(line: string, echo = false): void {
+    const bytes = encodeDosText(line);
+    this.input.push(bytes);
+    if (echo) this.writeOutput(`${bytes}\n`);
+    if (this.state === MachineState.WAITING) this.state = MachineState.PAUSED;
+  }
+
+  /** Queue Unicode key text, or one raw DOS extended-key pair (NUL + scan byte). */
+  provideKey(text: string): void {
+    if (!text.length) return;
+    const bytes = text.length === 2 && text.charCodeAt(0) === 0 && text.charCodeAt(1) <= 255
+      ? text
+      : encodeDosText(text);
+    this.keyQueue += bytes;
+    if (this.state === MachineState.WAITING && this.getInputMode() === 'key')
+      this.state = MachineState.PAUSED;
   }
 
   /**
    * Get the program output
    */
   getOutput(): string[] {
-    return [...this.output];
+    return this.outputLine ? [...this.output, this.outputLine] : [...this.output];
   }
 
   /**
@@ -848,6 +1085,100 @@ export class Machine {
    */
   getPC(): number {
     return this.pc;
+  }
+
+  getSourceLine(): number {
+    return this.bytecode.sourceLines[Math.max(0, this.pc - 1)] ?? -1;
+  }
+
+  getNextSourceLine(): number { return this.bytecode.sourceLines[this.pc] ?? -1; }
+  getSourceFile(): string | undefined { return this.bytecode.sourceFiles[Math.max(0, this.pc - 1)]; }
+  getRegisters(): { pc: number; sp: number; mp: number; np: number; ep: number } {
+    return { pc: this.pc, sp: this.sp, mp: this.mp, np: this.np, ep: this.ep };
+  }
+  getConsole() { return this.services.console; }
+  getGraphics() { return this.services.graphics; }
+  getFileSystem() { return this.config.fileSystem; }
+  getWakeTime(): number { return this.wakeTime; }
+  wake(): boolean {
+    if (this.state !== MachineState.SLEEPING) return true;
+    if (Date.now() < this.wakeTime) return false;
+    this.state = MachineState.PAUSED;
+    return true;
+  }
+  getInputMode(): 'key' | 'line' {
+    const instruction = this.bytecode.istore[this.pc];
+    return instruction !== undefined && inst.getOpcode(instruction) === (Opcode.CSP as number) && inst.getOperand2(instruction) === (CrtProcedure.READKEY as number) ? 'key' : 'line';
+  }
+  /** Stable character references preserve aliasing across VAR calls and input. */
+  stringCharacterAddress(address: number, index: number, capacity: number): number {
+    this.checkAddress(address);
+    if (address >= this.dstore.length || !Number.isInteger(capacity) || capacity < 0 || capacity > 255 ||
+      !Number.isInteger(index) || index < 0 || index > capacity)
+      throw new PascalError('String index out of bounds');
+    const reference = this.dstore.length + address * 256 + index;
+    this.stringCharacters.set(reference, { address, index, capacity });
+    return reference;
+  }
+
+  private stringBytes(address: number): string {
+    const current = this.dstore[address];
+    const text = typeof current === 'string' ? current : '';
+    const previous = this.stringBacking.get(address) ?? '';
+    return text + previous.slice(text.length);
+  }
+
+  poke(address: number, value: StackValue): void {
+    this.checkAddress(address);
+    const character = this.stringCharacters.get(address);
+    if (character) {
+      const text = String(this.dstore[character.address] ?? '');
+      let bytes = this.stringBytes(character.address).padEnd(character.capacity, '\0');
+      if (character.index === 0) {
+        const length = String(value).charCodeAt(0);
+        if (length > character.capacity) throw new PascalError('String length exceeds capacity');
+        this.dstore[character.address] = bytes.slice(0, length);
+      } else {
+        bytes = bytes.slice(0, character.index - 1) + (String(value).charAt(0) || '\0') + bytes.slice(character.index);
+        this.dstore[character.address] = bytes.slice(0, text.length);
+      }
+      this.stringBacking.set(character.address, bytes);
+      return;
+    }
+    if (typeof value === 'string') this.stringBacking.set(address, value + this.stringBytes(address).slice(value.length));
+    else this.stringBacking.delete(address);
+    this.dstore[address] = value;
+  }
+
+  private allocate(words: number, defaults: StackValue[]): number {
+    if (!Number.isInteger(words) || words <= 0) throw new PascalError('Invalid allocation size');
+    const free = this.freeBlocks.findIndex((block) => block.words >= words);
+    let address: number;
+    if (free >= 0) {
+      const block = this.freeBlocks[free]!;
+      address = block.address;
+      block.address += words; block.words -= words;
+      if (block.words === 0) this.freeBlocks.splice(free, 1);
+    } else {
+      address = this.np - words;
+      if (address <= this.sp || address < this.config.stackSize) throw new PascalError('Heap overflow');
+      this.np = address;
+    }
+    this.allocations.set(address, words);
+    for (let i = 0; i < words; i++) this.dstore[address + i] = defaults[i] ?? 0;
+    return address;
+  }
+  private free(address: number): void {
+    const words = this.allocations.get(address);
+    if (words === undefined) throw new PascalError('Invalid or disposed pointer');
+    this.allocations.delete(address);
+    this.freeBlocks.push({ address, words });
+    this.freeBlocks.sort((a, b) => a.address - b.address);
+    for (let i = 0; i + 1 < this.freeBlocks.length;) {
+      const first = this.freeBlocks[i]!, next = this.freeBlocks[i + 1]!;
+      if (first.address + first.words === next.address) { first.words += next.words; this.freeBlocks.splice(i + 1, 1); }
+      else i++;
+    }
   }
 
   /**
@@ -883,6 +1214,12 @@ export class Machine {
    * @param address - The stack address
    */
   peek(address: number): StackValue {
+    const character = this.stringCharacters.get(address);
+    if (character) {
+      const text = String(this.dstore[character.address] ?? '');
+      return character.index === 0 ? String.fromCharCode(text.length)
+        : this.stringBytes(character.address).charAt(character.index - 1) || '\0';
+    }
     return this.dstore[address] ?? 0;
   }
 
@@ -904,6 +1241,7 @@ export class Machine {
    */
   halt(): void {
     this.state = MachineState.STOPPED;
+    this.config.onSound(0);
   }
 }
 

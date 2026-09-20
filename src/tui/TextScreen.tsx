@@ -2,13 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import * as stylex from '@stylexjs/stylex';
 import { VGA_PALETTE } from './palette';
 import type { Screen } from './Screen';
+import { CELL_W, CELL_H, rasterize } from './rasterize';
 
 /** Nominal VGA text mode cell, 720x400 for the full 80x25 screen. */
-export const CELL_W = 9;
-export const CELL_H = 16;
-
-export const MONO_STACK =
-  '"Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "IBM Plex Mono", "DejaVu Sans Mono", Consolas, Menlo, "Courier New", monospace';
+export { CELL_W, CELL_H } from './rasterize';
 
 export interface CellEvent {
   col: number;
@@ -51,15 +48,26 @@ const styles = stylex.create({
   },
   screen: {
     position: 'relative',
-    fontVariantLigatures: 'none',
-    fontKerning: 'none',
     whiteSpace: 'pre',
-    textRendering: 'geometricPrecision',
+    overflow: 'hidden',
+  },
+  bitmap: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    imageRendering: 'pixelated',
+    pointerEvents: 'none',
   },
   row: {
     position: 'absolute',
     left: 0,
     right: 0,
+    // Keep real screen text in the accessibility tree and available to tools.
+    // The visible image always comes from the VGA character ROM.
+    opacity: 0,
+    pointerEvents: 'none',
+    overflow: 'hidden',
   },
   run: {
     position: 'absolute',
@@ -69,8 +77,6 @@ const styles = stylex.create({
   },
   cursor: {
     position: 'absolute',
-    backgroundColor: '#FFFFFF',
-    mixBlendMode: 'difference',
     pointerEvents: 'none',
     animationName: 'tpBlink',
     animationDuration: '1s',
@@ -78,17 +84,6 @@ const styles = stylex.create({
     animationTimingFunction: 'steps(1, end)',
   },
 });
-
-/** Advance width of the resolved monospace font, in em. */
-function measureAdvanceRatio(): number {
-  if (typeof document === 'undefined') return 0.6;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return 0.6;
-  ctx.font = `100px ${MONO_STACK}`;
-  const w = ctx.measureText('M'.repeat(50)).width / 50;
-  return w > 0 ? w / 100 : 0.6;
-}
 
 export function TextScreen({
   screen,
@@ -100,12 +95,17 @@ export function TextScreen({
   onWheel,
 }: TextScreenProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [scale, setScale] = useState(1);
-  const ratioRef = useRef<number>(0.6);
 
   useLayoutEffect(() => {
-    ratioRef.current = measureAdvanceRatio();
-  }, []);
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d', { alpha: false });
+    if (!canvas || !context) return;
+    const pixels = context.createImageData(canvas.width, canvas.height);
+    rasterize(screen, pixels);
+    context.putImageData(pixels, 0, 0);
+  }, [screen]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -124,7 +124,6 @@ export function TextScreen({
 
   const cellW = CELL_W * scale;
   const cellH = CELL_H * scale;
-  const fontSize = cellW / ratioRef.current;
 
   const toCell = useCallback(
     (clientX: number, clientY: number) => {
@@ -182,6 +181,7 @@ export function TextScreen({
       onMouseMove={wrap(onCellMove)}
       onMouseUp={wrap(onCellUp)}
       onDoubleClick={wrap(onCellDoubleClick)}
+      onContextMenu={(event) => { event.preventDefault(); }}
       onWheel={(ev) => {
         if (!onWheel) return;
         const { col, row } = toCell(ev.clientX, ev.clientY);
@@ -196,17 +196,24 @@ export function TextScreen({
         });
       }}
       data-testid="tp-screen"
+      tabIndex={0}
+      aria-label="Turbo Pascal IDE"
     >
       <div
         {...stylex.props(styles.screen)}
         style={{
           width: screen.cols * cellW,
           height: screen.rows * cellH,
-          fontFamily: MONO_STACK,
-          fontSize: `${String(fontSize)}px`,
-          lineHeight: `${String(cellH)}px`,
         }}
       >
+        <canvas
+          {...stylex.props(styles.bitmap)}
+          ref={canvasRef}
+          width={screen.cols * CELL_W}
+          height={screen.rows * CELL_H}
+          aria-hidden="true"
+          data-testid="tp-bitmap"
+        />
         {runs.map((row, y) => {
           const top = Math.round(y * cellH);
           return (
@@ -239,11 +246,14 @@ export function TextScreen({
         {cursor?.visible && (
           <div
             {...stylex.props(styles.cursor)}
+            data-testid="tp-cursor"
+            aria-hidden="true"
             style={{
               left: cursor.col * cellW,
-              top: cursor.row * cellH + (cursor.fat ? cellH * 0.5 : cellH * 0.8),
+              top: cursor.row * cellH + (cursor.fat ? 8 : 14) * scale,
               width: cellW,
-              height: cursor.fat ? cellH * 0.5 : cellH * 0.2,
+              height: (cursor.fat ? 8 : 2) * scale,
+              backgroundColor: VGA_PALETTE[screen.fg[cursor.row * screen.cols + cursor.col] ?? 15],
             }}
           />
         )}

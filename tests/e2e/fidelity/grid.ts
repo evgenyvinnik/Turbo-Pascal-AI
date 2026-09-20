@@ -8,7 +8,7 @@ const CELL_H = 16;
 /** VGA palette as the reference PNGs store it. */
 export const PALETTE = [
   '000000', '0000a8', '00a800', '00a8a8', 'a80000', 'a800a8', 'a85700', 'a8a8a8',
-  '545454', '5757ff', '57ff57', '57ffff', 'ff5757', 'ff57ff', 'ffff57', 'ffffff',
+  '575757', '5757ff', '57ff57', '57ffff', 'ff5757', 'ff57ff', 'ffff57', 'ffffff',
 ];
 
 /** One letter per palette entry, for compact reports. */
@@ -84,6 +84,21 @@ export async function ourGrid(page: Page): Promise<Grid> {
             grid.ch[idx] = c;
             grid.blank[idx] = c === ' ' || c === ' ' || fg === bg;
           });
+        }
+      }
+      // The caret is painted over the bitmap, outside the semantic text rows.
+      // Count its ink too: gallery captures can show it on an otherwise blank cell.
+      const caret = screen.querySelector<HTMLElement>('[data-testid="tp-cursor"]');
+      if (caret && getComputedStyle(caret).opacity !== '0') {
+        const bounds = screen.getBoundingClientRect();
+        const cursor = caret.getBoundingClientRect();
+        const x = Math.floor((cursor.x - bounds.x) / cw);
+        const y = Math.floor((cursor.y - bounds.y) / (bounds.height / rows));
+        if (cursor.width > 0 && cursor.height > 0 && x >= 0 && x < cols && y >= 0 && y < rows) {
+          const idx = y * cols + x;
+          grid.fg[idx] = nearest(getComputedStyle(caret).backgroundColor);
+          grid.blank[idx] = grid.fg[idx] === grid.bg[idx];
+          if (grid.ch[idx] === ' ') grid.ch[idx] = '▁';
         }
       }
       return grid;

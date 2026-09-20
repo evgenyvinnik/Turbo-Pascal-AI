@@ -1,5 +1,5 @@
 import { C, type Attr } from './palette';
-import { DOUBLE, SINGLE, SHADE_MEDIUM, TRI_DOWN, TRI_LEFT, TRI_RIGHT, TRI_UP, BLOCK_SMALL, type BoxChars } from './chars';
+import { DOUBLE, SINGLE, SHADE_DARK, SHADE_MEDIUM, TRI_DOWN, TRI_LEFT, TRI_RIGHT, TRI_UP, BLOCK_SMALL, type BoxChars } from './chars';
 
 export interface Run {
   x: number;
@@ -190,10 +190,12 @@ export class Screen {
     };
     at(0, vertical ? TRI_UP : TRI_LEFT);
     at(len - 1, vertical ? TRI_DOWN : TRI_RIGHT);
-    for (let i = 1; i < len - 1; i += 1) at(i, SHADE_MEDIUM);
+    const enabled = max > 0;
+    // Blue on cyan makes the dark shade a sparse cyan pattern, as in the IDE.
+    for (let i = 1; i < len - 1; i += 1) at(i, enabled ? SHADE_MEDIUM : SHADE_DARK);
     const track = len - 2;
-    if (track > 0) {
-      const t = max > 0 ? Math.round((pos / max) * (track - 1)) : 0;
+    if (track > 0 && enabled) {
+      const t = Math.round((pos / max) * (track - 1));
       at(1 + Math.min(track - 1, Math.max(0, t)), BLOCK_SMALL);
     }
   }

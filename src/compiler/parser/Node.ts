@@ -11,6 +11,7 @@ export enum NodeType {
   CONST_DECLARATION = 'constDeclaration',
   VAR_DECLARATION = 'varDeclaration',
   TYPE_DECLARATION = 'typeDeclaration',
+  LABEL_DECLARATION = 'labelDeclaration',
   PROCEDURE = 'procedure',
   FUNCTION = 'function',
 
@@ -23,6 +24,9 @@ export enum NodeType {
   STRING_TYPE = 'stringType',
   ARRAY_TYPE = 'arrayType',
   RECORD_TYPE = 'recordType',
+  OBJECT_TYPE = 'objectType',
+  PROCEDURAL_TYPE = 'proceduralType',
+  UNIT_INITIALIZATION = 'unitInitialization',
   SET_TYPE = 'setType',
   POINTER_TYPE = 'pointerType',
   SUBRANGE_TYPE = 'subrangeType',
@@ -40,6 +44,7 @@ export enum NodeType {
   FOR_STATEMENT = 'forStatement',
   WITH_STATEMENT = 'withStatement',
   GOTO_STATEMENT = 'gotoStatement',
+  LABELED_STATEMENT = 'labeledStatement',
   EXIT = 'exit',
 
   // Expressions
@@ -59,6 +64,7 @@ export enum NodeType {
   // Parameters
   PARAMETER = 'parameter',
   VAR_PARAMETER = 'varParameter',
+  FORMATTED_ARGUMENT = 'formattedArgument',
 }
 
 /**
@@ -89,8 +95,11 @@ export interface ProgramNode extends Node {
 export interface UnitNode extends Node {
   type: NodeType.UNIT;
   name: string;
-  interfaceSection?: Node[];
-  implementationSection?: Node[];
+  interfaceSection: Node[];
+  implementationSection: Node[];
+  interfaceUses: string[];
+  implementationUses: string[];
+  initialization: BlockNode;
 }
 
 /**
@@ -100,6 +109,8 @@ export interface BlockNode extends Node {
   type: NodeType.BLOCK;
   declarations: Node[];
   statements: Node[];
+  endLineNumber?: number;
+  beginLineNumber?: number;
 }
 
 /**
@@ -147,7 +158,7 @@ export interface FunctionNode extends Node {
   type: NodeType.FUNCTION;
   name: string;
   parameters: Node[];
-  returnType: Node;
+  returnType?: Node;
   block?: BlockNode;
   isForward?: boolean;
 }
@@ -234,6 +245,17 @@ export interface CallNode extends Node {
   type: NodeType.CALL;
   name: string;
   arguments: Node[];
+  receiver?: Node | undefined;
+  callee?: Node;
+  inherited?: boolean;
+}
+
+/** A Write/WriteLn value with an optional real precision and a field width. */
+export interface FormattedArgumentNode extends Node {
+  type: NodeType.FORMATTED_ARGUMENT;
+  value: Node;
+  width: Node;
+  precision?: Node;
 }
 
 /**

@@ -20,6 +20,7 @@ export function paintEditWindow(
   win: TPWindow,
   buf: Buffer,
   active: boolean,
+  breakpoints: number[] = [],
 ): EditorCursor | null {
   const client = clientRect(win.rect);
   paintFrame(scr, {
@@ -33,7 +34,7 @@ export function paintEditWindow(
     grip: TP.editGrip,
     indicator: `${String(buf.cursor.line + 1)}:${String(buf.cursor.col + 1)}`,
     modified: buf.modified,
-    vScroll: { pos: buf.scroll.line, max: Math.max(1, buf.lines.length - 1) },
+    vScroll: { pos: buf.scroll.line, max: Math.max(0, buf.lines.length - 1) },
     hScroll: { pos: buf.scroll.col, max: 80 },
   });
 
@@ -48,9 +49,11 @@ export function paintEditWindow(
     if (text === undefined) break;
     const lineColours = colours[lineNo] ?? [];
     const inHighlight = buf.highlight !== null && buf.highlight - 1 === lineNo;
+    const breakpoint = breakpoints.includes(lineNo + 1);
     if (inHighlight) {
       scr.fill({ x: client.x, y: client.y + row, w: client.w, h: 1 }, ' ', TP.editHighlight);
     }
+    else if (breakpoint) scr.fill({ x: client.x, y: client.y + row, w: client.w, h: 1 }, ' ', TP.editError);
     for (let i = 0; i < client.w; i += 1) {
       const col = buf.scroll.col + i;
       const ch = text[col];
@@ -62,7 +65,7 @@ export function paintEditWindow(
       const a =
         selected || inHighlight
           ? TP.editHighlight
-          : { fg: lineColours[col] ?? TP.editText.fg, bg: TP.editText.bg };
+          : breakpoint ? TP.editError : { fg: lineColours[col] ?? TP.editText.fg, bg: TP.editText.bg };
       scr.put(client.x + i, client.y + row, ch, a);
     }
   }

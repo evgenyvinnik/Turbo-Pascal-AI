@@ -10,8 +10,4 @@ export {
   Compiler,
   // NodeType intentionally not exported - use NodeType from parser module
   type INode,
-  type ISymbol,
-  type ISymbolLookup,
-  type ISymbolTable,
-  type IRawData,
 } from './Compiler';

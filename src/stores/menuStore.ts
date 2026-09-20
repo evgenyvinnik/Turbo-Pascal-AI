@@ -1,6 +1,7 @@
+import { currentMenus } from '@components/MenuBar/currentMenus';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { MENUS, isSeparator, type MenuEntry } from '@components/MenuBar/menuDefs';
+import { isSeparator, type MenuEntry } from '@components/MenuBar/menuDefs';
 
 interface MenuState {
   open: boolean;
@@ -46,8 +47,8 @@ export const useMenuStore = create<MenuState & MenuActions>()(
     openMenu: (index) =>
       { set((s) => {
         s.open = true;
-        s.menuIndex = Math.max(0, Math.min(MENUS.length - 1, index));
-        const items = MENUS[s.menuIndex]?.items ?? [];
+        s.menuIndex = Math.max(0, Math.min(currentMenus().length - 1, index));
+        const items = currentMenus()[s.menuIndex]?.items ?? [];
         s.itemIndex = firstSelectable(items, 0, 1);
         s.subOpen = false;
         s.subIndex = 0;
@@ -62,23 +63,23 @@ export const useMenuStore = create<MenuState & MenuActions>()(
     setMenu: (index) =>
       { set((s) => {
         if (index === s.menuIndex) return;
-        s.menuIndex = Math.max(0, Math.min(MENUS.length - 1, index));
-        const items = MENUS[s.menuIndex]?.items ?? [];
+        s.menuIndex = Math.max(0, Math.min(currentMenus().length - 1, index));
+        const items = currentMenus()[s.menuIndex]?.items ?? [];
         s.itemIndex = firstSelectable(items, 0, 1);
         s.subOpen = false;
       }); },
 
     moveMenu: (dir) =>
       { set((s) => {
-        s.menuIndex = (s.menuIndex + dir + MENUS.length) % MENUS.length;
-        const items = MENUS[s.menuIndex]?.items ?? [];
+        s.menuIndex = (s.menuIndex + dir + currentMenus().length) % currentMenus().length;
+        const items = currentMenus()[s.menuIndex]?.items ?? [];
         s.itemIndex = firstSelectable(items, 0, 1);
         s.subOpen = false;
       }); },
 
     moveItem: (dir) =>
       { set((s) => {
-        const items = MENUS[s.menuIndex]?.items ?? [];
+        const items = currentMenus()[s.menuIndex]?.items ?? [];
         if (!items.length) return;
         const next = (s.itemIndex + dir + items.length) % items.length;
         s.itemIndex = firstSelectable(items, next, dir);
@@ -86,7 +87,7 @@ export const useMenuStore = create<MenuState & MenuActions>()(
 
     setItem: (index) =>
       { set((s) => {
-        const items = MENUS[s.menuIndex]?.items ?? [];
+        const items = currentMenus()[s.menuIndex]?.items ?? [];
         if (index < 0 || index >= items.length) return;
         const node = items[index];
         if (node && isSeparator(node)) return;
@@ -107,7 +108,7 @@ export const useMenuStore = create<MenuState & MenuActions>()(
 
     moveSub: (dir) =>
       { set((s) => {
-        const items = MENUS[s.menuIndex]?.items ?? [];
+        const items = currentMenus()[s.menuIndex]?.items ?? [];
         const node = items[s.itemIndex];
         const sub = node && !isSeparator(node) ? (node.submenu ?? []) : [];
         if (!sub.length) return;
@@ -121,7 +122,7 @@ export const useMenuStore = create<MenuState & MenuActions>()(
 
     current: () => {
       const s = get();
-      const items = MENUS[s.menuIndex]?.items ?? [];
+      const items = currentMenus()[s.menuIndex]?.items ?? [];
       const node = items[s.itemIndex];
       if (!node || isSeparator(node)) return null;
       if (s.subOpen && node.submenu) return node.submenu[s.subIndex] ?? null;
