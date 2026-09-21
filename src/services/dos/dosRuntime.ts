@@ -45,6 +45,17 @@ echo DOS workspace. Type EXIT to return to the IDE.
 echo DEBUG provides registers, disassembly, memory and assembly.
 `;
 
+/** A line the startup batch prints each time the user leaves the shell. */
+export const DOS_EXIT_SIGNAL = '__TURBO_PASCAL_DOS_EXIT__';
+
+/** The end of AUTOEXEC: an optional tool command, then the interactive shell.
+ * EXIT in DOSBox's first shell tears DOS down, after which the drive can no
+ * longer be read. The user works in a child shell instead, so EXIT returns
+ * here with DOS still running, and the signal line tells the IDE to leave. */
+export function dosShell(command = ''): string {
+  return [...(command ? [`call ${command}`] : []), ':shell', 'command', `echo ${DOS_EXIT_SIGNAL}`, 'goto shell', ''].join('\n');
+}
+
 export async function startDosRuntime(files: DosFiles, command = '', nativePascal = false, toolFiles: DosFiles = {}): Promise<CommandInterface> {
   if (/[\r\n\0]/.test(command)) throw new Error('DOS tool command must be a single line.');
   const emulators = await loadDosEmulator();
@@ -62,7 +73,7 @@ export async function startDosRuntime(files: DosFiles, command = '', nativePasca
   init.push(
     ...Object.entries(toolFiles).map(([path, contents]) => ({ path: `__TPTOOLS/${dosPath(path)}`, contents: stringToBytes(contents) })),
     ...Object.entries(files).map(([path, contents]) => ({ path: `USER/${dosPath(path)}`, contents: stringToBytes(contents) })),
-    { dosboxConf: (nativePascal ? DOS_STARTUP.replace('cputype=386', 'cputype=pentium').replace('cycles=max', 'cycles=fixed 25000') : DOS_STARTUP) + (command ? `${command}\n` : ''), jsdosConf: { version: emulators.version } },
+    { dosboxConf: (nativePascal ? DOS_STARTUP.replace('cputype=386', 'cputype=pentium').replace('cycles=max', 'cycles=fixed 25000') : DOS_STARTUP) + dosShell(command), jsdosConf: { version: emulators.version } },
   );
   return nativePascal ? emulators.dosboxXWorker(init) : emulators.dosboxWorker(init);
 }

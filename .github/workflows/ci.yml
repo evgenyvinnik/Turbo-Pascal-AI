@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: 1.3.3
+  NODE_VERSION: 22
+
+jobs:
+  checks:
+    name: Typecheck, unit tests, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bunx vitest run
+      - run: bun run build
+
+  # Compiles the reference corpus with Free Pascal as an independent oracle
+  # for the browser VM; see "test:reference" in the README.
+  reference:
+    name: Pascal reference (Free Pascal)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Install Free Pascal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fpc
+          echo "Free Pascal $(fpc -iV)"
+      - run: bun run test:reference
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pascal-reference
+          path: artifacts/verification/pascal-reference.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  e2e:
+    name: E2E (${{ matrix.project }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # visual and fidelity compare pixels, so they run in Chromium only.
+        project: [chromium, firefox, webkit, visual, fidelity]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Install browser
+        run: bunx playwright install --with-deps ${{ contains(fromJSON('["visual","fidelity"]'), matrix.project) && 'chromium' || matrix.project }}
+      # The gallery images are third-party, so they stay out of git. Without
+      # them the fidelity spec skips every test, so a failed fetch must fail
+      # the job rather than let it pass having compared nothing.
+      - name: Restore gallery reference images
+        if: matrix.project == 'fidelity'
+        uses: actions/cache@v4
+        with:
+          path: tests/e2e/fidelity/reference
+          key: fidelity-reference-${{ hashFiles('tests/e2e/fidelity/gallery.json') }}
+      - name: Fetch missing gallery reference images
+        if: matrix.project == 'fidelity'
+        run: bun run fidelity:fetch
+      - run: bunx playwright test --project=${{ matrix.project }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-${{ matrix.project }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

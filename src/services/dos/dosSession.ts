@@ -5,7 +5,7 @@ import { bufferText, useDesktopStore } from '../../stores/desktopStore';
 import { encodeDosText, decodeDosText } from '../../compiler/encoding';
 import { applyProgramFileChanges, programDisk } from '../../components/IDE/programFiles';
 import { bytesToString, dosPath, importDosArchive, reconcileDosFiles, stringToBytes, type DosFiles } from './dosFiles';
-import { readDosFiles, startDosRuntime, typeDosCommand } from './dosRuntime';
+import { DOS_EXIT_SIGNAL, readDosFiles, startDosRuntime, typeDosCommand } from './dosRuntime';
 
 interface DosState {
   visible: boolean;
@@ -29,19 +29,11 @@ let editorAtLaunch = new Map<string, string>();
 let closing = false;
 let exited = false;
 let stdoutTail = '';
+let leaving: Promise<void> | null = null;
+const SIGNAL_LINE = new RegExp(`${DOS_EXIT_SIGNAL}\\r?\\n?`, 'g');
 let pendingFiles: DosFiles | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let generation = 0;
-
-/** EXIT typed at a drive prompt but not yet submitted, as DOSBox echoes it. */
-const EXIT_PENDING = /[A-Za-z]:\\[^\r\n>]*>\s*exit[ \t]*$/i;
-/** The same line already submitted, which leaves DOS unreachable. */
-const EXIT_SUBMITTED = /[A-Za-z]:\\[^\r\n>]*>\s*exit[ \t]*\r?\n/i;
-
-/** Whether Enter would submit EXIT. DOSBox keeps its first shell alive but
- * tears the DOS layer down, so an executed EXIT can no longer read the drive.
- * The key handler closes the session itself instead of forwarding that Enter. */
-export const dosExitIsPending = (): boolean => EXIT_PENDING.test(stdoutTail);
 
 export const getDosMachine = (): CommandInterface | null => machine;
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -87,19 +79,15 @@ export async function openDosSession(options: { command?: string; files?: DosFil
       useDosStore.setState({ width, height, frame: pixels, frameWidth: width, frameHeight: height });
     });
     ci.events().onStdout((text) => {
-      useDosStore.setState((state) => ({ transcript: (state.transcript + text + '\n').slice(-32768) }));
-      // DOSBox keeps its first shell alive, so EXIT at the prompt raises no
-      // event and leaves the workspace stranded. The echoed prompt line is the
-      // only signal that the user asked to leave. Keystrokes arrive split
-      // across chunks, so match a raw tail rather than one chunk: the
-      // transcript itself separates chunks and would break the line apart.
+      useDosStore.setState((state) => ({ transcript: (state.transcript + text.replaceAll(SIGNAL_LINE, '') + '\n').slice(-32768) }));
+      // The startup batch prints the signal when the user types EXIT (see
+      // dosShell). DOS is still running then, so leaving can save the drive.
+      // Match a tail rather than one chunk, in case output arrives split.
       stdoutTail = (stdoutTail + text).slice(-256);
-      // Should an EXIT reach the shell anyway, the drive can no longer be read,
-      // so leave the workspace rather than hanging on a save that cannot finish.
-      if (EXIT_SUBMITTED.test(stdoutTail)) { stdoutTail = ''; void abandonDosSession(); }
+      if (stdoutTail.includes(DOS_EXIT_SIGNAL)) { stdoutTail = ''; void closeDosSession(); }
     });
     // Should the emulator end on its own, reconcile files and return to the
-    // IDE. EXIT at the prompt raises neither event (see dosExitIsPending); these
+    // IDE. EXIT raises neither event, since it only leaves a child shell; these
     // cover any other ending. onUnload runs while the drive is still readable,
     // and whichever arrives first wins.
     const endedByDos = async (): Promise<void> => {
@@ -168,27 +156,21 @@ export function syncDosFiles(): Promise<number> {
   });
 }
 
-export async function closeDosSession(): Promise<void> {
-  try {
-    await syncDosFiles();
-    closing = true;
-    generation++;
-    await machine?.exit();
-    machine = null;
-    useDosStore.setState({ visible: false, status: 'closed', error: null });
-  } catch (error) { fail(error); }
-}
-
-/** Leave a session whose DOS layer has gone, without reading the drive. The
- * workspace closes first: the emulator may never answer another request. */
-export async function abandonDosSession(): Promise<void> {
-  if (closing) return;
-  closing = true;
-  generation++;
-  const dying = machine;
-  machine = null;
-  useDosStore.setState({ visible: false, status: 'closed', error: null });
-  try { await dying?.exit(); } catch { /* DOS is already gone. */ }
+/** EXIT and Return to IDE can both ask to leave; a second request joins the
+ * first instead of reading the drive again. A failed attempt can be retried. */
+export function closeDosSession(): Promise<void> {
+  leaving ??= (async () => {
+    try {
+      await syncDosFiles();
+      closing = true;
+      generation++;
+      await machine?.exit();
+      machine = null;
+      useDosStore.setState({ visible: false, status: 'closed', error: null });
+    } catch (error) { fail(error); }
+    finally { leaving = null; }
+  })();
+  return leaving;
 }
 
 export function sendDosCommand(command: string): Promise<void> {

@@ -38,8 +38,13 @@ test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 regi
   await page.keyboard.type('type x86test.txt', { delay: 60 });
   await page.keyboard.press('Enter');
   await expect(page.getByLabel('DOS output')).toContainText('DX=1236');
+  // EXIT must save like Return to IDE does, not just close the workspace.
+  await page.keyboard.type('echo saved by exit> exit.txt', { delay: 60 }); await page.keyboard.press('Enter');
+  await expect(page.getByLabel('DOS output')).toContainText('exit.txt');
   await page.keyboard.type('exit', { delay: 60 }); await page.keyboard.press('Enter');
   await expect(workspace).toBeHidden({ timeout: 20_000 });
+  const afterExit = await page.evaluate(() => JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<string, string>);
+  expect(afterExit['EXIT.TXT']).toBe('saved by exit\r\n');
 });
 
 test('native DOS Pascal compiles and executes inline x86 assembly and refuses to run stale binaries after an error', async ({ page }) => {

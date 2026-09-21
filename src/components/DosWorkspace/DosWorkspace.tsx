@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { closeDosSession, discardDosSession, dosExitIsPending, exportDosFiles, getDosMachine, importFilesToDos, openDosDebugger, syncDosFiles, useDosStore } from '../../services/dos/dosSession';
+import { closeDosSession, discardDosSession, exportDosFiles, getDosMachine, importFilesToDos, openDosDebugger, syncDosFiles, useDosStore } from '../../services/dos/dosSession';
 import { dosKeyCode } from '../../services/dos/dosRuntime';
 import { DOS_EXAMPLES } from '../../services/dos/fixtures';
 import { stringToBytes } from '../../services/dos/dosFiles';
@@ -45,12 +45,6 @@ export function DosWorkspace() {
       const code = dosKeyCode(event.code);
       if (code === null || event.repeat) return;
       const pressed = event.type === 'keydown';
-      // Submitting EXIT tears down the DOS layer, after which the drive can no
-      // longer be read. Close here instead, while the files are still readable.
-      if (code === 257 && dosExitIsPending()) {
-        if (pressed) void closeDosSession();
-        return;
-      }
       if (code < 340) {
         const shiftedCharacter = event.key.length === 1 && ('~!@#$%^&*()_+{}|:"<>?'.includes(event.key) || /[A-Z]/.test(event.key));
         for (const [modifier, active] of [[340, event.shiftKey || shiftedCharacter], [341, event.ctrlKey], [342, event.altKey]] as const) {
