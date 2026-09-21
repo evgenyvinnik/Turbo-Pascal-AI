@@ -15,17 +15,33 @@ interface DosState {
   width: number;
   height: number;
   frame: Uint8ClampedArray | null;
+  /** The frame's own size. A mode change resizes the screen before the next
+   * frame arrives, so painting must not use the screen size of a later mode. */
+  frameWidth: number;
+  frameHeight: number;
   nativePascal: boolean;
 }
-export const useDosStore = create<DosState>(() => ({ visible: false, status: 'closed', error: null, transcript: '', width: 640, height: 400, frame: null, nativePascal: false }));
+export const useDosStore = create<DosState>(() => ({ visible: false, status: 'closed', error: null, transcript: '', width: 640, height: 400, frame: null, frameWidth: 0, frameHeight: 0, nativePascal: false }));
 let machine: CommandInterface | null = null;
 let initial: DosFiles = {};
 let diskAtLaunch: DosFiles = {};
 let editorAtLaunch = new Map<string, string>();
 let closing = false;
+let exited = false;
+let stdoutTail = '';
 let pendingFiles: DosFiles | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let generation = 0;
+
+/** EXIT typed at a drive prompt but not yet submitted, as DOSBox echoes it. */
+const EXIT_PENDING = /[A-Za-z]:\\[^\r\n>]*>\s*exit[ \t]*$/i;
+/** The same line already submitted, which leaves DOS unreachable. */
+const EXIT_SUBMITTED = /[A-Za-z]:\\[^\r\n>]*>\s*exit[ \t]*\r?\n/i;
+
+/** Whether Enter would submit EXIT. DOSBox keeps its first shell alive but
+ * tears the DOS layer down, so an executed EXIT can no longer read the drive.
+ * The key handler closes the session itself instead of forwarding that Enter. */
+export const dosExitIsPending = (): boolean => EXIT_PENDING.test(stdoutTail);
 
 export const getDosMachine = (): CommandInterface | null => machine;
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -41,8 +57,10 @@ export async function openDosSession(options: { command?: string; files?: DosFil
     if (options.command && machine) await sendDosCommand(options.command);
     return;
   }
-  useDosStore.setState({ visible: true, status: 'loading', error: null, transcript: '', frame: null, nativePascal: options.nativePascal ?? false });
+  useDosStore.setState({ visible: true, status: 'loading', error: null, transcript: '', frame: null, frameWidth: 0, frameHeight: 0, nativePascal: options.nativePascal ?? false });
   closing = false;
+  exited = false;
+  stdoutTail = '';
   const launch = ++generation;
   pendingFiles = null;
   diskAtLaunch = programDisk.snapshot();
@@ -60,26 +78,47 @@ export async function openDosSession(options: { command?: string; files?: DosFil
     ci.events().onFrame((rgb, rgba) => {
       const source = rgba ?? rgb;
       if (!source) return;
-      const pixels = new Uint8ClampedArray(ci.width() * ci.height() * 4);
-      if (rgba) pixels.set(rgba);
-      else for (let i = 0, j = 0; i < source.length; i += 3, j += 4) { pixels[j] = source[i]!; pixels[j + 1] = source[i + 1]!; pixels[j + 2] = source[i + 2]!; pixels[j + 3] = 255; }
-      useDosStore.setState({ width: ci.width(), height: ci.height(), frame: pixels });
+      const width = ci.width(), height = ci.height();
+      const pixels = new Uint8ClampedArray(width * height * 4);
+      // A frame produced just before a mode change can be longer or shorter
+      // than the current mode needs. Copy what fits rather than throwing.
+      if (rgba) pixels.set(rgba.subarray(0, pixels.length));
+      else for (let i = 0, j = 0; i < source.length && j < pixels.length; i += 3, j += 4) { pixels[j] = source[i]!; pixels[j + 1] = source[i + 1]!; pixels[j + 2] = source[i + 2]!; pixels[j + 3] = 255; }
+      useDosStore.setState({ width, height, frame: pixels, frameWidth: width, frameHeight: height });
     });
-    ci.events().onStdout((text) => { useDosStore.setState((state) => ({ transcript: (state.transcript + text + '\n').slice(-32768) })); });
-    ci.events().onUnload(async () => {
-      if (closing) return;
+    ci.events().onStdout((text) => {
+      useDosStore.setState((state) => ({ transcript: (state.transcript + text + '\n').slice(-32768) }));
+      // DOSBox keeps its first shell alive, so EXIT at the prompt raises no
+      // event and leaves the workspace stranded. The echoed prompt line is the
+      // only signal that the user asked to leave. Keystrokes arrive split
+      // across chunks, so match a raw tail rather than one chunk: the
+      // transcript itself separates chunks and would break the line apart.
+      stdoutTail = (stdoutTail + text).slice(-256);
+      // Should an EXIT reach the shell anyway, the drive can no longer be read,
+      // so leave the workspace rather than hanging on a save that cannot finish.
+      if (EXIT_SUBMITTED.test(stdoutTail)) { stdoutTail = ''; void abandonDosSession(); }
+    });
+    // Should the emulator end on its own, reconcile files and return to the
+    // IDE. EXIT at the prompt raises neither event (see dosExitIsPending); these
+    // cover any other ending. onUnload runs while the drive is still readable,
+    // and whichever arrives first wins.
+    const endedByDos = async (): Promise<void> => {
+      if (closing || exited) return;
+      exited = true;
       try {
         await syncDosFiles();
         machine = null;
         useDosStore.setState({ visible: false, status: 'closed' });
       } catch (error) { machine = null; fail(error); }
-    });
+    };
+    ci.events().onUnload(endedByDos);
+    ci.events().onExit(() => { void endedByDos(); });
     useDosStore.setState({ status: 'running', width: ci.width(), height: ci.height() });
     // The command interface becomes ready before the first video frame. A
     // missing initial screenshot is normal; onFrame supplies it shortly.
     try {
       const screenshot = await ci.screenshot();
-      useDosStore.setState({ frame: new Uint8ClampedArray(screenshot.data), width: screenshot.width, height: screenshot.height });
+      useDosStore.setState({ frame: new Uint8ClampedArray(screenshot.data), width: screenshot.width, height: screenshot.height, frameWidth: screenshot.width, frameHeight: screenshot.height });
     } catch { /* Wait for the first frame. */ }
   } catch (error) { fail(error); }
 }
@@ -138,6 +177,18 @@ export async function closeDosSession(): Promise<void> {
     machine = null;
     useDosStore.setState({ visible: false, status: 'closed', error: null });
   } catch (error) { fail(error); }
+}
+
+/** Leave a session whose DOS layer has gone, without reading the drive. The
+ * workspace closes first: the emulator may never answer another request. */
+export async function abandonDosSession(): Promise<void> {
+  if (closing) return;
+  closing = true;
+  generation++;
+  const dying = machine;
+  machine = null;
+  useDosStore.setState({ visible: false, status: 'closed', error: null });
+  try { await dying?.exit(); } catch { /* DOS is already gone. */ }
 }
 
 export function sendDosCommand(command: string): Promise<void> {

@@ -44,7 +44,7 @@ end.`);
   await ide.press('Enter');
   const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
   await expect(canvas).toBeVisible();
-  await expect.poll(() => canvas.evaluate((element) => Array.from(element.getContext('2d')!.getImageData(10, 10, 1, 1).data))).toEqual([170, 0, 0, 255]);
+  await expect.poll(() => canvas.evaluate((element: HTMLCanvasElement) => Array.from(element.getContext('2d')!.getImageData(10, 10, 1, 1).data))).toEqual([170, 0, 0, 255]);
   await ide.press('Enter');
   await expect(canvas).toHaveCount(0);
 });

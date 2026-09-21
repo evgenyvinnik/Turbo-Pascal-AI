@@ -225,7 +225,10 @@ test.describe('compiler', () => {
     await ide.typeSource('program Broken;\nbegin\n  missing := 1;\nend.');
     await ide.press('Alt+F9');
     await ide.waitForText('Error');
-    expect(await ide.text(2)).toMatch(/Error 3:.*missing/i);
+    // Turbo Pascal names the error, not the identifier: the banner carries
+    // Borland's wording and the cursor moves to the offending line instead.
+    expect(await ide.text(2)).toContain('Error 3: Unknown identifier');
+    expect(await ide.text(23)).toMatch(/ 3:\d+ /);
   });
 
   test('a broken program shows the red error banner', async ({ page }) => {
