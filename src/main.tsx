@@ -7,7 +7,8 @@ import './i18n/index';
 import './index.css';
 
 // Create a new router instance
-const router = createRouter({ routeTree });
+// The basepath follows Vite's base, so the app also works under a sub-path such as GitHub Pages.
+const router = createRouter({ routeTree, basepath: import.meta.env.BASE_URL });
 
 // Register the router instance for type safety
 declare module '@tanstack/react-router' {

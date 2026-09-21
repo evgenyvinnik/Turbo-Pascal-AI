@@ -63,6 +63,48 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The e2e job tests the dev server. This one tests a production build served
+  # under a sub-path, as GitHub Pages deploys it; production-only defects, such
+  # as missing styles or root-absolute URLs, show up only here.
+  production:
+    name: E2E against the production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BASE_PATH: /${{ github.event.repository.name }}/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run build --base="$BASE_PATH"
+      - name: Serve the build
+        run: |
+          nohup bunx vite preview --base "$BASE_PATH" --port 4194 --strictPort > preview.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl --silent --fail "http://localhost:4194$BASE_PATH" > /dev/null && exit 0
+            sleep 1
+          done
+          cat preview.log
+          exit 1
+      - run: bunx playwright test --project=chromium --project=visual
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:4194${{ env.BASE_PATH }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-production
+          path: |
+            playwright-report/
+            test-results/
+            preview.log
+          retention-days: 7
+
   e2e:
     name: E2E (${{ matrix.project }})
     runs-on: ubuntu-24.04

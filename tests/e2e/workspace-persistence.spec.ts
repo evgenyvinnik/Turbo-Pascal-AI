@@ -53,7 +53,7 @@ async function fixturePage(page: Page): Promise<void> {
   await page.route('**/__persistence_test_host__', (route) => route.fulfill({
     contentType: 'text/html', body: '<!doctype html><title>Persistence fixture</title>',
   }));
-  await page.goto('/__persistence_test_host__');
+  await page.goto('./__persistence_test_host__');
 }
 
 async function replaceStoredWorkspace(page: Page, record: SavedWorkspace): Promise<void> {
@@ -111,7 +111,7 @@ test('adding workspace persistence preserves files, settings and sessions in an 
   await page.route('**/__persistence_test_host__', (route) => route.fulfill({
     contentType: 'text/html', body: '<!doctype html><title>Persistence fixture</title>',
   }));
-  await page.goto('/__persistence_test_host__');
+  await page.goto('./__persistence_test_host__');
   await page.evaluate(async () => {
     // Dexie represents version 1 as native IndexedDB version 10.
     const request = indexedDB.open('TurboPascalIDE', 10);
@@ -328,7 +328,7 @@ test('malformed saved data cannot crash the editor', async ({ page }) => {
     contentType: 'text/html',
     body: '<!doctype html><title>Persistence fixture</title>',
   }));
-  await page.goto('/__persistence_test_host__');
+  await page.goto('./__persistence_test_host__');
   await page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -399,7 +399,7 @@ for (const futurePart of ['envelope', 'payload'] as const) {
       : { ...current, payload: { ...(current.payload as Record<string, unknown>), version: 2 } };
     await fixturePage(page);
     await replaceStoredWorkspace(page, future);
-    await page.goto('/');
+    await page.goto('./');
     const state = page.getByTestId('workspace-status');
     await expect(state).toHaveAttribute('data-status', 'error');
     await expect(state).toHaveAttribute('data-workspace-ready', 'false');

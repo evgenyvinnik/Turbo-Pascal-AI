@@ -17,6 +17,10 @@ export default defineConfig({
             '@stylexjs/babel-plugin',
             {
               dev: process.env.NODE_ENV === 'development',
+              // Inject styles at runtime in production too. It otherwise follows
+              // `dev`, and nothing here extracts StyleX CSS to a file, so production
+              // builds shipped without any component styles.
+              runtimeInjection: true,
               genConditionalClasses: true,
               treeshakeCompensation: true,
               aliases: {

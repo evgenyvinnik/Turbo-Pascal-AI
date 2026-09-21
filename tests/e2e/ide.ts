@@ -9,7 +9,7 @@ export class Ide {
 
   static async open(page: Page): Promise<Ide> {
     const ide = new Ide(page);
-    await page.goto('/');
+    await page.goto('./');
     await page.waitForSelector('[data-testid="tp-screen"] [data-row="0"]');
     await expect(ide.row(0)).toContainText('File');
     // Restored workspaces can have several windows, or an intentionally empty desktop.
