@@ -35,3 +35,25 @@ describe('runtime numeric boundaries', () => {
     expect(machine.getOutput()).toEqual([]);
   });
 });
+
+describe('exit codes', () => {
+  const run = (source: string) => {
+    const machine = machineFor(source);
+    machine.run();
+    return machine;
+  };
+
+  // Free Pascal on Unix reports 255 for these, so the reference corpus cannot
+  // check them; DOS reports the low byte of ExitCode in ERRORLEVEL.
+  it('reports the low byte of the exit code, as DOS does', () => {
+    expect(run('program T; begin Halt(259) end.').getExitCode()).toBe(3);
+    expect(run('program T; begin Halt(-1) end.').getExitCode()).toBe(255);
+  });
+
+  it('starts each run from exit code 0, even after a Halt', () => {
+    const machine = run('program T; begin Halt(3) end.');
+    expect(machine.getExitCode()).toBe(3);
+    machine.reset();
+    expect(machine.getExitCode()).toBe(0);
+  });
+});

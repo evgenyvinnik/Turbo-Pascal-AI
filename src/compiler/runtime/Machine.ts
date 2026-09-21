@@ -13,6 +13,7 @@
 import { Opcode, TypeCode, Register, MARK_SIZE, inst } from '../types/inst';
 import { Bytecode } from '../codegen/Bytecode';
 import { PascalError } from '../errors/PascalError';
+import { describePascalDiagnostic } from '../errors/diagnostics';
 import { InternalProcedure, NativeRegistry } from './Native';
 import { BuiltinProcedure } from '../stdlib/builtin';
 import { CrtProcedure } from '../stdlib/crt';
@@ -115,6 +116,9 @@ export class Machine {
   /** Number of instructions executed */
   private instructionCount: number = 0;
 
+  /** The program's ExitCode: Halt sets it, and so does a run-time error. */
+  private exitCode = 0;
+
   /** Configuration options */
   private config: Required<MachineConfig>;
 
@@ -171,6 +175,7 @@ export class Machine {
     this.ep = 0;
     this.np = this.config.stackSize + this.config.heapSize;
     this.state = MachineState.READY;
+    this.exitCode = 0;
     this.output = [];
     this.outputLine = '';
     this.outputChars = 0;
@@ -248,6 +253,9 @@ export class Machine {
       this.execute(opcode as Opcode, p, q);
     } catch (error) {
       this.state = MachineState.ERROR;
+      // As in Turbo Pascal, a run-time error ends the program with its error
+      // number as the exit code. One with no Borland number exits with 255.
+      this.exitCode = describePascalDiagnostic(error, 'runtime').code ?? 255;
       if (error instanceof PascalError) {
         if (error.lineNumber < 1) Object.assign(error, { lineNumber: this.getSourceLine() });
         if (!('sourceFile' in error) && this.getSourceFile()) Object.assign(error, { sourceFile: this.getSourceFile() });
@@ -905,9 +913,15 @@ export class Machine {
         this.writeOutput(args.map((value) => typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') : String(value ?? '')).join(''));
         if (procIndex === BuiltinProcedure.WRITELN) this.writeOutput('\n');
         return;
-      case BuiltinProcedure.HALT:
-        this.halt();
+      case BuiltinProcedure.HALT: {
+        // A bare Halt is Halt(0), even after the program assigned ExitCode.
+        const code = args[0];
+        this.exitCode = typeof code === 'number' ? Math.trunc(code) : 0;
+        // Stop as the program's end does. DOS leaves any sound playing, so
+        // unlike halt() this does not silence the speaker.
+        this.state = MachineState.STOPPED;
         return;
+      }
       case BuiltinProcedure.EOF:
         if (args.length) break;
         this.push(this.inputPos >= this.input.length ? 1 : 0);
@@ -1234,6 +1248,15 @@ export class Machine {
       result.push(this.dstore[start + i] ?? 0);
     }
     return result;
+  }
+
+  /**
+   * The exit status the program ends with: the low byte of ExitCode, which is
+   * what DOS reports in ERRORLEVEL. Meaningful once the machine has stopped
+   * or failed with a run-time error.
+   */
+  getExitCode(): number {
+    return this.exitCode & 0xff;
   }
 
   /**
