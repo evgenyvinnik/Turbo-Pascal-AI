@@ -34,7 +34,7 @@ import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import { ModuleLoader } from '../stdlib/modules';
-import { ParamMode, type BuiltinDef } from '../stdlib/builtin';
+import { BuiltinProcedure, ParamMode, type BuiltinDef } from '../stdlib/builtin';
 import { TypeKind } from '../symbols/Symbol';
 import { Bytecode, type DebugType } from './Bytecode';
 import { roundReal48, integerOperation, realOperation } from './numeric';
@@ -2412,11 +2412,9 @@ export class Compiler {
       return VOID;
     }
     if (name === 'halt') {
-      if (args[0]) {
-        this.requireType(args[0], INTEGER, this.expression(args[0]));
-        this.helper('discard', 1, () => undefined);
-      }
-      this.emit(Opcode.STP);
+      // The VM records the exit code, then stops as at the program's end.
+      if (args[0]) this.requireType(args[0], INTEGER, this.expression(args[0]));
+      this.emit(Opcode.CSP, args[0] ? 1 : 0, BuiltinProcedure.HALT);
       return VOID;
     }
     if (name === 'break' || name === 'continue') {
