@@ -3,7 +3,7 @@ import { Lexer, Stream } from './lexer';
 import { Parser, type ParserOptions } from './parser';
 import { PascalError } from './errors';
 import { preprocessPascal, restoreSourceLocations, type PascalSource, type PreprocessedSource } from './directives';
-import type { ProgramNode, UnitNode } from './parser/Node';
+import { NodeType, type ProgramNode, type UnitNode } from './parser/Node';
 
 export interface ProjectOptions extends ParserOptions {
   /** Snapshot of source buffers and the virtual disk. Buffers take precedence. */
@@ -63,6 +63,8 @@ export function parseProject(source: string, filename: string, options: ProjectO
     }
   }
   const tree = parse({ filename, source });
+  // A program without a heading is named after its file, as Free Pascal names it.
+  if (tree.type === NodeType.PROGRAM && !tree.name) tree.name = sourcePath(filename).split('/').at(-1)?.replace(/\.[^.]*$/, '') ?? '';
   const units = new Map<string, UnitNode>();
   return {
     tree,
