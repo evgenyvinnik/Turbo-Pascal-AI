@@ -47,3 +47,6 @@ dev-dist/
 
 # Reference screenshots are third-party images, fetched on demand
 tests/e2e/fidelity/reference/
+
+# Third-party sources fetched for local verification (GPL; never committed).
+.cache/

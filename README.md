@@ -314,6 +314,8 @@ implementation-specific errors remain explicitly unnumbered.
 ```bash
 bun run test          # Vitest unit tests
 bun run test:reference # Independent Free Pascal comparison (requires fpc)
+bun run fpc-suite:fetch # Download Free Pascal's own test suite (pinned release)
+bun run test:fpc-suite  # Run it against the browser compiler (requires fpc)
 bun run test:e2e      # Playwright behaviour + visual suites
 bun run test:visual   # Only the pixel snapshots
 bun run test:e2e:update  # Refresh the snapshot baselines
@@ -327,7 +329,7 @@ The Pascal suite includes a deterministic reference corpus shared by Vitest and
 diagnostic, and 32 seeded programs combining sorting, overlapping sets, and
 signed arithmetic. The reference runner compiles and executes the same sources
 with Free Pascal in [Turbo Pascal compatibility mode](https://www.freepascal.org/docs-html/user/userse33.html)
-and the browser VM, comparing output lines and compile acceptance. It also checks
+and the browser VM, comparing output lines, exit codes and compile acceptance. It also checks
 independently specified expected results, so agreement between two wrong results
 cannot pass. It normalizes line endings; it does not assert binary stdout equality
 or complete compatibility with the original Borland compiler. Native word-size,
@@ -342,6 +344,21 @@ to `artifacts/verification/pascal-reference.json`, or `PASCAL_REFERENCE_REPORT`.
 Use `PASCAL_REFERENCE_FILTER` for a focused case-name substring.
 An interrupted or failed attempt invalidates the prior result. Ordinary Vitest
 runs execute the same corpus without requiring an installed native compiler.
+
+`test:fpc-suite` runs Free Pascal's own regression tests (`tbs` and `tbf` by
+default; `FPC_SUITE_DIRS` selects others) at the release pinned in
+`tests/fpc-suite/pin.json`. The tests are GPL, so `fpc-suite:fetch` downloads
+them into the git-ignored `.cache/` rather than the repository. Each test states
+its expectations in `{ %... }` headers, read as FPC's own runner reads them.
+Free Pascal in Turbo Pascal mode is the filter and the reference: a test counts
+only if `fpc -Mtp` builds and runs it as the test expects, and tests that switch
+to another dialect in their source, such as `{$mode objfpc}`, are excluded. The
+browser compiler must then accept the program and exit with the same code,
+since the tests check themselves; or, for a must-fail test, reject it at the
+line where Free Pascal does. Results are reported separately for programs that
+must run, compile, or be rejected, and written to
+`artifacts/verification/fpc-suite.json`. The run reports; it does not yet fail
+on regressions.
 
 IDE browser regressions exercise whole-word/backward/wrapped/scoped search,
 the documented Borland regular-expression syntax, replacement prompts and

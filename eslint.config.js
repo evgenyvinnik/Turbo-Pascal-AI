@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // .claude holds agent worktrees, which are full copies of the repository.
-  { ignores: ['dist', 'node_modules', '.claude', 'src/routeTree.gen.ts'] },
+  { ignores: ['dist', 'node_modules', '.claude', '.cache', 'src/routeTree.gen.ts'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.strictTypeChecked],
     files: ['**/*.{ts,tsx}'],
