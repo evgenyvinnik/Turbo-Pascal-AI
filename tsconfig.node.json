@@ -3,6 +3,7 @@
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "skipLibCheck": true,
+    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
@@ -14,8 +15,9 @@
     "declarationDir": "./node_modules/.tmp/tsconfig-node"
   },
   "include": [
-    "scripts/dosRuntimePlugin.ts",
+    "scripts",
     "vite.config.ts",
+    "vitest.config.ts",
     "playwright.config.ts",
     "eslint.config.js"
   ]
