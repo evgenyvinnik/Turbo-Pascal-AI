@@ -296,7 +296,7 @@ async function loadSample(name: string): Promise<string> {
   const saved = readVirtualFile(name);
   if (saved !== null) return decodeDosText(saved);
   try {
-    const res = await fetch(`/samples/${name}`);
+    const res = await fetch(`${import.meta.env.BASE_URL}samples/${name}`);
     if (res.ok) return await res.text();
   } catch {
     /* offline: fall through to an empty buffer */

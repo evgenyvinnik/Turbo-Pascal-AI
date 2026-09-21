@@ -1,0 +1,57 @@
+name: Deploy to GitHub Pages
+
+on:
+  # Deploy only commits that have passed CI on main.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a deployment in progress finish; the next one waits its turn.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # The branch filter matches a head branch named main from any fork, so
+    # also require that CI ran for a push to this repository's main.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - id: pages
+        uses: actions/configure-pages@v5
+      # A project site lives under /<repository>/, so Vite needs that base.
+      - run: bun run build --base="${{ steps.pages.outputs.base_path }}/"
+      - name: Prepare the site
+        run: |
+          # Pages answers unknown paths with 404.html; serving the app there
+          # lets deep links such as /help load and route normally.
+          cp dist/index.html dist/404.html
+          # Source maps would publish the original source with the site.
+          find dist -name '*.map' -delete
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
