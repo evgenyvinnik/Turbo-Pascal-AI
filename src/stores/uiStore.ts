@@ -66,66 +66,77 @@ export const useUIStore = create<UIState & UIActions>()(
     graphicsOverlayVisible: false,
     notifications: [],
 
-    openDialog: (type, props = {}) =>
+    openDialog: (type, props = {}) => {
       set((state) => {
         state.activeDialog = type;
         state.dialogProps = props;
-      }),
+      });
+    },
 
-    closeDialog: () =>
+    closeDialog: () => {
       set((state) => {
         state.activeDialog = null;
         state.dialogProps = {};
-      }),
+      });
+    },
 
-    setDialog: (type) =>
+    setDialog: (type) => {
       set((state) => {
         state.activeDialog = type;
         state.dialogProps = {};
-      }),
+      });
+    },
 
-    setMenuOpen: (menuId) =>
+    setMenuOpen: (menuId) => {
       set((state) => {
         state.menuOpen = menuId;
-      }),
+      });
+    },
 
-    showContextMenu: (x, y, items) =>
+    showContextMenu: (x, y, items) => {
       set((state) => {
         state.contextMenu = { x, y, items };
-      }),
+      });
+    },
 
-    hideContextMenu: () =>
+    hideContextMenu: () => {
       set((state) => {
         state.contextMenu = null;
-      }),
+      });
+    },
 
-    toggleFullscreen: () =>
+    toggleFullscreen: () => {
       set((state) => {
         state.isFullscreen = !state.isFullscreen;
-      }),
+      });
+    },
 
-    showGraphicsOverlay: () =>
+    showGraphicsOverlay: () => {
       set((state) => {
         state.graphicsOverlayVisible = true;
-      }),
+      });
+    },
 
-    hideGraphicsOverlay: () =>
+    hideGraphicsOverlay: () => {
       set((state) => {
         state.graphicsOverlayVisible = false;
-      }),
+      });
+    },
 
-    showNotification: (message, type) =>
+    showNotification: (message, type) => {
       set((state) => {
         state.notifications.push({
-          id: `notif-${Date.now()}`,
+          id: `notif-${String(Date.now())}`,
           message,
           type,
         });
-      }),
+      });
+    },
 
-    dismissNotification: (id) =>
+    dismissNotification: (id) => {
       set((state) => {
         state.notifications = state.notifications.filter((n) => n.id !== id);
-      }),
+      });
+    },
   }))
 );

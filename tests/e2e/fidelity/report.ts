@@ -165,8 +165,9 @@ const data: ReportData = {
   entries: [],
 };
 
-const saveManifest = () =>
+const saveManifest = () => {
   fs.writeFileSync(path.join(output, 'coverage.json'), JSON.stringify(data, null, 2) + '\n');
+};
 try {
   for (const item of gallery.screenshots) {
     const state = REPORT_STATES.find((candidate) => candidate.ref === item.ref);
@@ -270,7 +271,7 @@ try {
       );
       entry.status = 'captured';
       console.log(
-        `${state.name.padEnd(28)} raw ${String(raw.pixels).padStart(6)} / adjusted ${String(adjusted.pixels).padStart(6)} pixels / ${cells.count} cells${entry.equivalence === 'partial' ? ' (partial subject)' : ''}`
+        `${state.name.padEnd(28)} raw ${String(raw.pixels).padStart(6)} / adjusted ${String(adjusted.pixels).padStart(6)} pixels / ${String(cells.count)} cells${entry.equivalence === 'partial' ? ' (partial subject)' : ''}`
       );
     } catch (error) {
       entry.error = error instanceof Error ? error.message : String(error);
@@ -298,7 +299,7 @@ fs.writeFileSync(path.join(output, 'coverage.md'), coverageMarkdown(data));
 const captured = data.entries.filter((entry) => entry.status === 'captured');
 const exact = captured.filter((entry) => entry.raw?.pixels === 0);
 console.log(
-  `\nReport: ${path.join(output, 'index.html')}\n${captured.length}/${data.entries.length} gallery subjects captured; ${exact.length} unmasked exact matches.`
+  `\nReport: ${path.join(output, 'index.html')}\n${String(captured.length)}/${String(data.entries.length)} gallery subjects captured; ${String(exact.length)} unmasked exact matches.`
 );
 if (data.sourceChangedDuringCapture)
   console.warn(

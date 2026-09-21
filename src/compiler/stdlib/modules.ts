@@ -9,26 +9,17 @@ import { TypeKind, SymbolKind, type TypeInfo, Symbol } from '../symbols/Symbol';
 import {
   type BuiltinDef,
   ALL_BUILTINS,
-  BUILTIN_MAP,
   isBuiltin,
   getBuiltin,
   ParamMode,
 } from './builtin';
 import {
-  CRT_UNIT_NAME,
   CRT_CONSTANTS,
   ALL_CRT_PROCS,
-  CRT_PROC_MAP,
-  type CrtUnit,
-  createCrtUnit,
 } from './crt';
 import {
-  GRAPH_UNIT_NAME,
   GRAPH_CONSTANTS,
   ALL_GRAPH_PROCS,
-  GRAPH_PROC_MAP,
-  type GraphUnit,
-  createGraphUnit,
 } from './graph';
 
 /**

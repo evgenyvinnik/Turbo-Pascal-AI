@@ -54,7 +54,7 @@ function localResult(subject: ReferenceCase) {
     const machine = new Machine(bytecode, { maxInstructions: 100_000 });
     machine.setInput(subject.input ? subject.input.replace(/\n$/, '').split('\n') : []);
     machine.run();
-    if (machine.getState() !== MachineState.STOPPED) throw new Error(`Unexpected VM state: ${String(machine.getState())}`);
+    if (machine.getState() !== MachineState.STOPPED) throw new Error(`Unexpected VM state: ${machine.getState()}`);
     return { compiled: true, output: machine.getOutput(), error: null, diagnostic: false };
   } catch (error) {
     return { compiled: true, output: null, error: String(error), diagnostic: false };
@@ -84,7 +84,7 @@ async function compare(subject: ReferenceCase) {
     try {
       const output = await new Promise<string>((resolve, reject) => {
         const child = execFile(executable, [], { cwd: directory, timeout: 5000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-          if (error) reject(error); else resolve(stdout);
+          if (error) reject(error as Error); else resolve(stdout);
         });
         child.stdin?.end(subject.input ?? '');
       });
@@ -111,7 +111,7 @@ try {
   if (!Array.isArray(flags) || !flags.every(value => typeof value === 'string')) {
     throw new Error('FPC_FLAGS_JSON must be a JSON array of separate compiler arguments.');
   }
-  compilerFlags = ['-Mtp', ...flags as string[]];
+  compilerFlags = ['-Mtp', ...flags];
   // Fail explicitly if the independent compiler is absent; never report a skip
   // as a successful differential run. Every ordinary Vitest run remains local.
   const version = (await execute(compiler, ['-iV'], { timeout: 15_000 })).stdout.trim();
@@ -136,7 +136,7 @@ try {
   };
   await mkdir(path.dirname(reportPath), { recursive: true });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-  console.log(`${report.passed}/${results.length} agree with Free Pascal ${version}; report: ${reportPath}`);
+  console.log(`${String(report.passed)}/${String(results.length)} agree with Free Pascal ${version}; report: ${reportPath}`);
   if (report.failed || report.sourceChangedDuringRun) process.exitCode = 1;
 } catch (error) {
   await writeFile(reportPath, `${JSON.stringify({

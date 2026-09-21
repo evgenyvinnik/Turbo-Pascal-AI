@@ -20,10 +20,9 @@ export class PascalError extends Error {
     this.lineNumber = lineNumber;
     this.columnNumber = columnNumber;
 
-    // Maintains proper stack trace for where the error was thrown (only available on V8)
-    const ErrorWithCapture = Error as typeof Error & {
-      captureStackTrace?: (target: object, constructor: NewableFunction) => void;
-    };
+    // Maintains proper stack trace for where the error was thrown (only available on V8).
+    // Node's types declare it unconditionally, so type it as optional to keep the check.
+    const ErrorWithCapture: { captureStackTrace?: (target: object, constructor: NewableFunction) => void } = Error;
     if (ErrorWithCapture.captureStackTrace) {
       ErrorWithCapture.captureStackTrace(this, PascalError);
     }
@@ -34,9 +33,9 @@ export class PascalError extends Error {
    */
   override toString(): string {
     if (this.lineNumber >= 0 && this.columnNumber >= 0) {
-      return `${this.name} at line ${this.lineNumber}, column ${this.columnNumber}: ${this.message}`;
+      return `${this.name} at line ${String(this.lineNumber)}, column ${String(this.columnNumber)}: ${this.message}`;
     } else if (this.lineNumber >= 0) {
-      return `${this.name} at line ${this.lineNumber}: ${this.message}`;
+      return `${this.name} at line ${String(this.lineNumber)}: ${this.message}`;
     }
     return `${this.name}: ${this.message}`;
   }

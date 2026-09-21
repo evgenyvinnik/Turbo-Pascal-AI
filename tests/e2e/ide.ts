@@ -20,19 +20,19 @@ export class Ide {
   }
 
   row(y: number): Locator {
-    return this.page.locator(`[data-row="${y}"]`);
+    return this.page.locator(`[data-row="${String(y)}"]`);
   }
 
   /** Plain text of one screen row, trailing blanks trimmed. */
   async text(y: number): Promise<string> {
-    const value = await this.row(y).evaluate((el) => el.textContent ?? '');
+    const value = await this.row(y).evaluate((el) => el.textContent);
     return value.replace(/\s+$/, '');
   }
 
   /** The whole 80x25 screen as 25 lines of text. */
   async screenText(): Promise<string[]> {
     return this.page.$$eval('[data-row]', (rows) =>
-      rows.map((r) => (r.textContent ?? '').replace(/\s+$/, '')),
+      rows.map((r) => r.textContent.replace(/\s+$/, '')),
     );
   }
 

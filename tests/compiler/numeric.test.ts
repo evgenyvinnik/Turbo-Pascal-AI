@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { errorWith } from './matchers';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
@@ -76,8 +77,8 @@ describe('Turbo Pascal numeric representation', () => {
       begin i:=32767; {$Q-} WriteLn(i+1); {$Q+} WriteLn(i+1)
       end.`)
     );
-    expect(() => machine.run()).toThrowError(
-      expect.objectContaining({ message: 'Arithmetic overflow', lineNumber: 2 })
+    expect(() => { machine.run(); }).toThrowError(
+      errorWith({ message: 'Arithmetic overflow', lineNumber: 2 })
     );
     expect(machine.getOutput()).toEqual(['-32768']);
     expect(

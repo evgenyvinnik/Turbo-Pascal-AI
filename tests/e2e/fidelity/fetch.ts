@@ -21,7 +21,7 @@ await Promise.all(
       if (fs.existsSync(file)) continue;
       try {
         const response = await fetch(item.url, { signal: AbortSignal.timeout(20_000) });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
         const bytes = Buffer.from(await response.arrayBuffer());
         if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
           throw new Error('Response is not a PNG');

@@ -196,9 +196,6 @@ export enum GraphResult {
  * These are offset from other procedures to avoid conflicts
  */
 export enum GraphProcedure {
-  /** Base offset for Graph procedures */
-  BASE = 200,
-
   // Initialization
   INITGRAPH = 200,
   CLOSEGRAPH = 201,

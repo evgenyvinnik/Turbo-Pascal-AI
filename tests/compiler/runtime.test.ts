@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { errorWith } from './matchers';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Lexer, Stream } from '../../src/compiler/lexer';
 import { Parser } from '../../src/compiler/parser';
@@ -27,7 +28,7 @@ describe('runtime numeric boundaries', () => {
 
   it('reports real arithmetic overflow at its source line', () => {
     const machine = machineFor('program T; var x: Real;\nbegin\n  x := 1e30;\n  WriteLn(x * x)\nend.');
-    expect(() => machine.run()).toThrowError(expect.objectContaining({
+    expect(() => { machine.run(); }).toThrowError(errorWith({
       message: 'Real overflow', lineNumber: 4,
     }));
     expect(machine.getState()).toBe(MachineState.ERROR);

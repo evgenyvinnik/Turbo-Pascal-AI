@@ -233,11 +233,11 @@ export class NativeRegistry implements INative {
 
     // String functions
     this.register(StandardProcedure.LENGTH, 'Length', 1, true, (s) => {
-      return String(s ?? '').length;
+      return this.toText(s).length;
     });
 
     this.register(StandardProcedure.COPY, 'Copy', 3, true, (s, index, count) => {
-      const str = String(s ?? '');
+      const str = this.toText(s);
       const i = this.toNumber(index);
       const c = this.toNumber(count);
       if (i < 1 || c <= 0) return '';
@@ -245,18 +245,18 @@ export class NativeRegistry implements INative {
     });
 
     this.register(StandardProcedure.CONCAT, 'Concat', -1, true, (...args) => {
-      return args.map((a) => String(a ?? '')).join('');
+      return args.map((a) => this.toText(a)).join('');
     });
 
     this.register(StandardProcedure.POS, 'Pos', 2, true, (substr, s) => {
-      const str = String(s ?? '');
-      const sub = String(substr ?? '');
+      const str = this.toText(s);
+      const sub = this.toText(substr);
       const pos = str.indexOf(sub);
       return pos === -1 ? 0 : pos + 1;
     });
 
     this.register(StandardProcedure.UPCASE, 'Upcase', 1, true, (c) => {
-      return String(c ?? '').replace(/[a-z]/g, (letter) => letter.toUpperCase());
+      return this.toText(c).replace(/[a-z]/g, (letter) => letter.toUpperCase());
     });
 
     // Random functions
@@ -326,6 +326,16 @@ export class NativeRegistry implements INative {
    */
   getNames(): string[] {
     return Array.from(this.nameToIndex.keys());
+  }
+
+  /**
+   * Convert a stack value to text. The stack holds only primitives, and
+   * nil reads as the empty string.
+   */
+  private toText(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    return '';
   }
 
   /**

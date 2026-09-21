@@ -127,14 +127,8 @@ export enum Opcode {
   FLT = 0x2a,
   /** Integer to real (2nd entry on stack) */
   FLO = 0x2b,
-  /** Truncate */
+  /** Truncate. UCSD p-code also uses this opcode for round, integer to char, and anything to integer. */
   TRC = 0x2c,
-  /** Round (same opcode as TRC) */
-  RND = 0x2c,
-  /** Integer to char (same opcode as TRC) */
-  CHR = 0x2c,
-  /** Anything to integer (same opcode as TRC) */
-  ORD = 0x2c,
 
   // Termination
   /** Stop */
@@ -319,16 +313,16 @@ export const inst = {
   make(opcode: Opcode | number, operand1 = 0, operand2 = 0): number {
     // Sanity check
     if (operand1 < 0) {
-      throw new PascalError(`negative operand1: ${operand1}`);
+      throw new PascalError(`negative operand1: ${String(operand1)}`);
     }
     if (operand1 > OPERAND1_MASK) {
-      throw new PascalError(`too large operand1: ${operand1}`);
+      throw new PascalError(`too large operand1: ${String(operand1)}`);
     }
     if (operand2 < 0) {
-      throw new PascalError(`negative operand2: ${operand2}`);
+      throw new PascalError(`negative operand2: ${String(operand2)}`);
     }
     if (operand2 > OPERAND2_MASK) {
-      throw new PascalError(`too large operand2: ${operand2}`);
+      throw new PascalError(`too large operand2: ${String(operand2)}`);
     }
 
     return (
@@ -376,7 +370,7 @@ export const inst = {
     const operand2 = this.getOperand2(instruction);
 
     const name = opcodeToName[opcode] ?? `0x${opcode.toString(16)}`;
-    return `${name} ${operand1} ${operand2}`;
+    return `${name} ${String(operand1)} ${String(operand2)}`;
   },
 
   /**
@@ -384,7 +378,7 @@ export const inst = {
    * @param typeCode - The type code
    * @returns The human-readable name
    */
-  typeCodeToName(typeCode: TypeCode | number): string {
+  typeCodeToName(typeCode: TypeCode): string {
     switch (typeCode) {
       case TypeCode.A:
         return 'pointer';
@@ -405,7 +399,7 @@ export const inst = {
       case TypeCode.X:
         return 'any';
       default:
-        throw new PascalError(`unknown type code ${typeCode}`);
+        throw new PascalError(`unknown type code ${String(typeCode)}`);
     }
   },
 };

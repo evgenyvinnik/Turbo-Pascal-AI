@@ -65,31 +65,31 @@ export class SymbolTable {
     // Integer type
     this.insertBuiltInType('integer', {
       kind: TypeKind.INTEGER,
-      size: TYPE_SIZES[TypeKind.INTEGER] ?? 0,
+      size: TYPE_SIZES[TypeKind.INTEGER],
     });
 
     // Real type
     this.insertBuiltInType('real', {
       kind: TypeKind.REAL,
-      size: TYPE_SIZES[TypeKind.REAL] ?? 0,
+      size: TYPE_SIZES[TypeKind.REAL],
     });
 
     // Boolean type
     this.insertBuiltInType('boolean', {
       kind: TypeKind.BOOLEAN,
-      size: TYPE_SIZES[TypeKind.BOOLEAN] ?? 0,
+      size: TYPE_SIZES[TypeKind.BOOLEAN],
     });
 
     // Char type
     this.insertBuiltInType('char', {
       kind: TypeKind.CHAR,
-      size: TYPE_SIZES[TypeKind.CHAR] ?? 0,
+      size: TYPE_SIZES[TypeKind.CHAR],
     });
 
     // String type
     this.insertBuiltInType('string', {
       kind: TypeKind.STRING,
-      size: TYPE_SIZES[TypeKind.STRING] ?? 0,
+      size: TYPE_SIZES[TypeKind.STRING],
     });
 
     // Built-in constants
@@ -114,7 +114,7 @@ export class SymbolTable {
   private insertBuiltInConstant(name: string, typeKind: TypeKind, value: unknown): void {
     const typeInfo: TypeInfo = {
       kind: typeKind,
-      size: TYPE_SIZES[typeKind] ?? 0,
+      size: TYPE_SIZES[typeKind],
     };
     const symbol = new Symbol(name, SymbolKind.CONSTANT, typeInfo);
     symbol.level = 0;

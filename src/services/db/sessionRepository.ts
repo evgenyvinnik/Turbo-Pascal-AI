@@ -198,7 +198,7 @@ export async function generateUniqueSessionName(
   let name = baseName;
 
   while (await sessionNameExists(name)) {
-    name = `${baseName} ${counter}`;
+    name = `${baseName} ${String(counter)}`;
     counter++;
   }
 

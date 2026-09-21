@@ -49,10 +49,9 @@ describe('Turbo Pascal source directives', () => {
     expect(ast.block.declarations[0]).toMatchObject({ sourceFile: 'inc/second.inc', lineNumber: 2 });
     expect(ast.block.statements[0]).toMatchObject({ sourceFile: 'P.PAS', lineNumber: 3 });
   });
-  it.each(['{$ELSE}', '{$ENDIF}', '{$IFDEF A}', '{$IFDEF A}{$ELSE}{$ELSE}{$ENDIF}', '{$IFOPT ?}'])
-    ('rejects malformed conditional structure %s', source => {
-      expect(() => preprocessPascal(source)).toThrow(PascalError);
-    });
+  it.each(['{$ELSE}', '{$ENDIF}', '{$IFDEF A}', '{$IFDEF A}{$ELSE}{$ELSE}{$ENDIF}', '{$IFOPT ?}'])('rejects malformed conditional structure %s', source => {
+    expect(() => preprocessPascal(source)).toThrow(PascalError);
+  });
   it('rejects missing and recursive includes with source coordinates', () => {
     expect(() => preprocessPascal('\n{$I missing.inc}', { filename: 'MAIN.PAS' })).toThrow('Include file not found');
     try { preprocessPascal('\n{$I missing.inc}', { filename: 'MAIN.PAS' }); }
