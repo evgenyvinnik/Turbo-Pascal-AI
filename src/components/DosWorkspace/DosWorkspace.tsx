@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { closeDosSession, discardDosSession, exportDosFiles, getDosMachine, importFilesToDos, openDosDebugger, syncDosFiles, useDosStore } from '../../services/dos/dosSession';
+import { closeDosSession, discardDosSession, dosExitIsPending, exportDosFiles, getDosMachine, importFilesToDos, openDosDebugger, syncDosFiles, useDosStore } from '../../services/dos/dosSession';
 import { dosKeyCode } from '../../services/dos/dosRuntime';
 import { DOS_EXAMPLES } from '../../services/dos/fixtures';
 import { stringToBytes } from '../../services/dos/dosFiles';
@@ -19,9 +19,13 @@ export function DosWorkspace() {
     finally { setBusy(false); canvas.current?.focus(); }
   };
 
+  const { frame, frameWidth, frameHeight } = state;
   useEffect(() => {
-    if (state.frame && canvas.current) canvas.current.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(state.frame), state.width, state.height), 0, 0);
-  }, [state.frame, state.width, state.height]);
+    // Paint at the frame's own size: the screen may already have been resized
+    // for a mode this frame predates, and ImageData throws on a mismatch.
+    if (!frame || !canvas.current || frame.length !== frameWidth * frameHeight * 4) return;
+    canvas.current.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(frame), frameWidth, frameHeight), 0, 0);
+  }, [frame, frameWidth, frameHeight]);
 
   useEffect(() => {
     if (!state.visible) return;
@@ -41,6 +45,12 @@ export function DosWorkspace() {
       const code = dosKeyCode(event.code);
       if (code === null || event.repeat) return;
       const pressed = event.type === 'keydown';
+      // Submitting EXIT tears down the DOS layer, after which the drive can no
+      // longer be read. Close here instead, while the files are still readable.
+      if (code === 257 && dosExitIsPending()) {
+        if (pressed) void closeDosSession();
+        return;
+      }
       if (code < 340) {
         const shiftedCharacter = event.key.length === 1 && ('~!@#$%^&*()_+{}|:"<>?'.includes(event.key) || /[A-Z]/.test(event.key));
         for (const [modifier, active] of [[340, event.shiftKey || shiftedCharacter], [341, event.ctrlKey], [342, event.altKey]] as const) {
@@ -84,7 +94,7 @@ export function DosWorkspace() {
       }} />
     </div>
     <div className="dos-display">
-      <canvas ref={canvas} width={state.width} height={state.height} tabIndex={0} aria-label="DOS screen" onMouseMove={(event) => {
+      <canvas ref={canvas} width={frameWidth || state.width} height={frameHeight || state.height} tabIndex={0} aria-label="DOS screen" onMouseMove={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         getDosMachine()?.sendMouseMotion((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
       }} onMouseDown={(event) => { canvas.current?.focus(); getDosMachine()?.sendMouseButton(event.button, true); }} onMouseUp={(event) => getDosMachine()?.sendMouseButton(event.button, false)} onContextMenu={(event) => { event.preventDefault(); }} />
