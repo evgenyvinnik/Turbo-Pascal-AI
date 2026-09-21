@@ -63,8 +63,8 @@ export const useFileStore = create<FileState & FileActions>()(
       // Will be implemented with IndexedDB
     },
 
-    createFile: async (parentPath, name, _content = '') => {
-      const id = `file-${Date.now()}`;
+    createFile: (parentPath, name, _content = '') => {
+      const id = `file-${String(Date.now())}`;
       const path = `${parentPath}/${name}`;
       set((state) => {
         state.fileTree.set(id, {
@@ -78,11 +78,11 @@ export const useFileStore = create<FileState & FileActions>()(
           size: 0,
         });
       });
-      return id;
+      return Promise.resolve(id);
     },
 
-    createDirectory: async (parentPath, name) => {
-      const id = `dir-${Date.now()}`;
+    createDirectory: (parentPath, name) => {
+      const id = `dir-${String(Date.now())}`;
       const path = `${parentPath}/${name}`;
       set((state) => {
         state.fileTree.set(id, {
@@ -97,10 +97,10 @@ export const useFileStore = create<FileState & FileActions>()(
           size: 0,
         });
       });
-      return id;
+      return Promise.resolve(id);
     },
 
-    deleteNode: async (path) => {
+    deleteNode: (path) => {
       set((state) => {
         for (const [id, node] of state.fileTree) {
           if (node.path === path) {
@@ -109,9 +109,10 @@ export const useFileStore = create<FileState & FileActions>()(
           }
         }
       });
+      return Promise.resolve();
     },
 
-    renameNode: async (path, newName) => {
+    renameNode: (path, newName) => {
       set((state) => {
         for (const node of state.fileTree.values()) {
           if (node.path === path) {
@@ -122,34 +123,38 @@ export const useFileStore = create<FileState & FileActions>()(
           }
         }
       });
+      return Promise.resolve();
     },
 
-    readFile: async (_path) => {
+    readFile: (_path) => {
       // Will be implemented with IndexedDB
-      return '';
+      return Promise.resolve('');
     },
 
     writeFile: async (_path, _content) => {
       // Will be implemented with IndexedDB
     },
 
-    toggleExpanded: (path) =>
+    toggleExpanded: (path) => {
       set((state) => {
         if (state.expandedDirs.has(path)) {
           state.expandedDirs.delete(path);
         } else {
           state.expandedDirs.add(path);
         }
-      }),
+      });
+    },
 
-    setSelected: (path) =>
+    setSelected: (path) => {
       set((state) => {
         state.selectedPath = path;
-      }),
+      });
+    },
 
-    addRecentFile: (path) =>
+    addRecentFile: (path) => {
       set((state) => {
         state.recentFiles = [path, ...state.recentFiles.filter((p) => p !== path)].slice(0, 10);
-      }),
+      });
+    },
   }))
 );

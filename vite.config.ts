@@ -1,14 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
-import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import path from 'path';
 import { dosRuntimePlugin } from './scripts/dosRuntimePlugin';
 
 export default defineConfig({
   plugins: [
     dosRuntimePlugin(),
-    TanStackRouterVite(),
+    tanstackRouter(),
     react({
       babel: {
         plugins: [

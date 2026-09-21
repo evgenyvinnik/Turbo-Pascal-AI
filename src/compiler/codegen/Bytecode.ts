@@ -5,7 +5,7 @@
  * data such as program constants and typed constants.
  */
 
-import { inst, Opcode, opcodeToName } from '../types';
+import { inst, Opcode } from '../types';
 
 /**
  * Interface for native procedure registry
@@ -209,7 +209,7 @@ export class Bytecode {
     for (let i = 0; i < this.constants.length; i++) {
       const value = this.constants[i];
       const displayValue = typeof value === 'string' ? `'${value}'` : value;
-      lines.push(`${this.rightAlign(i, 4)}: ${displayValue}`);
+      lines.push(`${this.rightAlign(i, 4)}: ${String(displayValue)}`);
     }
 
     return 'Constants:\n' + lines.join('\n') + '\n';

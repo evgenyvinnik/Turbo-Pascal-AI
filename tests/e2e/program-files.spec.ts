@@ -80,7 +80,7 @@ test('rejects an oversized drop as one batch without replacing existing files or
   await ide.waitForText('MiB import limit');
   expect(
     await page.evaluate(() =>
-      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}')
+      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<string, string>
     )
   ).toEqual({ 'KEPT.TXT': 'keep this file' });
   await ide.press('Enter');
@@ -101,7 +101,7 @@ test('rejects a conflicting filename without importing the rest of the drop', as
   await ide.waitForText('already exists');
   expect(
     await page.evaluate(() =>
-      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}')
+      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<string, string>
     )
   ).toEqual({ 'KEPT.TXT': 'original data' });
 });

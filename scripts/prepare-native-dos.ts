@@ -12,7 +12,7 @@ const distributions = [
 const files: Zippable = {};
 for (const distribution of distributions) {
   const response = await fetch(distribution.url);
-  if (!response.ok) throw new Error(`Download failed: ${distribution.url} (${response.status})`);
+  if (!response.ok) throw new Error(`Download failed: ${distribution.url} (${String(response.status)})`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (createHash('sha256').update(bytes).digest('hex') !== distribution.sha256) throw new Error(`Checksum mismatch: ${distribution.url}`);
   for (const [path, content] of Object.entries(unzipSync(bytes))) {
@@ -27,4 +27,4 @@ for (const distribution of distributions) {
 await mkdir('public/dos/tools', { recursive: true });
 const bundle = zipSync(files, { level: 9 });
 await writeFile('public/dos/tools/fpc-3.2.2-dos.zip', bundle);
-console.log(`Native DOS compiler bundle: ${bundle.length} bytes, ${Object.keys(files).length} files`);
+console.log(`Native DOS compiler bundle: ${String(bundle.length)} bytes, ${String(Object.keys(files).length)} files`);

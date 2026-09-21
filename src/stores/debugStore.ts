@@ -41,7 +41,7 @@ export interface VMRegisters {
 
 interface DebugState {
   status: DebugStatus;
-  machine: unknown | null;
+  machine: unknown;
   breakpoints: Map<string, Breakpoint>;
   watches: WatchVariable[];
   callStack: StackFrame[];
@@ -89,15 +89,16 @@ export const useDebugStore = create<DebugState & DebugActions>()(
     currentLine: null,
     currentFile: null,
 
-    startDebugging: (bytecode) =>
+    startDebugging: (bytecode) => {
       set((state) => {
         state.machine = bytecode;
         state.status = 'running';
         state.callStack = [];
         state.registers = initialRegisters;
-      }),
+      });
+    },
 
-    stopDebugging: () =>
+    stopDebugging: () => {
       set((state) => {
         state.status = 'stopped';
         state.machine = null;
@@ -105,87 +106,101 @@ export const useDebugStore = create<DebugState & DebugActions>()(
         state.currentLine = null;
         state.currentFile = null;
         for (const watch of state.watches) { watch.value = undefined; watch.type = 'unknown'; }
-      }),
+      });
+    },
 
-    pause: () =>
+    pause: () => {
       set((state) => {
         state.status = 'paused';
-      }),
+      });
+    },
 
-    resume: () =>
+    resume: () => {
       set((state) => {
         state.status = 'running';
-      }),
+      });
+    },
 
-    stepInto: () =>
+    stepInto: () => {
       set((state) => {
         state.status = 'stepping';
-      }),
+      });
+    },
 
-    stepOver: () =>
+    stepOver: () => {
       set((state) => {
         state.status = 'stepping';
-      }),
+      });
+    },
 
-    stepOut: () =>
+    stepOut: () => {
       set((state) => {
         state.status = 'stepping';
-      }),
+      });
+    },
 
-    runToLine: (_line) =>
+    runToLine: (_line) => {
       set((state) => {
         state.status = 'running';
-      }),
+      });
+    },
 
-    addBreakpoint: (file, line) =>
+    addBreakpoint: (file, line) => {
       set((state) => {
-        const id = `bp-${file}-${line}`;
+        const id = `bp-${file}-${String(line)}`;
         state.breakpoints.set(id, {
           id,
           file,
           line,
           enabled: true,
         });
-      }),
+      });
+    },
 
-    removeBreakpoint: (id) =>
+    removeBreakpoint: (id) => {
       set((state) => {
         state.breakpoints.delete(id);
-      }),
+      });
+    },
 
-    toggleBreakpoint: (id) =>
+    toggleBreakpoint: (id) => {
       set((state) => {
         const bp = state.breakpoints.get(id);
         if (bp) {
           bp.enabled = !bp.enabled;
         }
-      }),
+      });
+    },
 
-    addWatch: (expression) =>
+    addWatch: (expression) => {
       set((state) => {
         state.watches.push({
-          id: `watch-${Date.now()}`,
+          id: `watch-${String(Date.now())}`,
           expression,
           value: undefined,
           type: 'unknown',
         });
-      }),
+      });
+    },
 
-    removeWatch: (id) =>
+    removeWatch: (id) => {
       set((state) => {
         state.watches = state.watches.filter((w) => w.id !== id);
-      }),
+      });
+    },
 
-    updateRegisters: (registers) =>
+    updateRegisters: (registers) => {
       set((state) => {
         state.registers = registers;
-      }),
+      });
+    },
 
-    setCurrentPosition: (file, line) =>
+    setCurrentPosition: (file, line) => {
       set((state) => {
         state.currentFile = file;
         state.currentLine = line;
-      }),
+      });
+    },
 
     updateSnapshot: (snapshot) => { set((state) => {
       state.status = snapshot.status;

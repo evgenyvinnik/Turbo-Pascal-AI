@@ -7,7 +7,7 @@ test('file picker displays both columns, scrolls by columns, and opens the click
     const transfer = new DataTransfer();
     for (let index = 0; index < 21; index += 1) {
       const name = `A${String(index).padStart(2, '0')}`;
-      transfer.items.add(new File([`program ${name};\nbegin WriteLn(${index}) end.`], `${name}.PAS`));
+      transfer.items.add(new File([`program ${name};\nbegin WriteLn(${String(index)}) end.`], `${name}.PAS`));
     }
     document.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
   });

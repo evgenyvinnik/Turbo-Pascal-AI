@@ -100,7 +100,8 @@ export class Token implements IToken {
    * @returns A formatted string describing the token
    */
   toString(): string {
-    const typeName = TokenType[this.type] ?? 'UNKNOWN';
-    return `Token(${typeName}, "${this.value}", line ${this.lineNumber})`;
+    // A reverse enum lookup is undefined for a value outside the enum.
+    const names: Record<number, string | undefined> = TokenType;
+    return `Token(${names[this.type] ?? 'UNKNOWN'}, "${this.value}", line ${String(this.lineNumber)})`;
   }
 }

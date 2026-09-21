@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { errorWith } from './matchers';
 import { compileProject } from '../../src/compiler/project';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 import { SourceDebugger } from '../../src/compiler/runtime/SourceDebugger';
@@ -12,7 +13,7 @@ describe('workspace compilation', () => {
     expect(tree.type).toBe('unit');
     expect(bytecode.sources['LIB/BASE.PAS']).toContain('Number=42');
     expect(() => compileProject('unit Broken; interface var n:Missing; implementation end.', 'BROKEN.PAS'))
-      .toThrow(expect.objectContaining({ sourceFile: 'BROKEN.PAS' }));
+      .toThrow(errorWith({ sourceFile: 'BROKEN.PAS' }));
   });
   it('resolves configured unit/include directories and conditional defines from an immutable source snapshot', () => {
     const { bytecode } = compileProject('program Main; uses Values; begin WriteLn(Value); end.', 'MAIN.PAS', {
@@ -29,13 +30,13 @@ describe('workspace compilation', () => {
   it('reports parsing errors in included files using original filenames and lines', () => {
     expect(() => compileProject('program Main;\n{$I invalid.inc}\nbegin end.', 'MAIN.PAS', {
       sources: { 'INVALID.INC': '\nvar X Integer;' },
-    })).toThrow(expect.objectContaining({ lineNumber: 2, sourceFile: 'INVALID.INC' }));
+    })).toThrow(errorWith({ lineNumber: 2, sourceFile: 'INVALID.INC' }));
   });
   it('reports runtime errors in a unit rather than attributing them to the main file', () => {
     const { bytecode } = compileProject('program Main; uses Broken; begin Run; end.', 'MAIN.PAS', {
       sources: { 'BROKEN.PAS': 'unit Broken;\ninterface\nprocedure Run;\nimplementation\nprocedure Run;\nvar x:Integer;\nbegin\nx:=0;\nx:=10 div x;\nend;\nend.' },
     });
-    expect(() => new Machine(bytecode).run()).toThrow(expect.objectContaining({ lineNumber: 9, sourceFile: 'BROKEN.PAS' }));
+    expect(() => { new Machine(bytecode).run(); }).toThrow(errorWith({ lineNumber: 9, sourceFile: 'BROKEN.PAS' }));
   });
   it('distinguishes same-line breakpoints in different units and exposes the actual frame file', () => {
     const { bytecode } = compileProject('program Main;\nuses One,Two;\nbegin One.Run;Two.Run;end.', 'MAIN.PAS', {

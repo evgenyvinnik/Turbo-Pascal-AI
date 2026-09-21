@@ -29,7 +29,7 @@ describe('Borland diagnostic presentation', () => {
     const error = errorFor(source);
     const diagnostic = describePascalDiagnostic(error, 'compiler');
     expect(diagnostic).toMatchObject({ code, message, detail: error.message, lineNumber: error.lineNumber, columnNumber: error.columnNumber });
-    expect(formatPascalDiagnostic(diagnostic)).toBe(`Error ${code}: ${message}`);
+    expect(formatPascalDiagnostic(diagnostic)).toBe(`Error ${String(code)}: ${message}`);
     expect(error.message).toBe(diagnostic.detail);
   });
 
@@ -43,7 +43,7 @@ describe('Borland diagnostic presentation', () => {
     const error = new PascalError(message, 19, 7);
     const diagnostic = describePascalDiagnostic(error, 'runtime');
     expect(diagnostic).toMatchObject({ code, detail: message, lineNumber: 19, columnNumber: 7 });
-    expect(formatPascalDiagnostic(diagnostic)).toMatch(new RegExp(`^Run-time error ${code}: `));
+    expect(formatPascalDiagnostic(diagnostic)).toMatch(new RegExp(`^Run-time error ${String(code)}: `));
   });
 
   test('keeps compiler and runtime number spaces separate', () => {

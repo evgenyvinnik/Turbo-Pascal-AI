@@ -35,7 +35,7 @@ export async function compareRaster(
       image.src = url;
       await image.decode();
       if (image.naturalWidth !== width || image.naturalHeight !== height) {
-        throw new Error(`Expected ${width}×${height} image, got ${image.naturalWidth}×${image.naturalHeight}`);
+        throw new Error(`Expected ${String(width)}×${String(height)} image, got ${String(image.naturalWidth)}×${String(image.naturalHeight)}`);
       }
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -93,14 +93,14 @@ export async function compareRaster(
 
 export function rasterReport(name: string, diff: RasterDiff, masks: RasterMask[]): string {
   return [
-    `${name}: ${diff.pixels} mismatched pixels / ${diff.compared} compared pixels`,
-    ...masks.map((mask) => `Mask x${mask.x} y${mask.y} ${mask.w}×${mask.h}: ${mask.reason}`),
+    `${name}: ${String(diff.pixels)} mismatched pixels / ${String(diff.compared)} compared pixels`,
+    ...masks.map((mask) => `Mask x${String(mask.x)} y${String(mask.y)} ${String(mask.w)}×${String(mask.h)}: ${mask.reason}`),
     '',
     'Mismatched cells (#):',
     ...diff.map.map((row, y) => `${String(y).padStart(2)}  ${row}`),
     '',
     'Cells by mismatched pixel count:',
-    ...diff.cells.map((cell) => `  x${cell.x} y${cell.y}: ${cell.pixels}`),
+    ...diff.cells.map((cell) => `  x${String(cell.x)} y${String(cell.y)}: ${String(cell.pixels)}`),
     '',
   ].join('\n');
 }

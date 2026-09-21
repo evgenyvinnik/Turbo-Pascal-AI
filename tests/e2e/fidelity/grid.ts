@@ -77,7 +77,7 @@ export async function ourGrid(page: Page): Promise<Grid> {
           const fg = nearest(cs.color);
           const bg = nearest(cs.backgroundColor);
           const x0 = Math.round(parseFloat(span.style.left) / cw);
-          Array.from(span.textContent ?? '').forEach((c, i) => {
+          Array.from(span.textContent).forEach((c, i) => {
             const idx = y * cols + x0 + i;
             grid.fg[idx] = fg;
             grid.bg[idx] = bg;
@@ -119,7 +119,7 @@ export async function refGrid(page: Page, png: Buffer): Promise<Grid> {
       img.src = dataUrl;
       await img.decode();
       if (img.naturalWidth !== cols * cw || img.naturalHeight !== rows * ch) {
-        throw new Error(`reference is ${img.naturalWidth}x${img.naturalHeight}`);
+        throw new Error(`reference is ${String(img.naturalWidth)}x${String(img.naturalHeight)}`);
       }
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
@@ -205,7 +205,7 @@ export interface DiffResult {
 const inside = (r: Rect, x: number, y: number) =>
   x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 
-const pair = (fg: number, bg: number) => `${NAMES[fg]}/${NAMES[bg]}`;
+const pair = (fg: number, bg: number) => `${String(NAMES[fg])}/${String(NAMES[bg])}`;
 const set = (fg: number, bg: number) => [fg, bg].sort((a, b) => a - b).join(',');
 
 /**
@@ -260,7 +260,7 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
       }
 
       if (o.blank !== r.blank) {
-        note('presence', x, y, o.blank ? `blank ${NAMES[o.bg]}` : `'${ours.ch[i]}' ${pair(o.fg, o.bg)}`, r.blank ? `blank ${NAMES[r.bg]}` : `ink ${pair(r.fg, r.bg)}`);
+        note('presence', x, y, o.blank ? `blank ${String(NAMES[o.bg])}` : `'${String(ours.ch[i])}' ${pair(o.fg, o.bg)}`, r.blank ? `blank ${String(NAMES[r.bg])}` : `ink ${pair(r.fg, r.bg)}`);
         line += 'P';
       } else if (o.blank) {
         if (o.bg !== r.bg) {
@@ -268,7 +268,7 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
           line += 'B';
         } else line += '.';
       } else if (set(o.fg, o.bg) !== set(r.fg, r.bg)) {
-        note('colour', x, y, `'${ours.ch[i]}' ${pair(o.fg, o.bg)}`, pair(r.fg, r.bg));
+        note('colour', x, y, `'${String(ours.ch[i])}' ${pair(o.fg, o.bg)}`, pair(r.fg, r.bg));
         line += 'C';
       } else line += '.';
     }
@@ -295,15 +295,15 @@ export function formatReport(name: string, ours: Grid, ref: Grid, diff: DiffResu
     refInk.push(line);
   }
   const pad = (n: number) => String(n).padStart(2);
-  const out = [`${name}: ${diff.count} mismatched cells`, ''];
+  const out = [`${name}: ${String(diff.count)} mismatched cells`, ''];
   out.push('    ours'.padEnd(84) + 'diff (P presence, B background, C colour)');
-  for (let y = 0; y < ROWS; y += 1) out.push(`${pad(y)}  ${text[y]}  ${diff.map[y]}`);
+  for (let y = 0; y < ROWS; y += 1) out.push(`${pad(y)}  ${String(text[y])}  ${String(diff.map[y])}`);
   out.push('', '    reference ink');
-  for (let y = 0; y < ROWS; y += 1) out.push(`${pad(y)}  ${refInk[y]}`);
+  for (let y = 0; y < ROWS; y += 1) out.push(`${pad(y)}  ${String(refInk[y])}`);
   out.push('', 'groups:');
   for (const g of diff.groups.slice(0, 40)) {
     out.push(
-      `  ${String(g.count).padStart(4)} ${g.kind.padEnd(10)} ours ${g.ours.padEnd(16)} ref ${g.ref.padEnd(10)} at x${g.box.x}..${g.box.x + g.box.w - 1} y${g.box.y}..${g.box.y + g.box.h - 1}`,
+      `  ${String(g.count).padStart(4)} ${g.kind.padEnd(10)} ours ${g.ours.padEnd(16)} ref ${g.ref.padEnd(10)} at x${String(g.box.x)}..${String(g.box.x + g.box.w - 1)} y${String(g.box.y)}..${String(g.box.y + g.box.h - 1)}`,
     );
   }
   return out.join('\n');

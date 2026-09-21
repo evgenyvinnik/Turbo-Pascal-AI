@@ -102,7 +102,7 @@ export function useCreateFile() {
     },
     onSuccess: (file) => {
       // Invalidate the parent directory cache
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(file.parentPath),
       });
       // Set the file in cache
@@ -132,7 +132,7 @@ export function useUpdateFile() {
         // Update the file in cache
         queryClient.setQueryData(fileSystemKeys.file(variables.path), file);
         // Invalidate recent files
-        queryClient.invalidateQueries({
+        void queryClient.invalidateQueries({
           queryKey: fileSystemKeys.recentFiles(),
         });
       }
@@ -158,11 +158,11 @@ export function useDeleteFile() {
         queryKey: fileSystemKeys.file(path),
       });
       // Invalidate parent directory
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(parentPath),
       });
       // Invalidate recent files
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.recentFiles(),
       });
     },
@@ -188,7 +188,7 @@ export function useCreateDirectory() {
     onSuccess: (directory) => {
       // Invalidate the parent directory cache
       const parentPath = directory.parentPath ?? '/';
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(parentPath),
       });
     },
@@ -209,11 +209,11 @@ export function useDeleteDirectory() {
       // Get parent path for cache invalidation
       const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
       // Invalidate parent directory
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(parentPath),
       });
       // Invalidate all directory queries (subdirectories may be affected)
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.all,
       });
     },
@@ -238,7 +238,7 @@ export function useMoveNode() {
     },
     onSuccess: () => {
       // Invalidate all file system queries as move affects multiple locations
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.all,
       });
     },
@@ -266,7 +266,7 @@ export function useRenameNode() {
       const parentPath =
         variables.path.substring(0, variables.path.lastIndexOf('/')) || '/';
       // Invalidate parent directory
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(parentPath),
       });
       // Remove old file cache

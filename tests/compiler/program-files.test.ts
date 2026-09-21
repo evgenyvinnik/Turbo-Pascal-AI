@@ -27,7 +27,7 @@ describe('atomic browser file imports', () => {
 
   it('keeps all DOS changes uncommitted when browser storage rejects them', async () => {
     const disk = await diskWith({ 'KEPT.BIN': '\0ÿ', 'OLD.TXT': 'old' }, true);
-    expect(() => disk.applyProgramFileChanges(new Map([['NEW.BIN', 'new'], ['OLD.TXT', null]]))).toThrow(/Browser storage/);
+    expect(() => { disk.applyProgramFileChanges(new Map([['NEW.BIN', 'new'], ['OLD.TXT', null]])); }).toThrow(/Browser storage/);
     expect(disk.programDisk.snapshot()).toEqual({ 'KEPT.BIN': '\0ÿ', 'OLD.TXT': 'old' });
   });
   it('preserves the disk when browser persistence rejects a complete batch', async () => {

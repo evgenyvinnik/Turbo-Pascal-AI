@@ -21,16 +21,16 @@ export function coverageMarkdown(data: ReportData): string {
             ? 'Pixel exact'
             : 'Compared'
         : entry.status;
-    return `| ${entry.order} | [${entry.ref}](${entry.url}) | ${status} | ${cell(entry.raw?.pixels)} | ${cell(entry.adjusted?.pixels)} | ${cell(entry.maskedPixels)} |`;
+    return `| ${String(entry.order)} | [${entry.ref}](${entry.url}) | ${status} | ${cell(entry.raw?.pixels)} | ${cell(entry.adjusted?.pixels)} | ${cell(entry.maskedPixels)} |`;
   });
   return [
     '# Turbo Pascal screenshot coverage',
     '',
     `[Open interactive comparison](index.html) · [Original gallery](${data.gallery}) · [Full JSON evidence](coverage.json)`,
     '',
-    `${data.entries.length} gallery screenshots; ${captured.length} fresh captures; ${exact.length} unmasked pixel-exact matches; ${partial.length} partial subject mappings; ${missing.length} uncaptured.`,
+    `${String(data.entries.length)} gallery screenshots; ${String(captured.length)} fresh captures; ${String(exact.length)} unmasked pixel-exact matches; ${String(partial.length)} partial subject mappings; ${String(missing.length)} uncaptured.`,
     '',
-    `${adjustedExact.length} zero-difference adjusted results; ${masked.length} subjects use the explicitly disclosed rectangular exclusions. Adjusted results do not establish full-image equality.`,
+    `${String(adjustedExact.length)} zero-difference adjusted results; ${String(masked.length)} subjects use the explicitly disclosed rectangular exclusions. Adjusted results do not establish full-image equality.`,
     '',
     `Captured ${data.generatedAt} through ${data.finishedAt ?? 'in progress'} with ${data.browser}, 720×400 at device scale 1.`,
     '',
@@ -48,7 +48,7 @@ export function coverageMarkdown(data: ReportData): string {
     '',
     ...data.entries
       .filter((entry) => entry.note?.includes('reference is internally inconsistent'))
-      .map((entry) => `- **${entry.ref}**: ${entry.note}`),
+      .map((entry) => `- **${entry.ref}**: ${String(entry.note)}`),
     '',
     '## Uncaptured and partial subjects',
     '',

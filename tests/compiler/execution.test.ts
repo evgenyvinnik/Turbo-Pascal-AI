@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { errorWith } from './matchers';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Lexer, Stream } from '../../src/compiler/lexer';
 import { Parser } from '../../src/compiler/parser';
@@ -155,7 +156,7 @@ describe('Pascal execution semantics', () => {
 
   it('rejects an undeclared identifier at its source line', () => {
     expect(() => compile('program T;\nbegin\n  Missing := 4\nend.')).toThrowError(
-      expect.objectContaining({ name: 'PascalError', lineNumber: 3 }),
+      errorWith({ name: 'PascalError', lineNumber: 3 }),
     );
   });
 
@@ -166,13 +167,13 @@ describe('Pascal execution semantics', () => {
 
   it('reports division by zero at the runtime source line', () => {
     const machine = new Machine(compile('program T; var zero:Integer;\nbegin\n  WriteLn(1 div zero)\nend.'));
-    expect(() => machine.run()).toThrowError(expect.objectContaining({ lineNumber: 3, message: 'Division by zero' }));
+    expect(() => { machine.run(); }).toThrowError(errorWith({ lineNumber: 3, message: 'Division by zero' }));
     expect(machine.getState()).toBe(MachineState.ERROR);
   });
 
   it('stops runaway programs at the instruction limit', () => {
     const machine = new Machine(compile('program T; begin while True do begin end end.'), { maxInstructions: 100 });
-    expect(() => machine.run()).toThrow(/Maximum instruction count/);
+    expect(() => { machine.run(); }).toThrow(/Maximum instruction count/);
     expect(machine.getState()).toBe(MachineState.ERROR);
   });
 
@@ -229,7 +230,7 @@ describe('Pascal execution semantics', () => {
   it('rejects invalid numeric input without coercing it to zero', () => {
     const machine = new Machine(compile('program T; var n: Integer; begin ReadLn(n) end.'));
     machine.setInput(['hello']);
-    expect(() => machine.run()).toThrow(/Invalid integer input/);
+    expect(() => { machine.run(); }).toThrow(/Invalid integer input/);
     expect(machine.getState()).toBe(MachineState.ERROR);
   });
 
@@ -261,7 +262,7 @@ describe('Pascal execution semantics', () => {
 
   it('reports out-of-range array access before corrupting another variable', () => {
     const machine = new Machine(compile('{$R+}program T; var a: array[1..2] of Integer; begin a[3] := 7 end.'));
-    expect(() => machine.run()).toThrow(/Array index 3 out of bounds/);
+    expect(() => { machine.run(); }).toThrow(/Array index 3 out of bounds/);
     expect(machine.getState()).toBe(MachineState.ERROR);
   });
 
@@ -286,7 +287,7 @@ describe('Pascal execution semantics', () => {
 
   it('limits output growth from a runaway printing loop', () => {
     const machine = new Machine(compile('program T; begin while True do Write(\'12345\') end.'), { maxOutputChars: 20 });
-    expect(() => machine.run()).toThrow(/Maximum output size/);
+    expect(() => { machine.run(); }).toThrow(/Maximum output size/);
     expect(machine.getOutput().join('\n').length).toBeLessThanOrEqual(20);
   });
 });
@@ -300,8 +301,8 @@ it('checks the original ReadLn destination when input changes its array index', 
       WriteLn(a[1])
     end.`));
   machine.setInput(['2 9']);
-  expect(() => machine.run()).toThrowError(
-    expect.objectContaining({ message: 'Range check error (1..3)', lineNumber: 5 }),
+  expect(() => { machine.run(); }).toThrowError(
+    errorWith({ message: 'Range check error (1..3)', lineNumber: 5 }),
   );
   expect(machine.getState()).toBe(MachineState.ERROR);
 });

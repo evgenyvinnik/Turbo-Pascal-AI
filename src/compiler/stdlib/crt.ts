@@ -7,7 +7,7 @@
  */
 
 import { TypeKind } from '../symbols/Symbol';
-import { ParamMode, type BuiltinParam, type BuiltinDef } from './builtin';
+import { ParamMode, type BuiltinDef } from './builtin';
 
 /**
  * CRT Unit name constant
@@ -59,9 +59,6 @@ export enum TextModes {
  * These are offset from the built-in procedures to avoid conflicts
  */
 export enum CrtProcedure {
-  /** Base offset for CRT procedures */
-  BASE = 100,
-
   // Screen control
   CLRSCR = 100,
   CLREOL = 101,

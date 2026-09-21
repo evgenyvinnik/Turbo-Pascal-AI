@@ -126,7 +126,7 @@ export const rejectedCases: ReferenceCase[] = [
   ['var-string-capacity-mismatch', "type S=String[3];var v:S;procedure P(var s:String);begin s:='abcdef'end;begin P(v)end."],
   ['constant-used-as-var-argument', 'const n=7;procedure P(var x:Integer);begin x:=8 end;begin P(n)end.'],
   ['overlapping-case-labels', 'var n:Integer;begin n:=2;case n of 1..3:WriteLn(1);3..5:WriteLn(2)end end.'],
-].map(([name, body]) => ({ name: name!, source: `program T;${body}`, reject: true }));
+].map(([name, body]) => ({ name: name!, source: `program T;${String(body)}`, reject: true }));
 
 /** Independent expected results use JS sorting/set operations, not Pascal VM code. */
 export function generatedCases(count = 32): ReferenceCase[] {
@@ -151,16 +151,16 @@ export function generatedCases(count = 32): ReferenceCase[] {
       name: `generated-sort-sets-arithmetic-${String(caseIndex + 1).padStart(2, '0')}`,
       source: `program Corpus;type Vec=array[-2..3]of Integer;SmallSet=set of 0..63;
 var a:Vec;i,j,key,sum,u,v,w:Integer;s,t:SmallSet;
-begin ${values.map((value, index) => `a[${index - 2}]:=${value};`).join('')}
+begin ${values.map((value, index) => `a[${String(index - 2)}]:=${String(value)};`).join('')}
 for i:=-1 to 3 do begin key:=a[i];j:=i-1;
 while j>=-2 do begin if a[j]<=key then Break;a[j+1]:=a[j];j:=j-1 end;a[j+1]:=key end;
 WriteLn(a[-2],',',a[-1],',',a[0],',',a[1],',',a[2],',',a[3]);
 sum:=0;for i:=-2 to 3 do sum:=sum+a[i]*a[i];WriteLn(sum);
 s:=[${left.join(',')}];t:=[${right.join(',')}];u:=0;v:=0;w:=0;
 for i:=0 to 63 do begin if i in (s+t)then u:=u+1;if i in (s*t)then v:=v+1;if i in (s-t)then w:=w+1 end;
-WriteLn(u,',',v,',',w);i:=${dividend};j:=${divisor};WriteLn(i div j,',',i mod j)end.`,
+WriteLn(u,',',v,',',w);i:=${String(dividend)};j:=${String(divisor)};WriteLn(i div j,',',i mod j)end.`,
       output: [sorted.join(','), String(values.reduce((sum, value) => sum + value * value, 0)),
-        `${union.length},${intersection.length},${difference.length}`, `${quotient},${remainder}`],
+        `${String(union.length)},${String(intersection.length)},${String(difference.length)}`, `${String(quotient)},${String(remainder)}`],
     };
   });
 }

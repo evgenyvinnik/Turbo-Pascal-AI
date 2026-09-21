@@ -14,15 +14,15 @@ async function readWorkspace(page: Page): Promise<SavedWorkspace | null> {
   return page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { resolve(request.result); };
+      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
     try {
       if (!database.objectStoreNames.contains('workspaces')) return null;
       const read = database.transaction('workspaces').objectStore('workspaces').get('active');
       return await new Promise<SavedWorkspace | null>((resolve, reject) => {
-        read.onsuccess = () => resolve((read.result as SavedWorkspace | undefined) ?? null);
-        read.onerror = () => reject(read.error);
+        read.onsuccess = () => { resolve((read.result as SavedWorkspace | undefined) ?? null); };
+        read.onerror = () => { reject(read.error ?? new Error('IndexedDB request failed')); };
       });
     } finally {
       database.close();
@@ -34,14 +34,14 @@ async function recoveryWorkspaces(page: Page): Promise<SavedWorkspace[]> {
   return page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { resolve(request.result); };
+      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
     try {
       const read = database.transaction('workspaces').objectStore('workspaces').getAll();
       return await new Promise<SavedWorkspace[]>((resolve, reject) => {
-        read.onsuccess = () => resolve((read.result as SavedWorkspace[]).filter((record) => record.id.startsWith('recovery:')));
-        read.onerror = () => reject(read.error);
+        read.onsuccess = () => { resolve((read.result as SavedWorkspace[]).filter((record) => record.id.startsWith('recovery:'))); };
+        read.onerror = () => { reject(read.error ?? new Error('IndexedDB request failed')); };
       });
     } finally {
       database.close();
@@ -60,15 +60,15 @@ async function replaceStoredWorkspace(page: Page, record: SavedWorkspace): Promi
   await page.evaluate(async (value) => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { resolve(request.result); };
+      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
     try {
       const transaction = database.transaction('workspaces', 'readwrite');
       transaction.objectStore('workspaces').put(value);
       await new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error);
+        transaction.oncomplete = () => { resolve(); };
+        transaction.onabort = () => { reject(transaction.error ?? new Error('IndexedDB transaction failed')); };
       });
     } finally {
       database.close();
@@ -131,16 +131,16 @@ test('adding workspace persistence preserves files, settings and sessions in an 
       }
     };
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { resolve(request.result); };
+      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
     const transaction = database.transaction(['files', 'settings', 'sessions'], 'readwrite');
     transaction.objectStore('files').put({ path: '/KEPT.PAS', name: 'KEPT.PAS', content: 'program Kept;begin end.' });
     transaction.objectStore('settings').put({ category: 'editor', data: { tabSize: 6 }, updatedAt: 123 });
     transaction.objectStore('sessions').put({ id: 1, name: 'Existing session', openFiles: ['/KEPT.PAS'], updatedAt: 123 });
     await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(transaction.error);
+      transaction.oncomplete = () => { resolve(); };
+      transaction.onabort = () => { reject(transaction.error ?? new Error('IndexedDB transaction failed')); };
     });
     database.close();
   });
@@ -151,16 +151,16 @@ test('adding workspace persistence preserves files, settings and sessions in an 
   const preserved = await page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { resolve(request.result); };
+      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
     try {
       const transaction = database.transaction(['files', 'settings', 'sessions']);
       const read = (table: string, key: IDBValidKey): Promise<unknown> => {
         const entry = transaction.objectStore(table).get(key);
         return new Promise((resolve, reject) => {
-          entry.onsuccess = () => resolve(entry.result as unknown);
-          entry.onerror = () => reject(entry.error);
+          entry.onsuccess = () => { resolve(entry.result as unknown); };
+          entry.onerror = () => { reject(entry.error ?? new Error('IndexedDB request failed')); };
         });
       };
       return await Promise.all([read('files', '/KEPT.PAS'), read('settings', 'editor'), read('sessions', 1)]);
@@ -180,7 +180,7 @@ test('reload restores unsaved files, tiled layout, selection, scroll, undo and I
   // can exhaust the normal setup budget in WebKit under concurrent browser load.
   test.slow();
   const ide = await Ide.open(page);
-  await ide.typeSource(Array.from({ length: 32 }, (_, index) => `Source line ${index + 1}`).join('\n'));
+  await ide.typeSource(Array.from({ length: 32 }, (_, index) => `Source line ${String(index + 1)}`).join('\n'));
   await ide.openMenu('f');
   await ide.chooseItem('n');
   await ide.type('SECOND!');
@@ -332,8 +332,8 @@ test('malformed saved data cannot crash the editor', async ({ page }) => {
   await page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { resolve(request.result); };
+      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
     });
     const transaction = database.transaction('workspaces', 'readwrite');
     transaction.objectStore('workspaces').put({
@@ -341,8 +341,8 @@ test('malformed saved data cannot crash the editor', async ({ page }) => {
       payload: { desktop: { windows: [{ kind: 'edit', bufferId: 'missing' }] } },
     });
     await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(transaction.error);
+      transaction.oncomplete = () => { resolve(); };
+      transaction.onabort = () => { reject(transaction.error ?? new Error('IndexedDB transaction failed')); };
     });
     database.close();
   });
@@ -366,6 +366,7 @@ test('failed IndexedDB save keeps editing intact and a later save recovers', asy
   await ide.type('Durable');
   const durable = await savedWorkspace(page, 'Durable');
   await page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- the original is restored later and always called with .call(this)
     const original = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey) {
       if (this.name === 'workspaces') throw new DOMException('Injected disk quota failure', 'QuotaExceededError');
@@ -378,8 +379,7 @@ test('failed IndexedDB save keeps editing intact and a later save recovers', asy
   await expect(ide.row(2)).toContainText('Durable work still here');
   expect(await readWorkspace(page)).toEqual(durable);
   await page.evaluate(() => {
-    const restore: unknown = Reflect.get(window, '__restorePersistencePut');
-    if (typeof restore === 'function') restore();
+    (Reflect.get(window, '__restorePersistencePut') as (() => void) | undefined)?.();
     Reflect.deleteProperty(window, '__restorePersistencePut');
   });
   await ide.type('!');
@@ -418,6 +418,7 @@ test('a failed initial read blocks editing until retry restores the durable work
   await ide.type('Read retry preserves source');
   const durable = await savedWorkspace(page, 'Read retry preserves source');
   await page.addInitScript(() => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- the original is restored later and always called with .call(this)
     const original = IDBObjectStore.prototype.get;
     IDBObjectStore.prototype.get = function (key: IDBValidKey | IDBKeyRange) {
       if (this.name === 'workspaces') throw new DOMException('Injected temporary read failure', 'UnknownError');
@@ -432,8 +433,7 @@ test('a failed initial read blocks editing until retry restores the durable work
   await page.keyboard.type('Discarded while loading');
   expect((await new Ide(page).screenText()).join('\n')).not.toContain('Discarded while loading');
   await page.evaluate(() => {
-    const restore: unknown = Reflect.get(window, '__restorePersistenceGet');
-    if (typeof restore === 'function') restore();
+    (Reflect.get(window, '__restorePersistenceGet') as (() => void) | undefined)?.();
     Reflect.deleteProperty(window, '__restorePersistenceGet');
   });
   expect(await readWorkspace(page)).toEqual(durable);
