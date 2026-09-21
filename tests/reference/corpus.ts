@@ -1,11 +1,14 @@
 import { languageCases } from './language-corpus';
 import { switchCases } from './switch-corpus';
+import { exitCases } from './exit-corpus';
 /** Portable TP-mode programs, checked against an independent Free Pascal run. */
 export interface ReferenceCase {
   name: string;
   source: string;
   input?: string;
   output?: string[];
+  /** Expected exit status (default 0). A run-time error exits with its error number. */
+  exitCode?: number;
   reject?: true;
   units?: Record<string, string>;
 }
@@ -165,4 +168,4 @@ WriteLn(u,',',v,',',w);i:=${String(dividend)};j:=${String(divisor)};WriteLn(i di
   });
 }
 
-export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases];
+export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases];

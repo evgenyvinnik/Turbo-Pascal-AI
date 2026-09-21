@@ -9,6 +9,7 @@ import { Lexer, Stream } from '../../src/compiler/lexer';
 import { Parser } from '../../src/compiler/parser';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 import { PascalError } from '../../src/compiler/errors';
+import { describePascalDiagnostic } from '../../src/compiler/errors/diagnostics';
 import { referenceCases, type ReferenceCase } from './corpus';
 
 const execute = promisify(execFile);
@@ -24,7 +25,8 @@ await mkdir(path.dirname(reportPath), { recursive: true });
 await writeFile(reportPath, `${JSON.stringify({ status: 'running', startedAt, compiler }, null, 2)}\n`);
 const temporary = await mkdtemp(path.join(tmpdir(), 'turbo-pascal-reference-'));
 let compilerFlags: string[] = [];
-const normalize = (text: string) => text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+// No output is no lines; a lone newline is one empty line.
+const normalize = (text: string) => text === '' ? [] : text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 async function fingerprint(): Promise<string> {
@@ -48,16 +50,22 @@ function localResult(subject: ReferenceCase) {
       resolveUnit: name => Object.entries(subject.units ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1],
     });
   } catch (error) {
-    return { compiled: false, output: null, error: String(error), diagnostic: error instanceof PascalError };
+    return { compiled: false, output: null, exitCode: null, error: String(error), diagnostic: error instanceof PascalError };
   }
+  let machine: Machine | undefined;
   try {
-    const machine = new Machine(bytecode, { maxInstructions: 100_000 });
+    machine = new Machine(bytecode, { maxInstructions: 100_000 });
     machine.setInput(subject.input ? subject.input.replace(/\n$/, '').split('\n') : []);
     machine.run();
     if (machine.getState() !== MachineState.STOPPED) throw new Error(`Unexpected VM state: ${machine.getState()}`);
-    return { compiled: true, output: machine.getOutput(), error: null, diagnostic: false };
+    return { compiled: true, output: machine.getOutput(), exitCode: machine.getExitCode(), error: null, diagnostic: false };
   } catch (error) {
-    return { compiled: true, output: null, error: String(error), diagnostic: false };
+    // A run-time error with a Borland number ends the program as Turbo Pascal
+    // does: the output so far, and that number as the exit code.
+    if (machine?.getState() === MachineState.ERROR && describePascalDiagnostic(error, 'runtime').code !== undefined) {
+      return { compiled: true, output: machine.getOutput(), exitCode: machine.getExitCode(), error: null, diagnostic: false };
+    }
+    return { compiled: true, output: null, exitCode: null, error: String(error), diagnostic: false };
   }
 }
 
@@ -74,33 +82,39 @@ async function compare(subject: ReferenceCase) {
     await execute(compiler, [...compilerFlags, `-o${executable}`, sourcePath], {
       cwd: directory, timeout: 60_000, maxBuffer: 1024 * 1024,
     });
-    reference = { compiled: true, output: null as string[] | null, error: null as string | null };
+    reference = { compiled: true, output: null as string[] | null, exitCode: null as number | null, error: null as string | null };
   } catch (error) {
     const failure = error as { code?: unknown; stdout?: string; stderr?: string; killed?: boolean };
     if (typeof failure.code !== 'number' || failure.killed) throw error;
-    reference = { compiled: false, output: null, error: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    reference = { compiled: false, output: null, exitCode: null, error: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
   }
   if (reference.compiled) {
     try {
-      const output = await new Promise<string>((resolve, reject) => {
+      const run = await new Promise<{ stdout: string; exitCode: number }>((resolve, reject) => {
         const child = execFile(executable, [], { cwd: directory, timeout: 5000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-          if (error) reject(error as Error); else resolve(stdout);
+          // A nonzero exit is a result to compare, not a failure of the run.
+          if (!error) resolve({ stdout, exitCode: 0 });
+          else if (typeof error.code === 'number' && !error.killed) resolve({ stdout, exitCode: error.code });
+          else reject(error as Error);
         });
         child.stdin?.end(subject.input ?? '');
       });
-      reference.output = normalize(output);
+      reference.output = normalize(run.stdout);
+      reference.exitCode = run.exitCode;
     } catch (error) { reference.error = String(error); }
   }
   const referenceMatchesExpectation = subject.reject
-    ? !reference.compiled : reference.compiled && reference.error === null && equal(reference.output, subject.output);
+    ? !reference.compiled
+    : reference.compiled && reference.error === null && equal(reference.output, subject.output) && reference.exitCode === (subject.exitCode ?? 0);
   const enginesAgree = subject.reject
     ? !local.compiled && local.diagnostic && !reference.compiled
-    : local.compiled && reference.compiled && local.error === null && reference.error === null && equal(local.output, reference.output);
+    : local.compiled && reference.compiled && local.error === null && reference.error === null
+      && equal(local.output, reference.output) && local.exitCode === reference.exitCode;
   return {
     name: subject.name, passed: referenceMatchesExpectation && enginesAgree,
     referenceMatchesExpectation, enginesAgree,
     sourceHash: createHash('sha256').update(subject.source).update(JSON.stringify(subject.units ?? {})).digest('hex'),
-    expected: subject.reject ? 'compile rejection' : subject.output,
+    expected: subject.reject ? 'compile rejection' : { output: subject.output, exitCode: subject.exitCode ?? 0 },
     local, reference,
   };
 }
@@ -129,7 +143,7 @@ try {
     startedAt, finishedAt: new Date().toISOString(), compiler, version, flags: compilerFlags,
     mode: 'Turbo Pascal compatibility', selectedCases: selectedCases.length, filter: process.env.PASCAL_REFERENCE_FILTER ?? null, generatedSeed: '0x5eed1234',
     sourceHashStart, sourceHashEnd, sourceChangedDuringRun: sourceHashStart !== sourceHashEnd,
-    scope: 'Portable language semantics, typed input and text files; compares output lines with normalized line endings. Excludes DOS/hardware, Real48 ABI and unsupported dialect extensions.',
+    scope: 'Portable language semantics, typed input and text files; compares output lines with normalized line endings, and exit codes. Excludes DOS/hardware, Real48 ABI and unsupported dialect extensions.',
     passed: results.filter(result => result.passed).length,
     failed: results.filter(result => !result.passed).length,
     results,
