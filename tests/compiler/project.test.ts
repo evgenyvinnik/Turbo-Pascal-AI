@@ -38,6 +38,21 @@ describe('workspace compilation', () => {
     });
     expect(() => { new Machine(bytecode).run(); }).toThrow(errorWith({ lineNumber: 9, sourceFile: 'BROKEN.PAS' }));
   });
+  it('names a program without a heading after its file, and the call stack shows that name', () => {
+    const { tree, bytecode } = compileProject("begin\n  WriteLn('x');\nend.", 'HELLO.PAS');
+    expect(tree).toMatchObject({ type: 'program', name: 'HELLO' });
+    const machine = new Machine(bytecode);
+    machine.reset();
+    const debuggerSession = new SourceDebugger(machine, bytecode);
+    debuggerSession.setBreakpoints(() => [{ file: 'C:\\HELLO.PAS', line: 2, enabled: true }]);
+    debuggerSession.command('run');
+    debuggerSession.runSlice();
+    expect(debuggerSession.isPaused()).toBe(true);
+    expect(debuggerSession.frames().map(frame => frame.name)).toEqual(['HELLO']);
+  });
+  it('keeps the declared name of a program with a heading', () => {
+    expect(compileProject('program Demo; begin end.', 'HELLO.PAS').tree).toMatchObject({ name: 'Demo' });
+  });
   it('distinguishes same-line breakpoints in different units and exposes the actual frame file', () => {
     const { bytecode } = compileProject('program Main;\nuses One,Two;\nbegin One.Run;Two.Run;end.', 'MAIN.PAS', {
       sources: Object.fromEntries(['One', 'Two'].map(name => [name + '.pas', `unit ${name};\ninterface procedure Run;\nimplementation procedure Run;\nbegin WriteLn('${name}');end;\nend.`])),

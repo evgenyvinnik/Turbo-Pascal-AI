@@ -101,4 +101,13 @@ export const languageCases: ReferenceCase[] = [
     procedure Bad(n:Char);far;begin end;begin callback:=Bad end.`,reject:true },
   { name:'reject-nested-procedural-value',source:`program Corpus;type TProc=procedure;var callback:TProc;
     procedure Outer;procedure Inner;far;begin end;begin callback:=Inner end;begin Outer end.`,reject:true },
+  // The program heading is optional in Turbo Pascal.
+  { name:'program-without-heading',source:`var i:Integer;begin for i:=1 to 3 do Write(i);WriteLn end.`,output:['123'] },
+  { name:'program-without-heading-declarations-first',source:`const N=2;type T=array[1..N]of Integer;var a:T;
+    procedure Show;begin WriteLn(a[1]+a[2])end;begin a[1]:=20;a[2]:=22;Show end.`,output:['42'] },
+  { name:'program-without-heading-empty',source:`begin end.`,output:[] },
+  { name:'program-without-heading-uses-first',units:{Helper:`unit Helper;interface function Twice(n:Integer):Integer;
+    implementation function Twice(n:Integer):Integer;begin Twice:=n*2 end;end.`},
+    source:`uses Helper;begin WriteLn(Twice(21))end.`,output:['42'] },
+  { name:'program-heading-with-parameters',source:`program P(input,output);begin WriteLn('still fine')end.`,output:['still fine'] },
 ];

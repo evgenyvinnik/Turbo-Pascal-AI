@@ -176,22 +176,26 @@ export class Parser {
 
   /**
    * Parses a Pascal program
-   * program ::= 'program' identifier ['(' identifier-list ')'] ';' block '.'
+   * program ::= ['program' identifier ['(' identifier-list ')'] ';'] block '.'
+   * Turbo Pascal makes the heading optional; without one the name is empty.
    */
   private parseProgram(): ProgramNode {
     const line = this.lineNumber;
 
-    this.expectReservedWord('program');
-    const name = this.expectIdentifier();
-
-    // Optional program parameters (e.g., program test(input, output);)
-    if (this.isSymbol('(')) {
+    let name = '';
+    if (this.isReservedWord('program')) {
       this.advance();
-      this.parseIdentifierList();
-      this.expectSymbol(')');
-    }
+      name = this.expectIdentifier();
 
-    this.expectSymbol(';');
+      // Optional program parameters (e.g., program test(input, output);)
+      if (this.isSymbol('(')) {
+        this.advance();
+        this.parseIdentifierList();
+        this.expectSymbol(')');
+      }
+
+      this.expectSymbol(';');
+    }
 
     // Optional uses clause
     let uses: string[] | undefined;
