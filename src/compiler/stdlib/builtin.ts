@@ -138,6 +138,15 @@ export enum BuiltinProcedure {
   SWAP = 65,
   HIGH = 66,
   LOW = 67,
+  FLUSH = 82,
+  SETTEXTBUF = 83,
+  GETMEM = 84,
+  FREEMEM = 85,
+  MEMAVAIL = 86,
+  MAXAVAIL = 87,
+  RUNERROR = 88,
+  PARAMCOUNT = 89,
+  PARAMSTR = 90,
 }
 
 /**
@@ -579,6 +588,115 @@ export const FILE_BUILTINS: BuiltinDef[] = [
 /**
  * All built-in procedures and functions
  */
+/**
+ * The rest of Turbo Pascal's System unit: memory, byte and program routines
+ */
+export const SYSTEM_BUILTINS: BuiltinDef[] = [
+  {
+    name: 'FillChar',
+    isFunction: false,
+    params: [
+      { name: 'X', type: TypeKind.POINTER, mode: ParamMode.VAR },
+      { name: 'Count', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+      { name: 'Value', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+    ],
+    description: 'Fill the first Count bytes of a variable with a byte or character',
+    procedureIndex: BuiltinProcedure.FILLCHAR,
+  },
+  {
+    name: 'Move',
+    isFunction: false,
+    params: [
+      { name: 'Source', type: TypeKind.POINTER, mode: ParamMode.VAR },
+      { name: 'Dest', type: TypeKind.POINTER, mode: ParamMode.VAR },
+      { name: 'Count', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+    ],
+    description: 'Copy Count bytes from one variable to another',
+    procedureIndex: BuiltinProcedure.MOVE,
+  },
+  ...(
+    [
+      ['Hi', BuiltinProcedure.HI, 'Return the high-order byte of a word'],
+      ['Lo', BuiltinProcedure.LO, 'Return the low-order byte of a word'],
+      ['Swap', BuiltinProcedure.SWAP, 'Exchange the high- and low-order bytes of a word'],
+    ] as const
+  ).map(([name, procedureIndex, description]) => ({
+    name,
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: [{ name: 'X', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
+    description,
+    procedureIndex,
+  })),
+  {
+    name: 'Addr',
+    isFunction: true,
+    returnType: TypeKind.POINTER,
+    params: [{ name: 'X', type: TypeKind.POINTER, mode: ParamMode.VAR }],
+    description: 'Return the address of a variable, as @ does',
+    procedureIndex: BuiltinProcedure.ADDR,
+  },
+  {
+    name: 'Flush',
+    isFunction: false,
+    params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }],
+    description: 'Write out the buffer of a text file open for output',
+    procedureIndex: BuiltinProcedure.FLUSH,
+  },
+  {
+    name: 'SetTextBuf',
+    isFunction: false,
+    params: [
+      { name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR },
+      { name: 'Buf', type: TypeKind.POINTER, mode: ParamMode.VAR },
+      { name: 'Size', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true },
+    ],
+    description: 'Give a text file its own buffer',
+    procedureIndex: BuiltinProcedure.SETTEXTBUF,
+  },
+  ...(['GetMem', 'FreeMem'] as const).map((name) => ({
+    name,
+    isFunction: false,
+    params: [
+      { name: 'P', type: TypeKind.POINTER, mode: ParamMode.VAR },
+      { name: 'Size', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+    ],
+    description: name === 'GetMem' ? 'Allocate a heap block of Size bytes' : 'Release a block from GetMem',
+    procedureIndex: name === 'GetMem' ? BuiltinProcedure.GETMEM : BuiltinProcedure.FREEMEM,
+  })),
+  ...(['MemAvail', 'MaxAvail'] as const).map((name) => ({
+    name,
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: [],
+    description: name === 'MemAvail' ? 'Return the free heap space' : 'Return the largest free heap block',
+    procedureIndex: name === 'MemAvail' ? BuiltinProcedure.MEMAVAIL : BuiltinProcedure.MAXAVAIL,
+  })),
+  {
+    name: 'RunError',
+    isFunction: false,
+    params: [{ name: 'ErrorCode', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true }],
+    description: 'Stop the program with a run-time error',
+    procedureIndex: BuiltinProcedure.RUNERROR,
+  },
+  {
+    name: 'ParamCount',
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: [],
+    description: 'Return the number of command-line parameters',
+    procedureIndex: BuiltinProcedure.PARAMCOUNT,
+  },
+  {
+    name: 'ParamStr',
+    isFunction: true,
+    returnType: TypeKind.STRING,
+    params: [{ name: 'Index', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
+    description: 'Return a command-line parameter; ParamStr(0) is the program',
+    procedureIndex: BuiltinProcedure.PARAMSTR,
+  },
+];
+
 export const ALL_BUILTINS: BuiltinDef[] = [
   ...IO_BUILTINS,
   ...ORDINAL_BUILTINS,
@@ -589,6 +707,7 @@ export const ALL_BUILTINS: BuiltinDef[] = [
   ...CONTROL_BUILTINS,
   ...RANDOM_BUILTINS,
   ...FILE_BUILTINS,
+  ...SYSTEM_BUILTINS,
 ];
 
 /**

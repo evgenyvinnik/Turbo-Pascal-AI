@@ -21,6 +21,10 @@ export enum InternalProcedure {
   STRING_CHARACTER_ADDRESS = 900,
   COPY_AGGREGATE_CELL = 901,
   LOAD_AGGREGATE_CELL = 902,
+  /** Copy cells to a new heap block, for a value open array parameter. */
+  COPY_TO_HEAP = 903,
+  /** Release a block from COPY_TO_HEAP when the routine returns. */
+  FREE_HEAP_COPY = 904,
 }
 
 /**

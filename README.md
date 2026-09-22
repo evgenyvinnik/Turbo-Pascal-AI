@@ -2,6 +2,8 @@
 
 A web-based recreation of the classic Turbo Pascal V7 IDE, bringing the authentic DOS development experience to modern browsers.
 
+**Try it:** <https://evgenyvinnik.github.io/Turbo-Pascal-AI/>, deployed from `main` by GitHub Pages.
+
 ![Turbo Pascal](https://img.shields.io/badge/Turbo%20Pascal-V7-blue)
 ![React](https://img.shields.io/badge/React-19-61dafb)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6)
@@ -38,14 +40,16 @@ is also retained in the DOM for accessibility and interaction tests.
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) (recommended) or Node.js 18+
+- [Bun](https://bun.sh/) 1.3 or later, which installs dependencies and runs every script
+- Node.js 22 (what CI uses) for Vite and Playwright
+- [Free Pascal](https://www.freepascal.org/download.html) 3.2.2, only for the reference and FPC suite commands
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/turbo-pascal-ide.git
-cd turbo-pascal-ide
+git clone https://github.com/evgenyvinnik/Turbo-Pascal-AI.git
+cd Turbo-Pascal-AI
 
 # Install dependencies
 bun install
@@ -145,13 +149,23 @@ src/
 ├── compiler/          # Pascal compiler
 │   ├── lexer/         # Tokenizer
 │   ├── parser/        # AST parser
-│   ├── codegen/       # Bytecode generator
-│   ├── runtime/       # P-machine VM
-│   └── stdlib/        # Standard library (CRT, Graph)
+│   ├── symbols/       # Symbol tables
+│   ├── codegen/       # Bytecode generator, Real48 and 8087 arithmetic
+│   ├── runtime/       # P-machine VM, virtual files, source debugger
+│   ├── stdlib/        # Standard library (System, CRT, Graph, DOS)
+│   └── errors/        # Pascal diagnostics
 ├── components/        # Painters that draw into the cell buffer
+├── routes/            # TanStack Router
 ├── stores/            # Zustand state management
-├── services/          # IndexedDB persistence
-└── i18n/              # Internationalization
+├── services/          # IndexedDB persistence and the DOS emulator
+├── hooks/             # React hooks
+├── styles/            # StyleX theme tokens and Turbo Pascal attributes
+└── i18n/              # Translations (en, de, ru)
+tests/
+├── compiler/          # Vitest unit tests
+├── reference/         # Programs checked against Free Pascal
+├── fpc-suite/         # Runner for Free Pascal's own test suite
+└── e2e/               # Playwright behaviour, visual and fidelity tests
 ```
 
 ## Technology Stack
@@ -160,9 +174,12 @@ src/
 - **Styling**: StyleX for CSS-in-JS
 - **State**: Zustand with Immer
 - **Storage**: IndexedDB via Dexie
-- **Routing**: TanStack Router
+- **Routing and data**: TanStack Router and TanStack Query
+- **Offline**: vite-plugin-pwa
+- **Translations**: i18next
+- **DOS emulation**: js-dos (DOSBox and DOSBox-X)
 - **Build**: Vite + Bun
-- **Testing**: Vitest + Playwright
+- **Testing**: Vitest + Playwright, with Free Pascal as a reference compiler
 
 ## Browser Workspace
 
@@ -212,10 +229,15 @@ bounded output buffer to keep runaway programs recoverable.
 Supported constructs include scalar values, constants, typed constants
 (initialized variables that keep their values between calls, with array,
 record, set and global-address values), aliases, enums, subranges, fixed
-arrays, records, nested and recursive routines, value and `var` parameters,
+arrays, records with variant parts, nested and recursive routines,
 `for`/`while`/`repeat`, `if`/`case`, `Break`/`Continue`/`Exit`, formatted
-output, and the registered math, ordinal, and string functions.
-The former unsupported categories now execute:
+output, and the registered math, ordinal, and string functions. Routines take
+value, `var`, `const`, untyped and open array parameters; `High`, `Low` and
+`SizeOf` of an open array come from the caller, and a value open array is
+copied for the routine. Standard functions such as `Ord`, `Chr`, `SizeOf` and
+`Round` are worked out while compiling when their arguments are constant, so a
+constant that cannot fit is reported then rather than at run time. Beyond the
+core language:
 
 - **Units:** source units with interface/implementation sections, private declarations, qualified names, dependencies, and ordered initialization. Compilation resolves unsaved buffers and the virtual drive, including configured unit/include directories. Units can compile independently; run a program that uses them to execute initialization. Source errors, breakpoints, and watches retain the originating unit/include file.
 - **Objects:** fields, inheritance, virtual methods, constructors/destructors, `Self`, `inherited`, private members, constructor `Fail`, `New`/`Dispose`, and object value assignment. FAR procedural variables support callbacks, signature checks, and nil/`Assigned`.
@@ -226,6 +248,7 @@ The former unsupported categories now execute:
 - **CRT:** cursor positioning, windows, colors, clearing, line insertion/deletion, scrolling, text modes, keyboard input, sound, and nonblocking delays.
 - **Graph:** a palette-index VGA framebuffer with pixels, lines, rectangles, bars, arcs/ellipses, sectors, flood fills, viewports, line/fill styles, and bitmap/stroke text. The default font is the IBM 8×8 bitmap. Non-default fonts load `.CHR` files from the virtual drive using the path supplied to `InitGraph`; original Borland font files are not bundled. `SetUserCharSize` supports custom stroke scaling.
 - **DOS:** date/time getters and setters use a virtual clock; environment values and disk-capacity queries refer to the virtual DOS environment.
+- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `GetMem`/`FreeMem`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables that share another variable's storage.
 
 `Byte`, `ShortInt`, `Word`, `Integer`, and `LongInt` retain their Pascal widths.
 Integer expression promotion and overflow follow those widths, including
@@ -246,17 +269,20 @@ them: UTF-8 `.pas` files open in the editor, while data and `.CHR` font files
 retain their original bytes under their filenames. Use `Assign(f, 'data.txt')`
 for imported data or an empty `InitGraph` path for fonts imported at the root.
 Imports are atomic and subject to browser storage capacity; rename conflicting
-filenames to keep both copies. A failed batch preserves existing files.
-Pascal programs cannot access the
-host filesystem or change the host clock. Source printing uses the browser's
-print dialog; the original DOS printer-filter settings are retained as UI
-preferences. Graph emulates VGA modes 640×200, 640×350, and 640×480; unsupported
-drivers report a graphics error.
+filenames to keep both copies. A failed batch preserves existing files. Pascal
+programs cannot access the host filesystem or change the host clock. Source
+printing uses the browser's print dialog; the original DOS printer-filter
+settings are retained as UI preferences. Graph emulates VGA modes 640×200,
+640×350, and 640×480; unsupported drivers report a graphics error.
 
 ### Compiler switches and includes
 
-The P-machine implements `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, and `$F`, with
-Turbo Pascal defaults (`B- R- V+ P- I+ Q- F-`). The Compiler Options dialog
+The P-machine implements `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$N` and
+`$X`, with Turbo Pascal defaults (`B- R- V+ P- I+ Q- F- N- X+`). Under `$X+` a
+function may be called as a statement, though not a System function, as in
+Turbo Pascal. A module that uses `Single`,
+`Double` or `Extended` is compiled as if with `$N+`, since Turbo Pascal
+requires it for those types. The Compiler Options dialog
 sets their initial values; source directives override them at the relevant
 expression, call, or declaration. `$B-` short-circuits Boolean expressions;
 integer bit operations remain eager. `$R+` checks ordinal stores and array
@@ -306,32 +332,45 @@ programs may need porting or an imported original toolchain. The native DOS
 emulator can execute imported 16-bit programs, but does not make the two Pascal
 compilers ABI-compatible.
 
-The P-machine does not implement arbitrary pointer reinterpret casts, typed
-procedural constants, original overlay/linker formats, `.BGI` loading, or all
-compiler switches. In particular `$T`, `$X`, alignment, overlay, and code
+The P-machine does not implement segment and offset routines (`Seg`, `Ofs`,
+`Ptr` outside constant expressions, `CSeg`, `DSeg`, `SSeg`, `SPtr`), the
+`Input` and `Output` file variables, null-terminated string handling beyond
+the `PChar` type itself, arbitrary pointer reinterpret casts, typed procedural
+constants, original overlay/linker formats, `.BGI` loading, or all compiler
+switches. The cases of a variant record share storage cell by cell, so reading
+a field of one case after writing another gives that value rather than a
+reinterpretation of its bytes. In particular `$T`, `$X`, alignment, overlay, and code
 generation options are retained as IDE preferences without full VM semantics.
 The VM always enforces its memory/instruction limits. `Extended` is held as a
-double rather than in 80 bits, and `Comp` is not emulated; transcendental math
+double rather than in 80 bits, and `Comp` keeps whole numbers in one too, so
+values beyond 2^53 lose precision; transcendental math
 uses JavaScript functions, rounded to Real48 outside 8087 code. Debugger
 expressions inspect data, operators, and selected pure built-ins; they do not
-execute user routines. Help is newly authored, and
-recognized diagnostics use Borland numbers while preserving explanatory detail;
-implementation-specific errors remain explicitly unnumbered.
+execute user routines. Help is newly authored, and recognized diagnostics use
+Borland numbers while preserving explanatory detail; implementation-specific
+errors remain explicitly unnumbered.
 
 ## Testing
 
 ```bash
-bun run test          # Vitest unit tests
-bun run test:reference # Independent Free Pascal comparison (requires fpc)
+bun run typecheck       # TypeScript, including the tests
+bun run lint            # ESLint
+bun run test -- --run   # Vitest unit tests once (plain `bun run test` watches)
+bun run test:reference  # Independent Free Pascal comparison (requires fpc)
 bun run fpc-suite:fetch # Download Free Pascal's own test suite (pinned release)
 bun run test:fpc-suite  # Run it against the browser compiler (requires fpc)
-bun run test:e2e      # Playwright behaviour + visual suites
-bun run test:visual   # Only the pixel snapshots
-bun run test:e2e:update  # Refresh the snapshot baselines
+bun run test:e2e        # Playwright behaviour + visual suites
+bun run test:visual     # Only the pixel snapshots
+bun run test:e2e:update # Refresh the snapshot baselines
 bun run fidelity:fetch  # Download the Museum of UI reference screenshots
 bun run test:fidelity   # Compare cell layouts and exact rendered gallery pixels
 bun run fidelity:report # Generate the complete 117-image comparison report
 ```
+
+CI runs the typecheck, lint, unit tests and build, the Free Pascal reference,
+and the Playwright suites in Chromium, Firefox and WebKit, plus one against the
+production build under its GitHub Pages path. A green run on `main` deploys
+the site.
 
 The Pascal suite includes a deterministic reference corpus shared by Vitest and
 `test:reference`: curated programs, invalid programs that must produce a Pascal
@@ -401,12 +440,13 @@ mixing revisions. The report can be opened through the dev server at
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+Contributions are welcome.
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run tests: `bun run test`
+4. Run `bun run typecheck`, `bun run lint` and `bun run test -- --run`, and
+   `bun run test:reference` if you change the compiler
 5. Submit a pull request
 
 ## License

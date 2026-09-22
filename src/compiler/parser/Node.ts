@@ -31,6 +31,8 @@ export enum NodeType {
   SET_TYPE = 'setType',
   POINTER_TYPE = 'pointerType',
   SUBRANGE_TYPE = 'subrangeType',
+  /** A parameter's `array of T`, which takes arrays of any bounds. */
+  OPEN_ARRAY_TYPE = 'openArrayType',
   ENUM_TYPE = 'enumType',
   FILE_TYPE = 'fileType',
 
@@ -157,6 +159,8 @@ export interface VarDeclarationNode extends Node {
   type: NodeType.VAR_DECLARATION;
   names: string[];
   varType: Node;
+  /** `absolute V`: the variables share V's storage. */
+  absolute?: string;
 }
 
 /**
@@ -214,6 +218,24 @@ export interface ArrayTypeNode extends Node {
 export interface RecordTypeNode extends Node {
   type: NodeType.RECORD_TYPE;
   fields: VarDeclarationNode[];
+  /** `case [Tag:] T of ...`: fields that share storage, one case at a time. */
+  variant?: VariantPart;
+}
+
+/** A record's variant part */
+export interface VariantPart {
+  lineNumber: number;
+  /** The tag field, when the variant part names one. */
+  tagName?: string;
+  tagType: Node;
+  cases: VariantCase[];
+}
+
+/** One case of a variant part: its labels and its own field list */
+export interface VariantCase {
+  labels: Node[];
+  fields: VarDeclarationNode[];
+  variant?: VariantPart;
 }
 
 /**
@@ -466,7 +488,10 @@ export interface RangeNode extends Node {
 export interface ParameterNode extends Node {
   type: NodeType.PARAMETER;
   names: string[];
-  paramType: Node;
+  /** Absent for an untyped `const` parameter. */
+  paramType: Node | null;
+  /** A `const` parameter, which the routine cannot change. */
+  constant?: boolean;
 }
 
 /**
@@ -475,7 +500,14 @@ export interface ParameterNode extends Node {
 export interface VarParameterNode extends Node {
   type: NodeType.VAR_PARAMETER;
   names: string[];
-  paramType: Node;
+  /** Absent for an untyped `var` parameter. */
+  paramType: Node | null;
+}
+
+/** An open array parameter's type: `array of T` */
+export interface OpenArrayTypeNode extends Node {
+  type: NodeType.OPEN_ARRAY_TYPE;
+  elementType: Node;
 }
 
 /**

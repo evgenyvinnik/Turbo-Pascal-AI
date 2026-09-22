@@ -363,6 +363,7 @@ async function doCompile(thenRun: boolean, debugAction: DebugAction = 'run', tar
     rangeChecking: ide().compilerOptions.runtime?.[0] ?? false,
     strictVarStrings: ide().compilerOptions.syntax?.[0] ?? true,
     completeBooleanEvaluation: ide().compilerOptions.syntax?.[1] ?? false,
+    extendedSyntax: ide().compilerOptions.syntax?.[2] ?? true,
     openStrings: ide().compilerOptions.syntax?.[4] ?? false,
     farCalls: ide().compilerOptions.codegen?.[0] ?? false,
     sources, defines: ide().defines.split(/[;,\s]+/).filter(Boolean),

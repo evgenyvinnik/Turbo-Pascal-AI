@@ -15,6 +15,9 @@ import {
   UnitNode,
   type ArrayTypeNode,
   type RecordTypeNode,
+  type VarDeclarationNode,
+  type VariantPart,
+  type VariantCase,
 } from './Node';
 
 export type ParserOptions = Partial<CompilerSwitches>;
@@ -454,9 +457,19 @@ export class Parser {
       const names = this.parseIdentifierList();
       this.expectSymbol(':');
       const varType = this.parseType();
+      // `absolute` is a directive, not a reserved word.
+      let absolute: string | undefined;
+      if (this.currentToken.isIdentifier() && this.currentToken.value.toLowerCase() === 'absolute') {
+        this.advance();
+        if (!this.currentToken.isIdentifier())
+          throw new PascalError('Absolute memory addresses are not supported', this.lineNumber);
+        absolute = this.expectIdentifier();
+      }
       this.expectSymbol(';');
 
-      variables.push(this.node(NodeType.VAR_DECLARATION, { names, varType }, line));
+      variables.push(
+        this.node(NodeType.VAR_DECLARATION, { names, varType, ...(absolute ? { absolute } : {}) }, line)
+      );
     }
 
     return variables;
@@ -564,6 +577,20 @@ export class Parser {
       return this.parseEnumType();
     }
 
+    // A subrange whose lower bound is an expression starting with a name,
+    // such as Low(Byte)..3 or N - 1..N.
+    if (this.currentToken.isIdentifier()) {
+      const next = this.lexer.peek();
+      const operator = ['(', '+', '-', '*', '/'].some((symbol) => next.isSymbol(symbol)) ||
+        ['div', 'mod', 'shl', 'shr', 'and', 'or', 'xor'].some((word) => next.isReservedWord(word));
+      if (operator) {
+        const low = this.parseSimpleExpression();
+        this.expectSymbol('..');
+        const high = this.parseSimpleExpression();
+        return this.node(NodeType.SUBRANGE_TYPE, { low, high }, line);
+      }
+    }
+
     // Subrange or identifier type
     if (this.currentToken.isIdentifier()) {
       let name = this.expectIdentifier();
@@ -627,27 +654,54 @@ export class Parser {
   private parseRecordType(): Node {
     const line = this.lineNumber;
     this.expectReservedWord('record');
-
-    const fields: Node[] = [];
-    while (!this.isReservedWord('end')) {
-      if (this.currentToken.isIdentifier()) {
-        const fieldLine = this.lineNumber;
-        const names = this.parseIdentifierList();
-        this.expectSymbol(':');
-        const varType = this.parseType();
-
-        fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType }, fieldLine));
-
-        if (this.isSymbol(';')) {
-          this.advance();
-        }
-      } else {
-        break;
-      }
-    }
-
+    const list = this.parseFieldList();
     this.expectReservedWord('end');
-    return this.node(NodeType.RECORD_TYPE, { fields }, line);
+    return this.node(NodeType.RECORD_TYPE, { ...list }, line);
+  }
+
+  /**
+   * Parses a record's field list
+   * field-list ::= [fixed-part] [variant-part] [';']
+   * variant-part ::= 'case' [identifier ':'] type 'of' variant {';' variant}
+   * variant ::= label {',' label} ':' '(' field-list ')'
+   */
+  private parseFieldList(): { fields: VarDeclarationNode[]; variant?: VariantPart } {
+    const fields: VarDeclarationNode[] = [];
+    while (this.currentToken.isIdentifier()) {
+      const fieldLine = this.lineNumber;
+      const names = this.parseIdentifierList();
+      this.expectSymbol(':');
+      const varType = this.parseType();
+      fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType }, fieldLine) as VarDeclarationNode);
+      if (!this.isSymbol(';')) break;
+      this.advance();
+    }
+    if (!this.isReservedWord('case')) return { fields };
+    const lineNumber = this.lineNumber;
+    this.advance();
+    let tagName: string | undefined;
+    if (this.currentToken.isIdentifier() && this.lexer.peek().isSymbol(':')) {
+      tagName = this.expectIdentifier();
+      this.expectSymbol(':');
+    }
+    const tagType = this.parseType();
+    this.expectReservedWord('of');
+    const cases: VariantCase[] = [];
+    while (!this.isReservedWord('end') && !this.isSymbol(')')) {
+      const labels = [this.parseSetElement()];
+      while (this.isSymbol(',')) {
+        this.advance();
+        labels.push(this.parseSetElement());
+      }
+      this.expectSymbol(':');
+      this.expectSymbol('(');
+      cases.push({ labels, ...this.parseFieldList() });
+      this.expectSymbol(')');
+      if (!this.isSymbol(';')) break;
+      this.advance();
+    }
+    const variant: VariantPart = { lineNumber, tagType, cases, ...(tagName ? { tagName } : {}) };
+    return { fields, variant };
   }
 
   /**
@@ -721,6 +775,9 @@ export class Parser {
         methods.push(method);
       } else {
         const fieldLine = this.lineNumber, names = this.parseIdentifierList();
+        // Borland Pascal 7 takes an object's fields before its methods.
+        if (methods.length)
+          throw new PascalError('Object fields must precede its methods', fieldLine);
         this.expectSymbol(':');
         const varType = this.parseType(); this.expectSymbol(';');
         fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType, privateMember }, fieldLine));
@@ -781,22 +838,43 @@ export class Parser {
 
   /**
    * Parses a parameter declaration
-   * parameter-declaration ::= ['var'] identifier-list ':' type
+   * parameter-declaration ::= ['var' | 'const'] identifier-list [':' parameter-type]
+   * parameter-type ::= type | 'array' 'of' type
+   * The type may be left out only after 'var' or 'const': an untyped parameter.
    */
   private parseParameterDeclaration(): Node[] {
     const line = this.lineNumber;
     const switches = { ...this.switches };
     const isVar = this.isReservedWord('var');
-    if (isVar) {
+    const constant = this.isReservedWord('const');
+    if (isVar || constant) {
       this.advance();
     }
 
     const names = this.parseIdentifierList();
-    this.expectSymbol(':');
-    const paramType = this.parseType();
+    let paramType: Node | null = null;
+    if (this.isSymbol(':') || (!isVar && !constant)) {
+      this.expectSymbol(':');
+      paramType = this.parseParameterType();
+    }
 
     const nodeType = isVar ? NodeType.VAR_PARAMETER : NodeType.PARAMETER;
-    return [this.node(nodeType, { names, paramType, ...switches }, line)];
+    return [
+      this.node(nodeType, { names, paramType, ...(constant ? { constant } : {}), ...switches }, line),
+    ];
+  }
+
+  /** A parameter's type, which may be an open array: `array of T`. */
+  private parseParameterType(): Node {
+    if (this.isReservedWord('array') && this.lexer.peek().isReservedWord('of')) {
+      const line = this.lineNumber;
+      this.advance();
+      this.advance();
+      if (this.isReservedWord('const'))
+        throw new PascalError('Array of const is not Turbo Pascal', this.lineNumber);
+      return this.node(NodeType.OPEN_ARRAY_TYPE, { elementType: this.parseType() }, line);
+    }
+    return this.parseType();
   }
 
   /**
@@ -965,7 +1043,7 @@ export class Parser {
     const selector = this.parseExpression();
     this.expectReservedWord('of');
 
-    const cases: { labels: Node[]; statement: Node }[] = [];
+    const cases: { labels: Node[]; statement: Node | null }[] = [];
 
     while (!this.isReservedWord('end') && !this.isReservedWord('else')) {
       const labels: Node[] = [];
@@ -977,11 +1055,9 @@ export class Parser {
       }
 
       this.expectSymbol(':');
+      // An empty branch still declares its labels, which are checked.
       const statement = this.parseStatement();
-
-      if (statement) {
-        cases.push({ labels, statement });
-      }
+      cases.push({ labels, statement });
 
       if (this.isSymbol(';')) {
         this.advance();

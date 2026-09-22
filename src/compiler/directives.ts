@@ -11,18 +11,20 @@ export interface CompilerSwitches {
   farCalls: boolean;
   /** $N: 8087 code, which computes every real expression in Extended. */
   numericProcessing: boolean;
+  /** $X: extended syntax, under which a function can be called as a statement. */
+  extendedSyntax: boolean;
 }
 
 export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
   completeBooleanEvaluation: false, rangeChecking: false, strictVarStrings: true,
   openStrings: false, ioChecking: true, overflowChecking: false, farCalls: false,
-  numericProcessing: false,
+  numericProcessing: false, extendedSyntax: true,
 });
 
 const switchNames: Record<string, keyof CompilerSwitches> = {
   B: 'completeBooleanEvaluation', R: 'rangeChecking', V: 'strictVarStrings',
   P: 'openStrings', I: 'ioChecking', Q: 'overflowChecking', F: 'farCalls',
-  N: 'numericProcessing',
+  N: 'numericProcessing', X: 'extendedSyntax',
 };
 
 /** Apply a switch list such as $B+,R-,I+; include filenames are not switches. */

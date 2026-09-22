@@ -85,7 +85,9 @@ describe('Turbo Pascal numeric representation', () => {
       execute(`program T;var i:Integer;
       begin i:=32767; {$Q+} WriteLn(LongInt(i)+1); {$Q-} WriteLn(i+1)end.`)
     ).toEqual(['32768', '-32768']);
-    expect(() => execute('{$R+}program T;var b:Byte;begin b:=256 end.')).toThrow(/Range check/);
+    expect(() => execute('{$R+}program T;var b:Byte;begin b:=256 end.')).toThrow(
+      /Constant out of range/
+    );
   });
 
   it('applies integer expression width to math intrinsics and LongInt results to Trunc and Round', () => {
