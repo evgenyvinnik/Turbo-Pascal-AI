@@ -161,6 +161,7 @@ export class Machine {
       write: (address, value) => { this.poke(address, value); },
       allocate: (words, defaults) => this.allocate(words, defaults),
       free: (address) => { this.free(address); },
+      heapAvailable: () => this.heapAvailable(),
       sound: this.config.onSound,
     }, this.config.fileSystem);
   }
@@ -892,6 +893,23 @@ export class Machine {
       this.push(this.stringCharacterAddress(Number(args[0]), Number(args[1]), Number(args[2])));
       return;
     }
+    if (procedureIndex === (InternalProcedure.COPY_TO_HEAP as number)) {
+      const source = Number(args[0]), words = Number(args[1]);
+      const copy = this.allocate(words, []);
+      for (let cell = 0; cell < words; cell++) {
+        this.checkAddress(source + cell);
+        const value = this.peek(source + cell);
+        const bytes = typeof value === 'string' ? this.stringBytes(source + cell) : undefined;
+        this.poke(copy + cell, value);
+        if (bytes !== undefined) this.stringBacking.set(copy + cell, bytes);
+      }
+      this.push(copy);
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.FREE_HEAP_COPY as number)) {
+      this.free(Number(args[0]));
+      return;
+    }
     if (procedureIndex === (InternalProcedure.COPY_AGGREGATE_CELL as number) ||
       procedureIndex === (InternalProcedure.LOAD_AGGREGATE_CELL as number)) {
       const loading = procedureIndex === (InternalProcedure.LOAD_AGGREGATE_CELL as number);
@@ -1181,6 +1199,14 @@ export class Machine {
     this.allocations.set(address, words);
     for (let i = 0; i < words; i++) this.dstore[address + i] = defaults[i] ?? 0;
     return address;
+  }
+  /** The heap lies between the stack's reserve and np, plus disposed blocks. */
+  private heapAvailable(): { total: number; largest: number } {
+    const top = Math.max(0, this.np - this.config.stackSize);
+    return {
+      total: top + this.freeBlocks.reduce((sum, block) => sum + block.words, 0),
+      largest: Math.max(top, ...this.freeBlocks.map((block) => block.words)),
+    };
   }
   private free(address: number): void {
     const words = this.allocations.get(address);

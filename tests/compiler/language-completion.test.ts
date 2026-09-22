@@ -82,8 +82,17 @@ describe('additional Pascal language execution', () => {
     expect(
       execute("program T;var s:String[3];begin s:='abcdef';WriteLn(s)end.").getOutput()
     ).toEqual(['abc']);
-    expect(() => execute('{$R+}program T;var n:Byte;begin n:=256 end.')).toThrow(/Range check/);
-    expect(() => execute('{$R+}program T;var n:Integer;begin n:=32768 end.')).toThrow(/Range check/);
+    // A constant that cannot fit is rejected while compiling, as in TP7.
+    expect(() => execute('{$R+}program T;var n:Byte;begin n:=256 end.')).toThrow(
+      /Constant out of range/
+    );
+    expect(() => execute('program T;var n:Byte;i:Integer;begin i:=256;n:=i end.')).not.toThrow();
+    expect(() => execute('{$R+}program T;var n:Byte;i:Integer;begin i:=256;n:=i end.')).toThrow(
+      /Range check/
+    );
+    expect(() => execute('{$R+}program T;var n:Integer;begin n:=32768 end.')).toThrow(
+      /Constant out of range/
+    );
     expect(execute('program T;var n:LongInt;begin n:=32768;WriteLn(n)end.').getOutput()).toEqual([
       '32768',
     ]);

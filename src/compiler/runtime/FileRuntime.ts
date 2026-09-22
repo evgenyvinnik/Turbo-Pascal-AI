@@ -83,7 +83,7 @@ export class FileRuntime {
     }
     if (
       ![
-        25, 26, 46, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81,
+        25, 26, 46, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 82,
       ].includes(index)
     )
       return undefined;
@@ -100,6 +100,11 @@ export class FileRuntime {
   }
   private execute(index: number, args: StackValue[]): { result?: StackValue } | undefined {
     const address = Number(args[0]);
+    // Writes reach the drive at once, so Flush only checks the file is open.
+    if (index === 82) {
+      this.handle(address, 'write');
+      return {};
+    }
     if (index === 46) {
       const id = this.nextHandle++;
       const layout = JSON.parse(String(args[3] ?? '[]')) as BinaryCell[];

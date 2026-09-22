@@ -55,4 +55,14 @@ begin s:='a';Change(s);WriteLn(s)end.`, output: ['3,4','abc'] },
   { name: 'switch-closed-string-alias-retains-declaration-mode', source: `{$P-}{$V+}program P;type Wide=string;{$P+}var s:string[3];
 procedure Change(var t:Wide);begin t:='a'end;
 begin Change(s)end.`, reject: true },
+  { name: 'switch-extended-syntax-discards-function-results', source: `program P;var n:Integer;
+type Counter=function:Integer;
+{$F+}function Bump:Integer;begin Inc(n);Bump:=n end;{$F-}
+function Name:string;begin Inc(n);Name:='x' end;
+var c:Counter;
+begin n:=0;Bump;Bump;Name;c:=Bump;c;WriteLn(n)end.`, output: ['4'] },
+  { name: 'switch-extended-syntax-off-requires-results', source: `{$X-}program P;
+function F:Integer;begin F:=1 end;begin F end.`, reject: true },
+  { name: 'switch-extended-syntax-excludes-system-functions', source: `program P;var s:string;
+begin s:='abc';Length(s)end.`, reject: true },
 ];

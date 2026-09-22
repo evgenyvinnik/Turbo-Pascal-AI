@@ -56,11 +56,23 @@ const UNSUPPORTED: Record<string, string> = {
 const NEUTRAL_OPTION = /^-(?:[vOga]\S*|Cg-?|Un|Xs|Xi|Xe|Sg)$/;
 /** In-source directives that make Free Pascal compile something other than
  * Turbo Pascal. They override -Mtp, so such a test says nothing about TP. */
-const DIALECT_DIRECTIVE = /\{\$(?:mode\s+(?!tp\b)\w+|modeswitch\b|h\+|longstrings\s+on|macro\s+on|coperators\s+on|inline\s+on|z[+\-\d]|minenumsize\b|j[+-]|writeableconst\b)/i;
+const DIALECT_DIRECTIVE = /\{\$(?:mode\s+(?!tp\b)\w+|modeswitch\b|h\+|longstrings\s+on|macro\s+on|coperators\s+on|inline\s+on|z[+\-\d]|minenumsize\b|j[+-]|writeableconst\b|asmmode\b|setpe(?:opt)?flags\b)/i;
 /** Types Free Pascal declares in every mode, TP mode included, that Turbo
  * Pascal 7 never had. A test using one is FPC code, whatever its mode. Comp,
  * WordBool and PChar are real TP7 types, so they are not listed. */
 const FPC_ONLY_TYPE = /\b(?:cardinal|smallint|shortint64|int64|qword|longword|dword|codepointer|ansistring|widestring|unicodestring|textfile|sizeint|sizeuint|ptrint|ptruint|nativeint|nativeuint)\b/i;
+/** Syntax only Free Pascal and Delphi accept, found in program text without
+ * brace comments or strings: a distinct type alias (`T = type Integer`;
+ * in Turbo Pascal `type` only starts a type section), a `//` comment, or a
+ * calling convention or directive Turbo Pascal lacks. */
+const FPC_ONLY_SYNTAX: readonly (readonly [RegExp, string])[] = [
+  [/=\s*type\s+[a-z_]/i, 'declares a distinct type alias (T = type X)'],
+  [/\/\//, 'uses // comments'],
+  [/;\s*(?:cdecl|stdcall|safecall|cppdecl|mwpascal|softfloat|local)\s*;/i, 'uses a Free Pascal procedure directive'],
+];
+/** Program text without strings or brace comments, keeping `//`. */
+const withoutBraces = (source: string) =>
+  source.replace(/'[^'\n]*'/g, "''").replace(/\{[^}]*\}|\(\*[\s\S]*?\*\)/g, ' ');
 /** Program text without comments, so a comment mentioning a type does not count. */
 const withoutComments = (source: string) => source.replace(/\{[^}]*\}|\(\*[\s\S]*?\*\)|\/\/[^\n]*/g, ' ');
 /** Run-time check options, which map onto the browser compiler's switches. */
@@ -82,8 +94,9 @@ interface Outcome {
   kind?: Kind;
   directives: Record<string, string>;
   verdict: Verdict;
-  fpc?: { built: boolean; exitCode?: number; message?: string };
-  vm?: { built: boolean; exitCode?: number; message?: string; outputMatches?: boolean };
+  /** `line` is where a compiler reported its first error. */
+  fpc?: { built: boolean; exitCode?: number; message?: string; line?: number };
+  vm?: { built: boolean; exitCode?: number; message?: string; line?: number; outputMatches?: boolean };
 }
 
 /** Sources are read byte for byte; a UTF-8 byte-order mark is file metadata, not program text. */
@@ -218,11 +231,17 @@ async function judge(file: string, relative: string, sources: Record<string, str
   if (dialect) return { ...outcome, verdict: { category: 'excluded', reason: `not Turbo Pascal: the source sets ${dialect[0].toLowerCase()}}` } };
   const fpcType = FPC_ONLY_TYPE.exec(withoutComments(source));
   if (fpcType) return { ...outcome, verdict: { category: 'excluded', reason: `not Turbo Pascal 7: uses the Free Pascal type ${fpcType[0].toLowerCase()}` } };
+  const syntax = FPC_ONLY_SYNTAX.find(([pattern]) => pattern.test(withoutBraces(source)));
+  if (syntax) return { ...outcome, verdict: { category: 'excluded', reason: `not Turbo Pascal 7: ${syntax[1]}` } };
 
   const work = await mkdtemp(path.join(tmpdir(), 'fpc-suite-'));
   try {
     const build = await buildWithFpc(file, work, options.fpc);
-    outcome.fpc = { built: build.built, ...(build.message ? { message: build.message } : {}) };
+    outcome.fpc = {
+      built: build.built,
+      ...(build.message ? { message: build.message } : {}),
+      ...(build.site ? { line: build.site.line } : {}),
+    };
     if (expected.failsToCompile && build.built) return { ...outcome, verdict: { category: 'excluded', reason: 'Free Pascal accepts it in TP mode' } };
     if (!expected.failsToCompile && !build.built) return { ...outcome, verdict: { category: 'excluded', reason: 'not Turbo Pascal: Free Pascal rejects it in TP mode' } };
     let reference: { exitCode: number; output: string[] } | undefined;
@@ -238,7 +257,7 @@ async function judge(file: string, relative: string, sources: Record<string, str
     if (vm.kind === 'asm') return { ...outcome, verdict: { category: 'excluded', reason: 'uses inline assembly, which only the native DOS compiler runs' } };
     if (vm.kind === 'crashed') return { ...outcome, vm: { built: false, message: vm.message }, verdict: { category: 'fail', reason: 'the browser compiler crashed' } };
     if (vm.kind === 'rejected') {
-      outcome.vm = { built: false, message: vm.message };
+      outcome.vm = { built: false, message: vm.message, line: vm.site.line };
       if (!expected.failsToCompile) return { ...outcome, verdict: { category: 'fail', reason: 'the browser compiler rejects it' } };
       if (!build.site) return { ...outcome, verdict: { category: 'pass', reason: 'rejected, as the test requires (Free Pascal gives no location)' } };
       return samePlace(vm.site, build.site)

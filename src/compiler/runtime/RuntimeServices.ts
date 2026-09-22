@@ -7,10 +7,13 @@ import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont } from './StrokeFont';
 import { roundReal48 } from '../codegen/numeric';
+import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 
 interface Host extends MemoryAccess {
   allocate(words: number, defaults: StackValue[]): number;
   free(address: number): void;
+  /** Free heap space, in total and in the largest block, in cells. */
+  heapAvailable(): { total: number; largest: number };
   sound(frequency: number): void;
 }
 interface Result {
@@ -55,6 +58,47 @@ export class RuntimeServices {
         this.host.free(Number(this.host.read(a)));
         this.host.write(a, 0);
         return {};
+      // FillChar and Move work on the variables' bytes, in the layout their
+      // types give, so a cell holding a word changes byte by byte.
+      case 60: {
+        const layout = JSON.parse(String(args[3])) as BinaryCell[];
+        const bytes = encodeBinary(this.host, a, layout);
+        bytes.fill(typeof args[2] === 'string' ? args[2].charCodeAt(0) : c & 255, 0, Math.max(0, Math.min(b, bytes.length)));
+        decodeBinary(this.host, a, layout, bytes);
+        return {};
+      }
+      case 61: {
+        const source = encodeBinary(this.host, a, JSON.parse(String(args[3])) as BinaryCell[]);
+        const layout = JSON.parse(String(args[4])) as BinaryCell[];
+        const target = encodeBinary(this.host, b, layout);
+        target.set(source.subarray(0, Math.max(0, Math.min(c, source.length, target.length))));
+        decodeBinary(this.host, b, layout, target);
+        return {};
+      }
+      case 63:
+        return { result: (a >> 8) & 255 };
+      case 64:
+        return { result: a & 255 };
+      case 65:
+        return { result: ((a & 255) << 8) | ((a >> 8) & 255) };
+      case 84: {
+        const defaults = typeof args[2] === 'string' ? (JSON.parse(args[2]) as StackValue[]) : [];
+        this.host.write(a, this.host.allocate(Math.max(1, b, defaults.length), defaults));
+        return {};
+      }
+      case 85:
+        this.host.free(Number(this.host.read(a)));
+        return {};
+      case 86:
+        return { result: this.host.heapAvailable().total };
+      case 87:
+        return { result: this.host.heapAvailable().largest };
+      case 88:
+        throw new PascalError(`Run-time error ${String(args.length ? a : 0)}`);
+      case 89:
+        return { result: 0 };
+      case 90:
+        return { result: a === 0 ? String(args[1]) : '' };
       case 34: {
         const text = readString(a);
         if (b >= 1 && c > 0) this.host.write(a, text.slice(0, b - 1) + text.slice(b - 1 + c));

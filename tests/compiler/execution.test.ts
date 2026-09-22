@@ -261,7 +261,13 @@ describe('Pascal execution semantics', () => {
   });
 
   it('reports out-of-range array access before corrupting another variable', () => {
-    const machine = new Machine(compile('{$R+}program T; var a: array[1..2] of Integer; begin a[3] := 7 end.'));
+    // A constant index is rejected while compiling, as Turbo Pascal does.
+    expect(() => compile('program T; var a: array[1..2] of Integer; begin a[3] := 7 end.')).toThrow(
+      /Constant out of range/
+    );
+    const machine = new Machine(
+      compile('{$R+}program T; var a: array[1..2] of Integer; i: Integer; begin i := 3; a[i] := 7 end.')
+    );
     expect(() => { machine.run(); }).toThrow(/Array index 3 out of bounds/);
     expect(machine.getState()).toBe(MachineState.ERROR);
   });
@@ -270,7 +276,8 @@ describe('Pascal execution semantics', () => {
     ['program T; var n: Integer; begin n := \'hello\' end.', /Type mismatch/],
     ['program T; var n: Boolean; begin n := 1 end.', /Type mismatch/],
     ['program T; procedure P; begin end; begin WriteLn(P()) end.', /Procedure cannot be used as an expression/],
-    ['program T; function F: Integer; begin F := 1 end; begin F end.', /Function result must be used/],
+    ['program T; {$X-} function F: Integer; begin F := 1 end; begin F end.', /Function result must be used/],
+    ["program T; var s: string; begin Length(s) end.", /Function result must be used/],
   ])('rejects invalid scalar or routine use: %s', (source, message) => {
     expect(() => compile(source)).toThrow(message);
   });

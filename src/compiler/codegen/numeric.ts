@@ -160,6 +160,17 @@ export function realOperation(operator: string, a: number, b: number, line = -1)
   return roundRational(operator === '+' ? first + second : first - second, 1n, scale, line);
 }
 
+/** A value stored in a Comp: the 8087 rounds it to the nearest integer, an
+ * exact half to even, and faults on one outside 64 bits. */
+export function compValue(value: number, line = -1): number {
+  const floor = Math.floor(value),
+    rest = value - floor;
+  const rounded = rest > 0.5 || (rest === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;
+  if (!Number.isFinite(rounded) || Math.abs(rounded) >= 2 ** 63)
+    throw new PascalError('Invalid numeric result', line);
+  return rounded === 0 ? 0 : rounded;
+}
+
 /** The exact decimal expansion of a positive finite double: its significant
  * digits and the power of ten of the first, so value = d.ddd × 10^exponent. */
 function decimalDigits(value: number): { digits: string; exponent: number } {

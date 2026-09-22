@@ -14,6 +14,7 @@ function services() {
     read: (address) => memory.get(address) ?? 0,
     write: (address, value) => { memory.set(address, value); },
     allocate: () => 1000,
+    heapAvailable: () => ({ total: 0, largest: 0 }),
     free: () => undefined,
     sound,
   }, disk);

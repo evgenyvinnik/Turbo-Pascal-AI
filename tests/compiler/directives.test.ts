@@ -9,7 +9,8 @@ describe('Turbo Pascal source directives', () => {
     const switches = { ...DEFAULT_SWITCHES };
     expect(applyCompilerSwitches('$B+,R+,V-,P+,I-,Q+,N+', switches)).toBe(true);
     expect(switches).toEqual({ completeBooleanEvaluation: true, rangeChecking: true, strictVarStrings: false,
-      openStrings: true, ioChecking: false, overflowChecking: true, farCalls: false, numericProcessing: true });
+      openStrings: true, ioChecking: false, overflowChecking: true, farCalls: false, numericProcessing: true,
+      extendedSyntax: true });
     expect(applyCompilerSwitches('$I settings.inc', switches)).toBe(false);
   });
   it('does not tokenize excluded source and preserves original line numbers', () => {
