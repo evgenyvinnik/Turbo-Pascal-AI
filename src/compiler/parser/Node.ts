@@ -264,7 +264,8 @@ export interface FormattedArgumentNode extends Node {
 export interface IfStatementNode extends Node {
   type: NodeType.IF_STATEMENT;
   condition: Node;
-  thenBranch: Node;
+  /** Null for an empty statement, as in `if c then ;`. */
+  thenBranch: Node | null;
   elseBranch?: Node;
 }
 
@@ -274,7 +275,8 @@ export interface IfStatementNode extends Node {
 export interface CaseStatementNode extends Node {
   type: NodeType.CASE_STATEMENT;
   selector: Node;
-  cases: { labels: Node[]; statement: Node }[];
+  /** An arm's statement is null when empty, as in `1: ;`. */
+  cases: { labels: Node[]; statement: Node | null }[];
   elseClause?: Node[];
 }
 
@@ -284,7 +286,8 @@ export interface CaseStatementNode extends Node {
 export interface WhileStatementNode extends Node {
   type: NodeType.WHILE_STATEMENT;
   condition: Node;
-  body: Node;
+  /** Null for an empty statement, as in `while c do ;`. */
+  body: Node | null;
 }
 
 /**
@@ -305,7 +308,8 @@ export interface ForStatementNode extends Node {
   start: Node;
   end: Node;
   direction: 'to' | 'downto';
-  body: Node;
+  /** Null for an empty statement, as in `while c do ;`. */
+  body: Node | null;
 }
 
 /**
@@ -314,7 +318,8 @@ export interface ForStatementNode extends Node {
 export interface WithStatementNode extends Node {
   type: NodeType.WITH_STATEMENT;
   records: Node[];
-  body: Node;
+  /** Null for an empty statement, as in `while c do ;`. */
+  body: Node | null;
 }
 
 /**

@@ -1242,12 +1242,16 @@ export class Compiler {
       for (const field of type.fields!.values()) this.initialize(field.type, offset + field.offset);
     } else {
       this.emit(Opcode.LDA, 0, offset);
-      this.literal(this.text(type) ? '' : type.kind === 'set' ? '[]' : 0, type);
+      // Storage starts zeroed, as Turbo Pascal's does: a Char is #0, never the
+      // empty string, which is no character at all.
+      this.literal(type.kind === 'char' ? '\0' : this.text(type) ? '' : type.kind === 'set' ? '[]' : 0, type);
       this.emit(Opcode.STI, this.typeCode(type));
     }
   }
 
-  private statement(node: Node): void {
+  /** An empty statement, such as the body of `while c do ;`, emits no code. */
+  private statement(node: Node | null): void {
+    if (!node) return;
     this.atSource(node, () => { this.emitStatement(node); });
   }
   private emitStatement(node: Node): void {
@@ -1378,21 +1382,34 @@ export class Compiler {
     if (variable?.kind !== 'variable') this.fail(node, `Undeclared variable "${node.variable}"`);
     if (!this.ordinal(variable.type))
       this.fail(node, 'For loop variable must have an ordinal type');
-    this.addressVariable(variable);
+    // As in Turbo Pascal, both bounds are evaluated before the variable is
+    // assigned, and an empty range leaves the variable untouched.
+    const first = this.temp(variable.type);
+    this.addressVariable(first);
     this.requireType(node.start, variable.type, this.expression(node.start));
     this.emit(Opcode.STI, this.typeCode(variable.type));
     const limit = this.temp(variable.type);
     this.addressVariable(limit);
     this.requireType(node.end, variable.type, this.expression(node.end));
     this.emit(Opcode.STI, this.typeCode(variable.type));
-    const start = this.bytecode.getNextAddress();
-    this.loadVariable(variable);
+    this.loadVariable(first);
     this.loadVariable(limit);
     this.emit(node.direction === 'downto' ? Opcode.GEQ : Opcode.LEQ, this.typeCode(variable.type));
-    const end = this.emit(Opcode.FJP);
+    const empty = this.emit(Opcode.FJP);
+    this.addressVariable(variable);
+    this.loadVariable(first);
+    this.emit(Opcode.STI, this.typeCode(variable.type));
+    const start = this.bytecode.getNextAddress();
     const loop = this.beginLoop();
     this.statement(node.body);
     const next = this.bytecode.getNextAddress();
+    // Stop on the final value instead of stepping past it: the variable ends
+    // holding the last value and never leaves its type, so a Byte loop to 255
+    // does not reach 256.
+    this.loadVariable(variable);
+    this.loadVariable(limit);
+    this.emit(Opcode.EQU, this.typeCode(variable.type));
+    const last = this.emit(Opcode.TJP);
     this.addressVariable(variable);
     this.loadVariable(variable);
     this.helper(`step-${variable.type.kind}-${node.direction}`, 1, (value) => {
@@ -1403,7 +1420,8 @@ export class Compiler {
     });
     this.emit(Opcode.STI, this.typeCode(variable.type));
     this.emit(Opcode.UJP, 0, start);
-    this.patch(end);
+    this.patch(empty);
+    this.patch(last);
     this.endLoop(loop, next);
   }
   private caseStatement(node: CaseStatementNode): void {

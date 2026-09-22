@@ -32,7 +32,8 @@ const directories = (process.env.FPC_SUITE_DIRS ?? 'tbs,tbf').split(',').filter(
 const filter = process.env.FPC_SUITE_FILTER;
 const jobs = Math.max(1, Number(process.env.FPC_SUITE_JOBS ?? 4));
 const reportPath = path.resolve(process.env.FPC_SUITE_REPORT ?? 'artifacts/verification/fpc-suite.json');
-const maxInstructions = 20_000_000;
+// Some numeric tests need about 200 million instructions in the VM.
+const maxInstructions = 300_000_000;
 
 /** Directives this harness cannot honour, with the reason a test is skipped. */
 const UNSUPPORTED: Record<string, string> = {
@@ -55,7 +56,7 @@ const UNSUPPORTED: Record<string, string> = {
 const NEUTRAL_OPTION = /^-(?:[vOga]\S*|Cg-?|Un|Xs|Xi|Xe|Sg)$/;
 /** In-source directives that make Free Pascal compile something other than
  * Turbo Pascal. They override -Mtp, so such a test says nothing about TP. */
-const DIALECT_DIRECTIVE = /\{\$(?:mode\s+(?!tp\b)\w+|modeswitch\b|h\+|longstrings\s+on|macro\s+on|coperators\s+on|inline\s+on)/i;
+const DIALECT_DIRECTIVE = /\{\$(?:mode\s+(?!tp\b)\w+|modeswitch\b|h\+|longstrings\s+on|macro\s+on|coperators\s+on|inline\s+on|z[+\-\d]|minenumsize\b)/i;
 /** Types Free Pascal declares in every mode, TP mode included, that Turbo
  * Pascal 7 never had. A test using one is FPC code, whatever its mode. Comp,
  * WordBool and PChar are real TP7 types, so they are not listed. */
