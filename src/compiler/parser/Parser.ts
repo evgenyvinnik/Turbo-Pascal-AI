@@ -746,8 +746,9 @@ export class Parser {
   private parseStatement(): Node | null {
     const line = this.lineNumber;
 
-    // Empty statement
-    if (this.isSymbol(';') || this.isReservedWord('end') || this.isReservedWord('until')) {
+    // Empty statement: nothing before a token that ends one. Turbo Pascal also
+    // allows it before else, as in `if c then else S`.
+    if (this.isSymbol(';') || this.isReservedWord('end') || this.isReservedWord('until') || this.isReservedWord('else')) {
       return null;
     }
 

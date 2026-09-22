@@ -110,4 +110,11 @@ export const languageCases: ReferenceCase[] = [
     implementation function Twice(n:Integer):Integer;begin Twice:=n*2 end;end.`},
     source:`uses Helper;begin WriteLn(Twice(21))end.`,output:['42'] },
   { name:'program-heading-with-parameters',source:`program P(input,output);begin WriteLn('still fine')end.`,output:['still fine'] },
+  // An empty statement may stand wherever a statement can.
+  { name:'empty-then-branch',source:`program T;var c:Boolean;begin c:=True;if c then ;WriteLn('after')end.`,output:['after'] },
+  { name:'empty-then-branch-before-else',source:`program T;var c:Boolean;begin c:=False;if c then else WriteLn('else ran')end.`,output:['else ran'] },
+  { name:'empty-then-branch-dangling-else',source:`program T;var a,b:Boolean;
+    begin a:=True;b:=False;if a then if b then else WriteLn('inner else')end.`,output:['inner else'] },
+  { name:'empty-while-body',source:`program T;var c:Boolean;begin c:=False;while c do ;WriteLn('after')end.`,output:['after'] },
+  { name:'empty-for-body',source:`program T;var i:Integer;begin for i:=1 to 3 do ;WriteLn('done')end.`,output:['done'] },
 ];

@@ -1247,7 +1247,9 @@ export class Compiler {
     }
   }
 
-  private statement(node: Node): void {
+  /** An empty statement, such as the body of `while c do ;`, emits no code. */
+  private statement(node: Node | null): void {
+    if (!node) return;
     this.atSource(node, () => { this.emitStatement(node); });
   }
   private emitStatement(node: Node): void {
