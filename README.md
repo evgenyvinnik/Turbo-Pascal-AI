@@ -209,10 +209,12 @@ output, typed input, arithmetic, loops, conditions, and procedures with `var`
 parameters. Browser execution has a five-million-instruction limit and a
 bounded output buffer to keep runaway programs recoverable.
 
-Supported constructs include scalar values, constants, aliases, enums,
-subranges, fixed arrays, records, nested and recursive routines, value and
-`var` parameters, `for`/`while`/`repeat`, `if`/`case`, `Break`/`Continue`/`Exit`,
-formatted output, and the registered math, ordinal, and string functions.
+Supported constructs include scalar values, constants, typed constants
+(initialized variables that keep their values between calls, with array,
+record, set and global-address values), aliases, enums, subranges, fixed
+arrays, records, nested and recursive routines, value and `var` parameters,
+`for`/`while`/`repeat`, `if`/`case`, `Break`/`Continue`/`Exit`, formatted
+output, and the registered math, ordinal, and string functions.
 The former unsupported categories now execute:
 
 - **Units:** source units with interface/implementation sections, private declarations, qualified names, dependencies, and ordered initialization. Compilation resolves unsaved buffers and the virtual drive, including configured unit/include directories. Units can compile independently; run a program that uses them to execute initialization. Source errors, breakpoints, and watches retain the originating unit/include file.
@@ -229,8 +231,14 @@ The former unsupported categories now execute:
 Integer expression promotion and overflow follow those widths, including
 `{$Q+}` arithmetic checks. Default `Real` uses six-byte Real48 precision and
 range; arithmetic rounds before later operations, and math/input results are
-quantized to Real48. Pascal strings contain CP437 bytes; browser input and
-source literals convert at the boundary, preserving numeric character codes.
+quantized to Real48. `Single`, `Double` and `Extended` are 8087 types, as in
+Turbo Pascal: a module that uses one, or is compiled with `{$N+}`, computes
+every real expression at full precision and rounds only when a value is stored
+(`Extended` is held as a double). `Write`, `WriteLn` and `Str` show reals in
+Turbo Pascal's forms, ` 1.5000000000E+00` for `Real` and
+` 1.50000000000000E+0000` from the 8087. Pascal strings contain CP437 bytes;
+browser input and source literals convert at the boundary, preserving numeric
+character codes.
 
 The virtual drive is local to this browser, case-insensitive, and limited to
 8 MiB. It persists between runs and reloads. Drop files onto the IDE to import
@@ -300,12 +308,13 @@ compilers ABI-compatible.
 
 The P-machine does not implement arbitrary pointer reinterpret casts, typed
 procedural constants, original overlay/linker formats, `.BGI` loading, or all
-compiler switches. In particular `$T`, `$X`, alignment, overlay, 8087, and code
+compiler switches. In particular `$T`, `$X`, alignment, overlay, and code
 generation options are retained as IDE preferences without full VM semantics.
-The VM always enforces its memory/instruction limits. Extended/Comp arithmetic
-is not emulated; transcendental math uses JavaScript functions with Real48
-rounding. Debugger expressions inspect data, operators, and selected pure
-built-ins; they do not execute user routines. Help is newly authored, and
+The VM always enforces its memory/instruction limits. `Extended` is held as a
+double rather than in 80 bits, and `Comp` is not emulated; transcendental math
+uses JavaScript functions, rounded to Real48 outside 8087 code. Debugger
+expressions inspect data, operators, and selected pure built-ins; they do not
+execute user routines. Help is newly authored, and
 recognized diagnostics use Borland numbers while preserving explanatory detail;
 implementation-specific errors remain explicitly unnumbered.
 

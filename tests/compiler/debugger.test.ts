@@ -91,6 +91,25 @@ end.`);
     expect(debug.machine.getState()).toBe(MachineState.STOPPED);
   });
 
+  it('reads and writes a routine typed constant in the program storage', () => {
+    const debug = create(`program Statics;
+procedure Tick;
+const Count: Integer = 10;
+begin
+  Count := Count + 1;
+end;
+begin
+  Tick;
+  Tick;
+end.`);
+    execute(debug, 'cursor', 5);
+    expect(debug.evaluate('Count').value).toBe(10);
+    expect(debug.frames()[0]?.locals.Count?.value).toBe(10);
+    debug.modify('Count', '20');
+    execute(debug, 'over');
+    expect(debug.evaluate('Count + 1').value).toBe(22);
+  });
+
   it('inspects lexical parent locals and writes through var parameters', () => {
     const debug = create(`program Nested;
 var result: Integer;

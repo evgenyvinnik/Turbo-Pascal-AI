@@ -9,16 +9,20 @@ export interface CompilerSwitches {
   ioChecking: boolean;
   overflowChecking: boolean;
   farCalls: boolean;
+  /** $N: 8087 code, which computes every real expression in Extended. */
+  numericProcessing: boolean;
 }
 
 export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
   completeBooleanEvaluation: false, rangeChecking: false, strictVarStrings: true,
   openStrings: false, ioChecking: true, overflowChecking: false, farCalls: false,
+  numericProcessing: false,
 });
 
 const switchNames: Record<string, keyof CompilerSwitches> = {
   B: 'completeBooleanEvaluation', R: 'rangeChecking', V: 'strictVarStrings',
   P: 'openStrings', I: 'ioChecking', Q: 'overflowChecking', F: 'farCalls',
+  N: 'numericProcessing',
 };
 
 /** Apply a switch list such as $B+,R-,I+; include filenames are not switches. */

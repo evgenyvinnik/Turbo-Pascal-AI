@@ -3,7 +3,7 @@ import { errorWith } from './matchers';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
-import { roundReal48, realOperation } from '../../src/compiler/codegen/numeric';
+import { roundReal48, realOperation, formatReal } from '../../src/compiler/codegen/numeric';
 
 const compile = (source: string) =>
   new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse());
@@ -109,6 +109,17 @@ describe('Turbo Pascal numeric representation', () => {
     ).toEqual(['TRUE', 'TRUE', 'TRUE']);
   });
 
+  it('computes every real expression in Extended under {$N+}, rounding only stores to Real', () => {
+    // 2^-45 is a quarter of a Real48 unit at 0.1: lost by 48-bit arithmetic
+    // and by a store to Real, but kept by the 8087.
+    const program = `program T;var r,s:Real;
+      begin r:=0.1; s:=r+1.0/35184372088832.0;
+        WriteLn(r=0.1, ',', s=r, ',', r+1.0/35184372088832.0=r)
+      end.`;
+    expect(execute(program)).toEqual(['TRUE,TRUE,TRUE']);
+    expect(execute(`{$N+} ${program}`)).toEqual(['FALSE,TRUE,FALSE']);
+  });
+
   it('quantizes Real literals and input while preserving six-byte storage size', () => {
     expect(
       execute(
@@ -118,6 +129,48 @@ describe('Turbo Pascal numeric representation', () => {
         ['1.0000000000001']
       )
     ).toEqual(['TRUE,6,TRUE']);
+  });
+
+  it('writes reals in Turbo Pascal floating-point and fixed-point forms', () => {
+    expect(
+      execute(`program T;var s:string;
+      begin WriteLn(1.5); WriteLn(-1.5); WriteLn(0.0); WriteLn(Pi); WriteLn(0.1);
+        WriteLn(1.5:20, '|', 1.5:10, '|', 1.5:1, '|', 1.5:12:-1);
+        WriteLn(123.456:0:2, '|', -0.5:0:0, '|', 0.4:0:0, '|', 2.5:0:0, '|', 9.99:6:1);
+        WriteLn(0.1:0:15, '|', 1e15:0:1, '|', -0.001:0:2, '|', 0.00123:0:5);
+        Str(1.5, s); WriteLn('[', s, ']'); Str(-2.5:0:1, s); WriteLn('[', s, ']')
+      end.`)
+    ).toEqual([
+      ' 1.5000000000E+00',
+      '-1.5000000000E+00',
+      ' 0.0000000000E+00',
+      ' 3.1415926536E+00',
+      ' 1.0000000000E-01',
+      '    1.5000000000E+00| 1.500E+00| 1.5E+00| 1.50000E+00',
+      '123.46|-1|0|3|  10.0',
+      '0.10000000000|1000000000000000.0|-0.00|0.00123',
+      '[ 1.5000000000E+00]',
+      '[-2.5]',
+    ]);
+  });
+
+  it('writes 8087 reals with a four-digit exponent and up to eighteen digits', () => {
+    expect(
+      execute(`program T;var d:Double; r:Real;
+      begin d:=1.5; WriteLn(d); d:=-2.25e-5; WriteLn(d, '|', d:12);
+        d:=0.1; WriteLn(d:0:20, '|', d:30); r:=1.5; WriteLn(r)
+      end.`)
+    ).toEqual([
+      ' 1.50000000000000E+0000',
+      '-2.25000000000000E-0005|-2.250E-0005',
+      '0.100000000000000006|     1.00000000000000006E-0001',
+      ' 1.50000000000000E+0000',
+    ]);
+    // Twelve digits are taken from a Real and eleven kept, so the rounding
+    // digit comes from the value itself; the 8087 rounds eighteen digits first.
+    expect(formatReal(roundReal48(9.99999999999), 17, -1, false)).toBe(' 1.0000000000E+01');
+    expect(formatReal(1e300, 23, -1, true)).toBe(' 1.00000000000000E+0300');
+    expect(formatReal(0.006, 0, 2, false)).toBe('0.01');
   });
 
   it('rounds products once from the exact significands at a double-rounding boundary', () => {

@@ -92,7 +92,7 @@ export class SourceDebugger {
       const locals: Record<string, DebugValue> = {};
       const args: unknown[] = [];
       for (const variable of scope.variables) {
-        const address = variable.reference ? Number(this.machine.peek(mp + variable.offset)) : mp + variable.offset;
+        const address = this.variableAddress(variable, mp);
         locals[variable.name] = { value: this.readValue(address, variable.type), type: variable.type.kind };
         if (variable.parameter) args.push(locals[variable.name]?.value);
       }
@@ -109,10 +109,7 @@ export class SourceDebugger {
     let mp = this.machine.getMP();
     while (scope) {
       const variable = scope.variables.find((item) => item.name.toLowerCase() === name.toLowerCase());
-      if (variable) return {
-        address: variable.reference ? Number(this.machine.peek(mp + variable.offset)) : mp + variable.offset,
-        type: variable.type,
-      };
+      if (variable) return { address: this.variableAddress(variable, mp), type: variable.type };
       const constant = scope.constants.find((item) => item.name.toLowerCase() === name.toLowerCase());
       if (constant) return { value: constant.type.kind === 'boolean' ? Boolean(constant.value) : constant.type.kind === 'set' ? new Set(JSON.parse(String(constant.value)) as number[]) : constant.value, type: constant.type.kind };
       mp = Number(this.machine.peek(mp + 1));
@@ -120,6 +117,13 @@ export class SourceDebugger {
       scope = this.bytecode.debugScopes.find((candidate) => candidate.id === parentId);
     }
     throw new Error(`Unknown identifier "${name}"`);
+  }
+
+  /** Typed constants live in the program's frame, which starts at 0. */
+  private variableAddress(variable: DebugScope['variables'][number], mp: number): number {
+    if (variable.static) return variable.offset;
+    const address = mp + variable.offset;
+    return variable.reference ? Number(this.machine.peek(address)) : address;
   }
 
   private readValue(address: number, type: DebugType, depth = 0): unknown {
