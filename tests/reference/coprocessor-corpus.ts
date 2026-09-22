@@ -2,13 +2,15 @@ import type { ReferenceCase } from './corpus';
 
 /** 8087 arithmetic. Turbo Pascal computes Single, Double and Extended, and
  * every real expression under {$N+}, at full precision; each case prints a
- * value that 48-bit Real arithmetic would get visibly wrong. */
+ * value that 48-bit Real arithmetic would get visibly wrong. Doubles meet
+ * inexact literals only through stores: on x86 Free Pascal, as in TP7, such a
+ * literal is an 80-bit Extended, which this VM holds as a double. */
 export const coprocessorCases: ReferenceCase[] = [
   {
     name: 'double-literals-keep-full-precision',
-    source: `program T; var d: Double;
-begin d := 0.1; WriteLn(d = 0.1, ' ', d:0:15);
-  d := d * 3; WriteLn(d = 0.3, ' ', d > 0.3, ' ', d:0:15) end.`,
+    source: `program T; var d, e: Double;
+begin d := 0.1; e := 0.1; WriteLn(d = e, ' ', d:0:15);
+  d := d * 3; e := 0.3; WriteLn(d = e, ' ', d > e, ' ', d:0:15) end.`,
     output: ['TRUE 0.100000000000000', 'FALSE TRUE 0.300000000000000'],
   },
   {
@@ -31,10 +33,10 @@ begin d := Third; WriteLn(d:0:15, ' ', Tenth:0:15); WriteLn(Pi:0:15) end.`,
   },
   {
     name: 'double-math-functions-and-sqr',
-    source: `program T; var d: Double;
+    source: `program T; var d, e: Double;
 begin d := Sqrt(2); WriteLn(d:0:15, ' ', Sqr(d) > 2, ' ', Sqrt(d * d) = d);
-  WriteLn(Sqr(0.1 + d - d):0:17, ' ', Abs(-d):0:15) end.`,
-    output: ['1.414213562373095 TRUE TRUE', '0.01000000000000002 1.414213562373095'],
+  e := d / 10; WriteLn(Sqr(e):0:17, ' ', Abs(-d):0:15) end.`,
+    output: ['1.414213562373095 TRUE TRUE', '0.02000000000000000 1.414213562373095'],
   },
   {
     name: 'single-rounds-when-stored',
