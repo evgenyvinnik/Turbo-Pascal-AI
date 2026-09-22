@@ -49,6 +49,8 @@ export class FileRuntime {
       ? 106
       : message.startsWith('File not found')
         ? 2
+        : message.startsWith('File access denied')
+          ? 5
         : message === 'Invalid file name'
           ? 3
           : message === 'File is not assigned'

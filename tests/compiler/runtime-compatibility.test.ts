@@ -99,3 +99,41 @@ describe('Turbo Pascal runtime compatibility', () => {
     expect(machine.getOutput()).toEqual(['-8,0,8']);
   });
 });
+
+describe('the DOS null device', () => {
+  const run = (source: string) => {
+    const disk = new VirtualFileSystem();
+    const machine = machineFor(source, disk);
+    machine.run();
+    return { machine, disk };
+  };
+
+  it('accepts Rewrite, Append and writes, and stores nothing', () => {
+    const { machine, disk } = run(`program T; var f: Text;
+      begin Assign(f, 'NUL'); Rewrite(f); WriteLn(f, 'gone'); Close(f);
+      Append(f); WriteLn(f, 'also gone'); Close(f); WriteLn('ok') end.`);
+    expect(machine.getState()).toBe(MachineState.STOPPED);
+    expect(machine.getOutput()).toEqual(['ok']);
+    expect(disk.snapshot()).toEqual({});
+  });
+
+  it('reads as an empty file', () => {
+    const { machine } = run(`program T; var f: Text;
+      begin Assign(f, 'NUL'); Reset(f); WriteLn(Eof(f)); Close(f) end.`);
+    expect(machine.getOutput()).toEqual(['TRUE']);
+  });
+
+  it('is NUL in any directory and with any extension, but NULL is an ordinary file', () => {
+    const disk = new VirtualFileSystem();
+    for (const name of ['nul', 'C:\\TEMP\\NUL.TXT', 'dir/Nul.dat']) expect(disk.exists(name)).toBe(true);
+    expect(disk.exists('NULL.TXT')).toBe(false);
+    disk.write('NULL.TXT', 'kept');
+    expect(disk.read('NULL.TXT')).toBe('kept');
+  });
+
+  it('cannot be erased or renamed: DOS error 5, file access denied', () => {
+    const { machine } = run(`program T; var f: Text;
+      begin Assign(f, 'NUL'); {$I-} Erase(f); WriteLn(IOResult); Rename(f, 'X.TXT'); WriteLn(IOResult) {$I+} end.`);
+    expect(machine.getOutput()).toEqual(['5', '5']);
+  });
+});
