@@ -117,4 +117,10 @@ export const languageCases: ReferenceCase[] = [
     begin a:=True;b:=False;if a then if b then else WriteLn('inner else')end.`,output:['inner else'] },
   { name:'empty-while-body',source:`program T;var c:Boolean;begin c:=False;while c do ;WriteLn('after')end.`,output:['after'] },
   { name:'empty-for-body',source:`program T;var i:Integer;begin for i:=1 to 3 do ;WriteLn('done')end.`,output:['done'] },
+  // Storage starts zeroed: an unassigned Char is #0.
+  { name:'unassigned-char-is-nul',source:`program T;var c:Char;begin WriteLn(Ord(c))end.`,output:['0'] },
+  { name:'unassigned-char-typecast',source:`program T;var c:Char;i:Integer;begin i:=Integer(c);c:=Char(i+65);WriteLn(i,c)end.`,output:['0A'] },
+  { name:'unassigned-char-in-a-string',source:`program T;var c:Char;s:String;begin s:='x'+c+'y';WriteLn(Length(s),Ord(s[2]))end.`,output:['30'] },
+  { name:'unassigned-char-in-array-and-record',source:`program T;var a:array[1..2]of Char;r:record c:Char;n:Integer end;
+    begin WriteLn(Ord(a[1])+Ord(a[2]),Ord(r.c),r.n)end.`,output:['000'] },
 ];

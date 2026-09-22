@@ -1242,7 +1242,9 @@ export class Compiler {
       for (const field of type.fields!.values()) this.initialize(field.type, offset + field.offset);
     } else {
       this.emit(Opcode.LDA, 0, offset);
-      this.literal(this.text(type) ? '' : type.kind === 'set' ? '[]' : 0, type);
+      // Storage starts zeroed, as Turbo Pascal's does: a Char is #0, never the
+      // empty string, which is no character at all.
+      this.literal(type.kind === 'char' ? '\0' : this.text(type) ? '' : type.kind === 'set' ? '[]' : 0, type);
       this.emit(Opcode.STI, this.typeCode(type));
     }
   }
