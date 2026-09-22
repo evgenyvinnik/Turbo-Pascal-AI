@@ -6,7 +6,16 @@
 import { applyCompilerSwitches, DEFAULT_SWITCHES, type CompilerSwitches } from '../directives';
 import { Lexer, Token } from '../lexer';
 import { PascalError } from '../errors';
-import { Node, NodeType, createNode, BlockNode, ProgramNode, UnitNode } from './Node';
+import {
+  Node,
+  NodeType,
+  createNode,
+  BlockNode,
+  ProgramNode,
+  UnitNode,
+  type ArrayTypeNode,
+  type RecordTypeNode,
+} from './Node';
 
 export type ParserOptions = Partial<CompilerSwitches>;
 
@@ -18,6 +27,8 @@ export class Parser {
   private interfaceDeclarations = false;
   private ioChecking = true;
   private overflowChecking = false;
+  /** Within a typed constant's value, parentheses may hold an array or record. */
+  private aggregateConstants = false;
   private lastCompoundEndLine = 1;
   private lastCompoundBeginLine = 1;
   /** The lexer providing tokens */
@@ -306,6 +317,17 @@ export class Parser {
     while (this.currentToken.isIdentifier()) {
       const line = this.lineNumber;
       const name = this.expectIdentifier();
+      if (this.isSymbol(':')) {
+        this.advance();
+        const constType = this.parseType();
+        this.expectSymbol('=');
+        const value = this.parseTypedConstant(constType);
+        this.expectSymbol(';');
+        constants.push(
+          this.node(NodeType.TYPED_CONST_DECLARATION, { name, constType, value }, line)
+        );
+        continue;
+      }
       this.expectSymbol('=');
       const value = this.parseExpression();
       this.expectSymbol(';');
@@ -314,6 +336,88 @@ export class Parser {
     }
 
     return constants;
+  }
+
+  /**
+   * Parses a typed constant's value: a constant expression, or in parentheses
+   * an array's elements `(1, 2)` or a record's fields `(X: 1; Y: 2)`, nested
+   * as the type requires. A type written out in the declaration directs the
+   * parse, so a missing parenthesis is reported where it belongs; a named
+   * type is checked when the constant is compiled.
+   */
+  private parseTypedConstant(type?: Node): Node {
+    const line = this.lineNumber;
+    if (type?.type === NodeType.ARRAY_TYPE) {
+      const array = type as ArrayTypeNode;
+      // array[a, b] of T holds arrays of array[b] of T.
+      const element: Node =
+        array.indexTypes.length > 1
+          ? { ...array, indexTypes: array.indexTypes.slice(1) }
+          : array.elementType;
+      const chars =
+        element.type === NodeType.CHAR_TYPE ||
+        (element.type === NodeType.IDENTIFIER && String(element.name).toLowerCase() === 'char');
+      // An array of Char may instead be given as a string.
+      if (!chars || this.isSymbol('(')) {
+        this.expectSymbol('(');
+        const elements = [this.parseTypedConstant(element)];
+        while (this.isSymbol(',')) {
+          this.advance();
+          elements.push(this.parseTypedConstant(element));
+        }
+        this.expectSymbol(')');
+        return this.node(NodeType.ARRAY_CONSTANT, { elements }, line);
+      }
+    } else if (type?.type === NodeType.RECORD_TYPE) {
+      const fieldTypes = new Map(
+        (type as RecordTypeNode).fields.flatMap((field) =>
+          field.names.map((name) => [name.toLowerCase(), field.varType] as const)
+        )
+      );
+      this.expectSymbol('(');
+      const fields: { name: string; value: Node }[] = [];
+      while (this.currentToken.isIdentifier()) {
+        const name = this.expectIdentifier();
+        this.expectSymbol(':');
+        fields.push({ name, value: this.parseTypedConstant(fieldTypes.get(name.toLowerCase())) });
+        if (!this.isSymbol(';')) break;
+        this.advance();
+      }
+      this.expectSymbol(')');
+      return this.node(NodeType.RECORD_CONSTANT, { fields }, line);
+    }
+    const previous = this.aggregateConstants;
+    this.aggregateConstants = true;
+    try {
+      return this.parseExpression();
+    } finally {
+      this.aggregateConstants = previous;
+    }
+  }
+
+  /** The rest of a parenthesized typed constant value, after its '('. One
+   * value alone is an ordinary parenthesized expression. */
+  private parseAggregateConstant(line: number): Node {
+    if (this.currentToken.isIdentifier() && this.lexer.peek().isSymbol(':')) {
+      const fields: { name: string; value: Node }[] = [];
+      do {
+        if (this.isSymbol(';')) this.advance();
+        if (this.isSymbol(')')) break;
+        const name = this.expectIdentifier();
+        this.expectSymbol(':');
+        fields.push({ name, value: this.parseExpression() });
+      } while (this.isSymbol(';'));
+      this.expectSymbol(')');
+      return this.node(NodeType.RECORD_CONSTANT, { fields }, line);
+    }
+    const first = this.parseExpression();
+    const elements = [first];
+    while (this.isSymbol(',')) {
+      this.advance();
+      elements.push(this.parseExpression());
+    }
+    this.expectSymbol(')');
+    return elements.length === 1 ? first : this.node(NodeType.ARRAY_CONSTANT, { elements }, line);
   }
 
   /**
@@ -1309,6 +1413,7 @@ export class Parser {
     // Parenthesized expression
     if (this.isSymbol('(')) {
       this.advance();
+      if (this.aggregateConstants) return this.parseAggregateConstant(line);
       const expr = this.parseExpression();
       this.expectSymbol(')');
       return expr;

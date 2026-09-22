@@ -9,6 +9,7 @@ export enum NodeType {
 
   // Declarations
   CONST_DECLARATION = 'constDeclaration',
+  TYPED_CONST_DECLARATION = 'typedConstDeclaration',
   VAR_DECLARATION = 'varDeclaration',
   TYPE_DECLARATION = 'typeDeclaration',
   LABEL_DECLARATION = 'labelDeclaration',
@@ -60,6 +61,10 @@ export enum NodeType {
   ADDRESS_OF = 'addressOf',
   SET_LITERAL = 'setLiteral',
   RANGE = 'range',
+  /** A typed constant's array value: `(1, 2, 3)`. */
+  ARRAY_CONSTANT = 'arrayConstant',
+  /** A typed constant's record value: `(X: 1; Y: 2)`. */
+  RECORD_CONSTANT = 'recordConstant',
 
   // Parameters
   PARAMETER = 'parameter',
@@ -120,6 +125,29 @@ export interface ConstDeclarationNode extends Node {
   type: NodeType.CONST_DECLARATION;
   name: string;
   value: Node;
+}
+
+/**
+ * Typed constant declaration node: `name: type = value`, an initialized
+ * variable with static storage
+ */
+export interface TypedConstDeclarationNode extends Node {
+  type: NodeType.TYPED_CONST_DECLARATION;
+  name: string;
+  constType: Node;
+  value: Node;
+}
+
+/** The elements of a typed constant array, in index order */
+export interface ArrayConstantNode extends Node {
+  type: NodeType.ARRAY_CONSTANT;
+  elements: Node[];
+}
+
+/** The fields given in a typed constant record, in declaration order */
+export interface RecordConstantNode extends Node {
+  type: NodeType.RECORD_CONSTANT;
+  fields: { name: string; value: Node }[];
 }
 
 /**

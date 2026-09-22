@@ -39,6 +39,8 @@ export interface DebugScope {
     offset: number;
     reference: boolean;
     parameter?: boolean;
+    /** A typed constant: the offset is in the program's frame, not this one. */
+    static?: boolean;
     type: DebugType;
   }[];
   constants: { name: string; value: number | string | boolean | null; type: DebugType }[];

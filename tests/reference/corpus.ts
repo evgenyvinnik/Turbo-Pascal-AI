@@ -1,6 +1,8 @@
 import { languageCases } from './language-corpus';
 import { switchCases } from './switch-corpus';
 import { exitCases } from './exit-corpus';
+import { coprocessorCases } from './coprocessor-corpus';
+import { typedConstantCases } from './typed-constant-corpus';
 /** Portable TP-mode programs, checked against an independent Free Pascal run. */
 export interface ReferenceCase {
   name: string;
@@ -168,4 +170,4 @@ WriteLn(u,',',v,',',w);i:=${String(dividend)};j:=${String(divisor)};WriteLn(i di
   });
 }
 
-export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases];
+export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases, ...coprocessorCases, ...typedConstantCases];

@@ -122,6 +122,24 @@ export function integerOperation(
   return Number(wrapped);
 }
 
+/** Arithmetic on the 8087 types (Single, Double, Extended), which Turbo
+ * Pascal computes on the coprocessor at full precision rather than in the
+ * 48-bit software arithmetic it uses for Real. */
+export function coprocessorOperation(operator: string, a: number, b: number, line = -1): number {
+  if (operator === '/' && b === 0) throw new PascalError('Division by zero', line);
+  return coprocessorValue(
+    operator === '+' ? a + b : operator === '-' ? a - b : operator === '*' ? a * b : a / b,
+    line
+  );
+}
+
+/** A value as the 8087 holds it. JavaScript has no 80-bit type, so this is a
+ * double, which is Extended's precision for every value Double can hold. */
+export function coprocessorValue(value: number, line = -1): number {
+  if (!Number.isFinite(value)) throw new PascalError('Real overflow', line);
+  return value;
+}
+
 export function realOperation(operator: string, a: number, b: number, line = -1): number {
   if (operator === '/' && b === 0) throw new PascalError('Division by zero', line);
   if (!Number.isFinite(a) || !Number.isFinite(b)) throw new PascalError('Real overflow', line);
@@ -140,4 +158,83 @@ export function realOperation(operator: string, a: number, b: number, line = -1)
   const first = left.significand << BigInt(left.exponent - scale);
   const second = right.significand << BigInt(right.exponent - scale);
   return roundRational(operator === '+' ? first + second : first - second, 1n, scale, line);
+}
+
+/** The exact decimal expansion of a positive finite double: its significant
+ * digits and the power of ten of the first, so value = d.ddd × 10^exponent. */
+function decimalDigits(value: number): { digits: string; exponent: number } {
+  const bits = new DataView(Float64Array.of(value).buffer).getBigUint64(0, true);
+  const biased = Number((bits >> 52n) & 0x7ffn);
+  const fraction = bits & ((1n << 52n) - 1n);
+  const mantissa = biased ? fraction | (1n << 52n) : fraction;
+  const power = (biased || 1) - 1075;
+  // m × 2^-k is m × 5^k / 10^k, so the integer m × 5^k holds every digit.
+  const integer = power >= 0 ? mantissa << BigInt(power) : mantissa * 5n ** BigInt(-power);
+  const text = integer.toString();
+  return { digits: text.replace(/0+$/, ''), exponent: text.length - 1 - Math.max(0, -power) };
+}
+
+/** Adds one unit in the last place of a digit string; '' means the carry
+ * passed the first digit. */
+function incrementDigits(digits: string): string {
+  const kept = digits.replace(/9+$/, '');
+  if (!kept) return '';
+  return kept.slice(0, -1) + String(Number(kept.at(-1)) + 1);
+}
+
+/** The width Write uses for a real value when none is given. */
+export const defaultRealWidth = (coprocessor: boolean) => (coprocessor ? 23 : 17);
+
+/**
+ * A real value as Write, WriteLn and Str show it. A negative number of
+ * decimals, or none, gives floating-point form: ' 1.5000000000E+00'.
+ *
+ * Real follows Turbo Pascal 7's software routine: at most eleven digits are
+ * kept, the next one rounds half up, and digits beyond those kept are zeros.
+ * The field width sets how many significant digits floating-point form
+ * shows (width - 6, at least two). The 8087 routine ({$N+}) has a four-digit
+ * exponent and up to eighteen digits, so its default width of 23 shows
+ * fifteen.
+ */
+export function formatReal(
+  value: number,
+  width: number,
+  decimals: number,
+  coprocessor: boolean
+): string {
+  const maximum = coprocessor ? 18 : 11;
+  const exponentDigits = coprocessor ? 4 : 2;
+  const fixed = decimals >= 0;
+  const places = fixed
+    ? Math.min(decimals, maximum)
+    : Math.min(maximum, Math.max(2, width - exponentDigits - 4));
+  let { digits, exponent } =
+    value === 0 ? { digits: '', exponent: 0 } : decimalDigits(Math.abs(value));
+  let kept = fixed ? places + exponent + 1 : places;
+  if (kept < 0) digits = '';
+  else {
+    kept = Math.min(kept, maximum);
+    const roundUp = (digits[kept] ?? '0') >= '5';
+    digits = digits.slice(0, kept);
+    if (roundUp) {
+      digits = incrementDigits(digits);
+      if (!digits) [digits, exponent] = ['1', exponent + 1];
+    }
+  }
+  const digit = (position: number) => (position >= 0 ? (digits[position] ?? '0') : '0');
+  let text: string;
+  if (fixed) {
+    text = value < 0 ? '-' : '';
+    if (exponent < 0) text += '0';
+    else for (let position = 0; position <= exponent; position++) text += digit(position);
+    if (places > 0) {
+      text += '.';
+      for (let place = 1; place <= places; place++) text += digit(exponent + place);
+    }
+  } else {
+    text = (value < 0 ? '-' : ' ') + digit(0) + '.';
+    for (let position = 1; position < places; position++) text += digit(position);
+    text += `E${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent)).padStart(exponentDigits, '0')}`;
+  }
+  return text.padStart(width, ' ');
 }

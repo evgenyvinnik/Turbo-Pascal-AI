@@ -56,7 +56,7 @@ const UNSUPPORTED: Record<string, string> = {
 const NEUTRAL_OPTION = /^-(?:[vOga]\S*|Cg-?|Un|Xs|Xi|Xe|Sg)$/;
 /** In-source directives that make Free Pascal compile something other than
  * Turbo Pascal. They override -Mtp, so such a test says nothing about TP. */
-const DIALECT_DIRECTIVE = /\{\$(?:mode\s+(?!tp\b)\w+|modeswitch\b|h\+|longstrings\s+on|macro\s+on|coperators\s+on|inline\s+on|z[+\-\d]|minenumsize\b)/i;
+const DIALECT_DIRECTIVE = /\{\$(?:mode\s+(?!tp\b)\w+|modeswitch\b|h\+|longstrings\s+on|macro\s+on|coperators\s+on|inline\s+on|z[+\-\d]|minenumsize\b|j[+-]|writeableconst\b)/i;
 /** Types Free Pascal declares in every mode, TP mode included, that Turbo
  * Pascal 7 never had. A test using one is FPC code, whatever its mode. Comp,
  * WordBool and PChar are real TP7 types, so they are not listed. */

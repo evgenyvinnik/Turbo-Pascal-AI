@@ -14,6 +14,9 @@ import {
   type VarDeclarationNode,
   type TypeDeclarationNode,
   type ConstDeclarationNode,
+  type TypedConstDeclarationNode,
+  type ArrayConstantNode,
+  type RecordConstantNode,
   type AssignmentNode,
   type CallNode,
   type BinaryOpNode,
@@ -37,7 +40,15 @@ import { ModuleLoader } from '../stdlib/modules';
 import { BuiltinProcedure, ParamMode, type BuiltinDef } from '../stdlib/builtin';
 import { TypeKind } from '../symbols/Symbol';
 import { Bytecode, type DebugType } from './Bytecode';
-import { roundReal48, integerOperation, realOperation } from './numeric';
+import {
+  roundReal48,
+  integerOperation,
+  realOperation,
+  coprocessorOperation,
+  coprocessorValue,
+  defaultRealWidth,
+  formatReal,
+} from './numeric';
 
 export interface CompilerOptions {
   /** Resolve a user unit from the current virtual workspace. Names are case insensitive. */
@@ -90,6 +101,14 @@ interface Variable {
   result?: boolean;
   parameter?: boolean;
   container?: Variable;
+  /** A typed constant: program-lifetime storage, whatever scope names it. */
+  static?: boolean;
+}
+/** One scalar cell of a typed constant's initial value. */
+interface StaticStore {
+  offset: number;
+  type: PascalType;
+  value: Value;
 }
 interface Constant {
   kind: 'constant';
@@ -133,6 +152,8 @@ interface Scope {
   withRecords: { pointer: Variable; type: PascalType }[];
   parent: Scope | null;
   level: number;
+  /** On a module's outermost scope: the module is compiled for the 8087. */
+  coprocessor?: boolean;
   symbols: Map<string, Symbol>;
   imports: Map<string, Map<string, Symbol>>;
   methodOwner?: PascalType;
@@ -156,6 +177,8 @@ const LONGINT: PascalType = {
   high: 2147483647,
 };
 const REAL: PascalType = { kind: 'real', size: 1, byteSize: 6 };
+/** What 8087 arithmetic produces; stores round it to the variable's type. */
+const EXTENDED: PascalType = { ...REAL, byteSize: 10 };
 const BOOLEAN: PascalType = { kind: 'boolean', size: 1, byteSize: 1, low: 0, high: 1 };
 const CHAR: PascalType = { kind: 'char', size: 1, byteSize: 1, low: 0, high: 255 };
 const STRING: PascalType = { kind: 'string', size: 1, byteSize: 256, capacity: 255 };
@@ -178,6 +201,8 @@ export class Compiler {
   private initializationOrder: CompiledUnit[] = [];
   private compilerOptions: CompilerOptions = {};
   private globalOffset = MARK_SIZE;
+  /** Typed constants, set once when the program starts. */
+  private typedConstants: { variable: Variable; stores: StaticStore[] }[] = [];
   private objectTypes: PascalType[] = [];
   private routineValues: Routine[] = [];
 
@@ -201,11 +226,13 @@ export class Compiler {
     this.globalOffset = MARK_SIZE;
     this.objectTypes = [];
     this.routineValues = [];
+    this.typedConstants = [];
     this.line = root.lineNumber ?? 1;
     this.sourceFile = typeof root.sourceFile === 'string' ? root.sourceFile : undefined;
     if (root.type !== NodeType.PROGRAM) this.fail(root, 'A Pascal program is required');
     const program = root as ProgramNode;
     this.scope = this.newScope(null, program.name);
+    this.scope.coprocessor = this.usesCoprocessor(root);
     this.addBuiltins();
     const programScope = this.scope;
     this.importUnits(program.uses ?? [], root);
@@ -218,6 +245,8 @@ export class Compiler {
     }
     this.scope = programScope;
     for (const routine of this.scope.routines) this.compileRoutine(routine);
+    // Typed constants in routines take program storage beyond the globals.
+    this.scope.nextOffset = Math.max(this.scope.nextOffset, this.globalOffset);
     // Unit globals share the program activation, but retain separate lexical namespaces.
     this.scope.locals.unshift(...this.initializationOrder.flatMap(unit => unit.scope.locals));
     this.bytecode.setStartAddress();
@@ -250,6 +279,7 @@ export class Compiler {
     const unit: CompiledUnit = { node: unitNode, scope, exports: new Map(), state: 'interface' };
     this.units.set(key, unit);
     this.scope = scope;
+    scope.coprocessor = this.usesCoprocessor(unitNode);
     this.addBuiltins();
     this.importUnits(unitNode.interfaceUses, unitNode);
     scope.nextOffset = this.globalOffset;
@@ -306,7 +336,7 @@ export class Compiler {
       real: REAL,
       single: { ...REAL, byteSize: 4 },
       double: { ...REAL, byteSize: 8 },
-      extended: { ...REAL, byteSize: 10 },
+      extended: EXTENDED,
       boolean: BOOLEAN,
       char: CHAR,
       string: STRING,
@@ -318,8 +348,8 @@ export class Compiler {
     for (const [name, value] of Object.entries({ maxint: 32767, pi: Math.PI }))
       this.scope.symbols.set(name, {
         kind: 'constant',
-        type: name === 'pi' ? REAL : INTEGER,
-        value: name === 'pi' ? roundReal48(value) : value,
+        type: name === 'pi' ? this.realResult() : INTEGER,
+        value: name === 'pi' && !this.coprocessorMode() ? roundReal48(value) : value,
       });
   }
 
@@ -527,6 +557,43 @@ export class Compiler {
   private ordinal(type: PascalType): boolean {
     return ['integer', 'char', 'boolean'].includes(type.kind);
   }
+  /** Single, Double and Extended: the 8087 types, which keep full precision. */
+  private coprocessorReal(type: PascalType): boolean {
+    return type.kind === 'real' && type.byteSize !== 6;
+  }
+  /** Whether the current module is compiled for the 8087 ({$N+}). */
+  private coprocessorMode(): boolean {
+    let scope = this.scope;
+    while (scope.parent) scope = scope.parent;
+    return scope.coprocessor ?? false;
+  }
+  /** Turbo Pascal needs {$N+} for the 8087 types, so a module that names one
+   * is taken to be compiled for the 8087 even without the switch. */
+  private usesCoprocessor(root: Node): boolean {
+    const seen = new Set<object>();
+    const visit = (value: unknown): boolean => {
+      if (typeof value !== 'object' || value === null || seen.has(value)) return false;
+      seen.add(value);
+      if (Array.isArray(value)) return value.some(visit);
+      const node = value as Node;
+      if (node.numericProcessing === true) return true;
+      if (
+        (node.type === NodeType.IDENTIFIER || node.type === NodeType.CALL) &&
+        /^(?:single|double|extended)$/i.test(String(node.name))
+      )
+        return true;
+      return Object.values(node).some(visit);
+    };
+    return visit(root);
+  }
+  /** Arithmetic on these operands is done by the 8087 rather than in software. */
+  private coprocessorArithmetic(left: PascalType, right: PascalType): boolean {
+    return this.coprocessorMode() || this.coprocessorReal(left) || this.coprocessorReal(right);
+  }
+  /** The type of a real value computed in the current module. */
+  private realResult(): PascalType {
+    return this.coprocessorMode() ? EXTENDED : REAL;
+  }
   private text(type: PascalType): boolean {
     return type.kind === 'string' || type.kind === 'char';
   }
@@ -616,6 +683,12 @@ export class Compiler {
           const declaration = node as ConstDeclarationNode;
           const constant = this.constant(declaration.value);
           this.declare(declaration.name, constant, node);
+          break;
+        }
+        case NodeType.TYPED_CONST_DECLARATION: {
+          const declaration = node as TypedConstDeclarationNode;
+          const type = this.resolveType(declaration.constType);
+          this.typedConstant(declaration.name, type, declaration);
           break;
         }
         case NodeType.TYPE_DECLARATION: {
@@ -937,10 +1010,12 @@ export class Compiler {
         return {
           kind: 'constant',
           type: node.isReal
-            ? REAL
+            ? this.realResult()
             : this.integerRangeType(Number(node.value), Number(node.value), node),
           value: node.isReal
-            ? roundReal48(Number(node.value), node.lineNumber)
+            ? this.coprocessorMode()
+              ? coprocessorValue(Number(node.value), node.lineNumber)
+              : roundReal48(Number(node.value), node.lineNumber)
             : Number(node.value),
         };
       case NodeType.STRING:
@@ -979,7 +1054,8 @@ export class Compiler {
           const number = -Number(value.value);
           return {
             ...value,
-            type: value.type.kind === 'real' ? REAL : this.integerRangeType(number, number, node),
+            type:
+              value.type.kind === 'real' ? value.type : this.integerRangeType(number, number, node),
             value: number,
           };
         }
@@ -1046,12 +1122,13 @@ export class Compiler {
         const real = operator === '/' || left.type.kind === 'real' || right.type.kind === 'real';
         if (real && !['+', '-', '*', '/'].includes(operator))
           this.fail(node, 'Integer operands required');
+        const coprocessor = real && this.coprocessorArithmetic(left.type, right.type);
         const value = real
-          ? realOperation(operator, a, b, node.lineNumber)
+          ? (coprocessor ? coprocessorOperation : realOperation)(operator, a, b, node.lineNumber)
           : integerOperation(operator, a, b, { bits: 32, signed: true }, true, node.lineNumber);
         return {
           kind: 'constant',
-          type: real ? REAL : this.integerRangeType(value, value, node),
+          type: real ? (coprocessor ? EXTENDED : REAL) : this.integerRangeType(value, value, node),
           value,
         };
       }
@@ -1169,6 +1246,16 @@ export class Compiler {
     this.line = block.lineNumber ?? routine?.declaration.lineNumber ?? this.line;
     const entry = this.emit(Opcode.ENT);
     for (const local of this.scope.locals) this.initialize(local.type, local.offset);
+    // Typed constants have their values before any unit initialization runs.
+    if (!routine)
+      for (const { variable, stores } of this.typedConstants) {
+        this.initialize(variable.type, variable.offset);
+        for (const store of stores) {
+          this.emit(Opcode.LDA, 0, store.offset);
+          this.literal(store.value, store.type);
+          this.emit(Opcode.STI, this.typeCode(store.type));
+        }
+      }
     if (routine && routine.type.kind !== 'void') {
       this.initialize(routine.type, 0);
       if (this.scope.constructorBody) { this.emit(Opcode.LDA, 0, 0); this.literal(true, BOOLEAN); this.emit(Opcode.STI, TypeCode.B); }
@@ -1207,6 +1294,7 @@ export class Compiler {
           offset: variable.offset,
           reference: variable.reference,
           ...(variable.parameter ? { parameter: true } : {}),
+          ...(variable.static ? { static: true } : {}),
           type: this.debugType(variable.type),
         })),
       constants: [...scope.symbols.entries()]
@@ -1232,6 +1320,148 @@ export class Compiler {
         ])
       );
     return result;
+  }
+
+  /** A typed constant is an initialized variable that lives as long as the
+   * program, even when a routine declares it, and keeps its value between
+   * calls. Its value is worked out here, in the declaring scope. */
+  private typedConstant(name: string, type: PascalType, node: TypedConstDeclarationNode): void {
+    if (type.kind === 'file' || type.object || type.procedureSignature)
+      this.fail(node, 'Typed constants of this type are not supported');
+    let root = this.scope;
+    while (root.parent) root = root.parent;
+    // Module-level constants sit among the globals; a routine's go after them.
+    const module = root === this.scope;
+    const offset = module ? this.scope.nextOffset : this.globalOffset;
+    if (module) this.scope.nextOffset += type.size;
+    else this.globalOffset += type.size;
+    if (offset + type.size > 32767)
+      this.fail(node, 'Variable storage exceeds the supported frame size');
+    const variable: Variable = {
+      kind: 'variable',
+      name,
+      type,
+      offset,
+      scope: root,
+      reference: false,
+      static: true,
+    };
+    const stores: StaticStore[] = [];
+    this.typedConstantValue(type, node.value, offset, stores);
+    this.declare(name, variable, node);
+    this.typedConstants.push({ variable, stores });
+  }
+  private typedConstantValue(
+    type: PascalType,
+    node: Node,
+    offset: number,
+    stores: StaticStore[]
+  ): void {
+    if (type.kind === 'array' && type.element) {
+      const element = type.element,
+        count = (type.high ?? 0) - (type.low ?? 0) + 1;
+      if (element.kind === 'char' && node.type !== NodeType.ARRAY_CONSTANT && count > 1) {
+        // An array of Char takes a string of exactly its length.
+        const text = this.constant(node);
+        if (!this.text(text.type) || String(text.value).length !== count)
+          this.fail(node, `String constant of length ${String(count)} expected`);
+        for (let index = 0; index < count; index++) {
+          const value = String(text.value).charAt(index);
+          stores.push({ offset: offset + index * element.size, type: element, value });
+        }
+        return;
+      }
+      // Parentheses around one value alone are only grouping, so a list that
+      // does not fit may still be the single element of a one-element array.
+      const list =
+        node.type === NodeType.ARRAY_CONSTANT ? (node as ArrayConstantNode).elements : undefined;
+      const elements = list?.length === count ? list : count === 1 ? [node] : (list ?? []);
+      if (elements.length !== count)
+        this.fail(node, `Array constant of ${String(count)} elements expected`);
+      for (const [index, value] of elements.entries())
+        this.typedConstantValue(element, value, offset + index * element.size, stores);
+      return;
+    }
+    if (type.kind === 'record' && type.fields) {
+      if (node.type !== NodeType.RECORD_CONSTANT) this.fail(node, 'Record constant expected');
+      // Fields are given in declaration order, from the first; any after the
+      // last one given stay zero.
+      const fields = [...type.fields.entries()];
+      for (const [index, { name, value }] of (node as RecordConstantNode).fields.entries()) {
+        const expected = fields[index];
+        if (!type.fields.has(name.toLowerCase()))
+          this.fail(value, `Unknown record field "${name}"`);
+        if (expected?.[0] !== name.toLowerCase())
+          this.fail(value, `Record field "${String(expected?.[0])}" expected`);
+        this.typedConstantValue(expected[1].type, value, offset + expected[1].offset, stores);
+      }
+      return;
+    }
+    if (type.kind === 'pointer' && !type.procedureSignature && node.type !== NodeType.NIL) {
+      stores.push({ offset, type, value: this.staticAddress(node) });
+      return;
+    }
+    const constant = this.constant(node);
+    this.requireType(node, type, constant.type);
+    let value = constant.value;
+    if (type.kind === 'real')
+      value =
+        type.byteSize === 6
+          ? roundReal48(Number(value), node.lineNumber)
+          : type.byteSize === 4
+            ? Math.fround(Number(value))
+            : Number(value);
+    else if (type.kind === 'string') value = String(value).slice(0, type.capacity);
+    else if (this.ordinal(type) && type.low !== undefined && type.high !== undefined) {
+      const ordinal = this.ordinalValue(value);
+      if (ordinal < type.low || ordinal > type.high) this.fail(node, 'Constant out of range');
+    }
+    stores.push({ offset, type, value });
+  }
+
+  /** A pointer typed constant's value: the address of a global variable, a
+   * typed constant, or a part of one, which is fixed when the program starts
+   * since the program's frame begins at address 0. */
+  private staticAddress(node: Node): number {
+    if (node.type === NodeType.CALL) {
+      // A typecast such as PString(@S) keeps the address.
+      const { name, arguments: [operand, ...rest] } = node as CallNode;
+      if (operand && !rest.length && this.lookup(name)?.kind === 'type')
+        return this.staticAddress(operand);
+    }
+    if (node.type !== NodeType.ADDRESS_OF) this.fail(node, 'Constant expression expected');
+    return this.staticLocation(node.operand as Node).offset;
+  }
+  private staticLocation(node: Node): { offset: number; type: PascalType } {
+    if (node.type === NodeType.IDENTIFIER) {
+      const symbol = this.lookup(String(node.name));
+      const global = symbol?.kind === 'variable' && symbol.scope.level === 0;
+      if (global && !symbol.reference && !symbol.container)
+        return { offset: symbol.offset, type: symbol.type };
+    } else if (node.type === NodeType.ARRAY_ACCESS) {
+      const access = node as ArrayAccessNode;
+      let location = this.staticLocation(access.array);
+      for (const index of access.indices) {
+        const array = location.type;
+        if (array.kind !== 'array' || !array.element) this.fail(index, 'Array required');
+        const low = array.low ?? 0,
+          position = this.ordinalValue(this.constant(index).value);
+        if (position < low || position > (array.high ?? 0))
+          this.fail(index, 'Constant out of range');
+        location = {
+          offset: location.offset + (position - low) * array.element.size,
+          type: array.element,
+        };
+      }
+      return location;
+    } else if (node.type === NodeType.FIELD_ACCESS) {
+      const access = node as FieldAccessNode;
+      const location = this.staticLocation(access.record);
+      const field = location.type.fields?.get(access.field.toLowerCase());
+      if (!field) this.fail(node, `Unknown record field "${access.field}"`);
+      return { offset: location.offset + field.offset, type: field.type };
+    }
+    return this.fail(node, 'Address of a global variable expected');
   }
 
   private initialize(type: PascalType, offset: number): void {
@@ -1618,7 +1848,8 @@ export class Compiler {
         const left = this.expressionType(binary.left),
           right = this.expressionType(binary.right);
         if (operator === '+' && this.text(left) && this.text(right)) return STRING;
-        if (operator === '/' || left.kind === 'real' || right.kind === 'real') return REAL;
+        if (operator === '/' || left.kind === 'real' || right.kind === 'real')
+          return this.coprocessorArithmetic(left, right) ? EXTENDED : REAL;
         if (left.kind === 'integer' && right.kind === 'integer')
           return this.integerResultType(left, right, operator);
         return left;
@@ -1835,6 +2066,14 @@ export class Compiler {
       this.fail(node, `Unsupported operator "${operator}"`);
     if (operator === '/' || left.kind === 'real' || right.kind === 'real') {
       const line = node.lineNumber ?? this.line;
+      // Real uses 48-bit software arithmetic; 8087 code computes at full
+      // precision, with an Extended result.
+      if (this.coprocessorArithmetic(left, right)) {
+        this.helper(`8087-${operator}-${String(line)}`, 2, (a, b) =>
+          coprocessorOperation(operator, Number(a), Number(b), line)
+        );
+        return EXTENDED;
+      }
       this.helper(`real-${operator}-${String(line)}`, 2, (a, b) =>
         realOperation(operator, Number(a), Number(b), line)
       );
@@ -2223,15 +2462,17 @@ export class Compiler {
       const type = this.expressionType(arguments_[0]);
       return type.kind === 'array' ? type.index! : type.kind === 'string' ? INTEGER : type;
     }
-    if (['abs', 'sqr', 'succ', 'pred'].includes(name) && arguments_[0])
-      return ['abs', 'sqr'].includes(name) && this.expressionType(arguments_[0]).kind === 'integer'
-        ? this.promoteInteger(this.expressionType(arguments_[0]))
-        : this.expressionType(arguments_[0]);
-    if (name === 'random' && arguments_.length === 0) return REAL;
+    if (['abs', 'sqr', 'succ', 'pred'].includes(name) && arguments_[0]) {
+      const type = this.expressionType(arguments_[0]);
+      if (!['abs', 'sqr'].includes(name)) return type;
+      if (type.kind === 'integer') return this.promoteInteger(type);
+      return type.kind === 'real' && this.coprocessorMode() ? EXTENDED : type;
+    }
+    if (name === 'random' && arguments_.length === 0) return this.realResult();
     if (['trunc', 'round', 'filepos', 'filesize'].includes(name)) return LONGINT;
     const types: Partial<Record<TypeKind, PascalType>> = {
       [TypeKind.INTEGER]: INTEGER,
-      [TypeKind.REAL]: REAL,
+      [TypeKind.REAL]: this.realResult(),
       [TypeKind.BOOLEAN]: BOOLEAN,
       [TypeKind.CHAR]: CHAR,
       [TypeKind.STRING]: STRING,
@@ -2474,8 +2715,10 @@ export class Compiler {
       this.integerHelper(name, returnType, node, 1);
     } else if (name === 'sqr' && returnType.kind === 'real') {
       const line = node.lineNumber ?? this.line;
-      this.helper(`real-sqr-${String(line)}`, 1, (value) =>
-        realOperation('*', Number(value), Number(value), line)
+      const coprocessor = this.coprocessorMode() || this.coprocessorReal(returnType);
+      const operation = coprocessor ? coprocessorOperation : realOperation;
+      this.helper(`${coprocessor ? '8087' : 'real'}-sqr-${String(line)}`, 1, (value) =>
+        operation('*', Number(value), Number(value), line)
       );
     } else {
       this.emit(Opcode.CSP, args.length, builtin.procedureIndex);
@@ -2639,6 +2882,8 @@ export class Compiler {
     const type = this.expression(value);
     if (this.aggregate(type) || ['pointer', 'file', 'set'].includes(type.kind))
       this.fail(node, 'Write requires a scalar or string value');
+    // Under {$N+} every real is written by the 8087 routine, as Extended.
+    const coprocessor = this.coprocessorMode() || this.coprocessorReal(type);
     if (formatted) {
       const width = node.width as Node;
       this.requireType(width, INTEGER, this.expression(width));
@@ -2648,15 +2893,19 @@ export class Compiler {
         if (!this.numeric(type)) this.fail(node, 'Decimal precision requires a numeric value');
       } else this.literal(-1, INTEGER);
     } else {
-      this.literal(0, INTEGER);
+      this.literal(type.kind === 'real' ? defaultRealWidth(coprocessor) : 0, INTEGER);
       this.literal(-1, INTEGER);
     }
     const line = node.lineNumber ?? this.line;
-    this.helper(`format-${type.kind}-${String(line)}`, 3, (raw, rawWidth, rawPrecision) => {
+    const real = type.kind === 'real';
+    const kind = real && coprocessor ? '8087' : type.kind;
+    this.helper(`format-${kind}-${String(line)}`, 3, (raw, rawWidth, rawPrecision) => {
       const width = Number(rawWidth),
         precision = Number(rawPrecision);
-      if (width < 0 || width > 32767 || precision < -1 || precision > 100)
+      // A negative precision asks a real for floating-point form.
+      if (width < 0 || width > 32767 || (!real && precision < -1) || precision > 100)
         throw new PascalError('Invalid output field width or precision', line);
+      if (real) return formatReal(Number(raw), width, precision, coprocessor);
       const text =
         type.kind === 'boolean'
           ? raw
