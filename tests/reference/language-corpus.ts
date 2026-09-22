@@ -123,4 +123,13 @@ export const languageCases: ReferenceCase[] = [
   { name:'unassigned-char-in-a-string',source:`program T;var c:Char;s:String;begin s:='x'+c+'y';WriteLn(Length(s),Ord(s[2]))end.`,output:['30'] },
   { name:'unassigned-char-in-array-and-record',source:`program T;var a:array[1..2]of Char;r:record c:Char;n:Integer end;
     begin WriteLn(Ord(a[1])+Ord(a[2]),Ord(r.c),r.n)end.`,output:['000'] },
+  // After a for loop the variable holds the final value, and an empty range leaves it alone.
+  { name:'for-variable-ends-on-final-value',source:`program T;var i:Integer;begin for i:=1 to 3 do ;WriteLn(i);for i:=3 downto 1 do ;WriteLn(i)end.`,output:['3','1'] },
+  { name:'for-empty-range-leaves-variable',source:`program T;var i:Integer;begin i:=99;for i:=5 to 3 do ;WriteLn(i)end.`,output:['99'] },
+  { name:'for-byte-and-char-stay-in-range',source:`program T;var b:Byte;c:Char;begin for b:=250 to 255 do ;for c:='a' to 'c' do ;WriteLn(b,' ',c)end.`,output:['255 c'] },
+  { name:'for-enumeration-ends-on-last-value',source:`program T;type Colour=(Red,Green,Blue);var c:Colour;begin for c:=Red to Blue do ;WriteLn(Ord(c))end.`,output:['2'] },
+  { name:'for-bounds-evaluated-before-assignment',source:`program T;var i:Integer;begin i:=10;for i:=1 to i do ;WriteLn(i)end.`,output:['10'] },
+  { name:'for-continue-and-single-iteration',source:`program T;var i,n:Integer;begin n:=0;for i:=1 to 5 do begin if Odd(i) then Continue;n:=n+i end;
+    WriteLn(n,' ',i);n:=0;for i:=7 to 7 do n:=n+i;WriteLn(n,' ',i)end.`,output:['6 5','7 7'] },
+  { name:'for-nested-to-and-downto',source:`program T;var i,j,s:Integer;begin s:=0;for i:=1 to 4 do for j:=i downto 1 do s:=s+i*j;WriteLn(s,' ',i,' ',j)end.`,output:['65 4 1'] },
 ];
