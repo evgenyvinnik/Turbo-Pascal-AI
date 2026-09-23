@@ -3,6 +3,7 @@ import { TypeCode } from '../types/inst';
 import type { StackValue } from './Machine';
 import { TextConsole } from './TextConsole';
 import { GraphicsRuntime } from './GraphicsRuntime';
+import { Graph3 } from './Graph3';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont } from './StrokeFont';
@@ -14,6 +15,11 @@ interface Host extends MemoryAccess {
   free(address: number): void;
   /** Free heap space, in total and in the largest block, in cells. */
   heapAvailable(): { total: number; largest: number };
+  /** The current stack pointer, which SPtr reports. */
+  stackPointer(): number;
+  /** The heap top, which Mark records and Release returns to. */
+  heapTop(): number;
+  releaseHeap(address: number): void;
   sound(frequency: number): void;
 }
 interface Result {
@@ -26,20 +32,135 @@ interface Result {
 export class RuntimeServices {
   readonly console = new TextConsole();
   readonly graphics = new GraphicsRuntime();
+  readonly graph3 = new Graph3(this.graphics);
   readonly files: FileRuntime;
   private clockOffset = 0;
   private fontPath = '';
+  /** The Overlay unit's buffer and probation sizes. Every unit is resident,
+   * so they only report back what the program set. */
+  private overlayBuffer = 0;
+  private overlayRetry = 0;
+  /** Interrupt vectors a program has set. The others hold the addresses of
+   * the BIOS and DOS handlers, which only compare and restore. */
+  readonly vectors = new Map<number, number>();
   constructor(
     private host: Host,
     private disk: VirtualFileSystem
   ) {
     this.files = new FileRuntime(host, disk);
   }
+  /** The characters of a null-terminated string. A nil PChar reads as empty. */
+  private cString(address: number): string {
+    let text = '';
+    for (let at = address; address !== 0 && text.length < 65535; at++) {
+      const value = this.host.read(at);
+      const char = typeof value === 'string' ? value.charAt(0) : value ? String.fromCharCode(Number(value)) : '';
+      if (!char || char === '\0') break;
+      text += char;
+    }
+    return text;
+  }
+  private putCString(address: number, text: string): void {
+    if (!address) throw new PascalError('Nil pointer dereference');
+    for (let index = 0; index < text.length; index++) this.host.write(address + index, text[index]!);
+    this.host.write(address + text.length, '\0');
+  }
+  /** Turbo Pascal's Strings unit. Comparisons give the difference of the
+   * first characters that differ, as it does. */
+  private strings(index: number, args: StackValue[]): Result {
+    const a = Number(args[0]),
+      b = Number(args[1]),
+      c = Number(args[2]);
+    const compare = (x: string, y: string, limit = Infinity, fold = false) => {
+      for (let at = 0; at < limit; at++) {
+        let p = x.charCodeAt(at) || 0,
+          q = y.charCodeAt(at) || 0;
+        if (fold) [p, q] = [String.fromCharCode(p).toUpperCase().charCodeAt(0), String.fromCharCode(q).toUpperCase().charCodeAt(0)];
+        if (p !== q || !p) return p - q;
+      }
+      return 0;
+    };
+    const cased = (upper: boolean) => {
+      const text = this.cString(a);
+      this.putCString(a, text.replace(/[a-z]/gi, (char) => (upper ? char.toUpperCase() : char.toLowerCase())));
+      return { result: a };
+    };
+    switch (index) {
+      case 350:
+        return { result: this.cString(a).length };
+      case 351:
+        this.putCString(a, this.cString(b));
+        return { result: a };
+      case 352:
+        this.putCString(a, this.cString(a) + this.cString(b));
+        return { result: a };
+      case 353:
+        return { result: compare(this.cString(a), this.cString(b)) };
+      case 354: {
+        const at = this.cString(a).indexOf(this.cString(b));
+        return { result: at < 0 ? 0 : a + at };
+      }
+      case 355:
+        return cased(true);
+      case 356:
+        return cased(false);
+      case 357:
+        return { result: a + this.cString(a).length };
+      case 358: {
+        // A raw copy of Count characters, which may overlap.
+        const cells = Array.from({ length: Math.max(0, c) }, (_, at) => this.host.read(b + at));
+        for (const [at, cell] of cells.entries()) this.host.write(a + at, cell);
+        return { result: a };
+      }
+      case 359: {
+        const text = this.cString(b);
+        this.putCString(a, text);
+        return { result: a + text.length };
+      }
+      case 360:
+        this.putCString(a, this.cString(b).slice(0, Math.max(0, c)));
+        return { result: a };
+      case 361:
+        this.putCString(a, String(args[1] ?? ''));
+        return { result: a };
+      case 362:
+        this.putCString(a, (this.cString(a) + this.cString(b)).slice(0, Math.max(0, c)));
+        return { result: a };
+      case 363:
+        return { result: compare(this.cString(a), this.cString(b), Infinity, true) };
+      case 364:
+        return { result: compare(this.cString(a), this.cString(b), c) };
+      case 365:
+        return { result: compare(this.cString(a), this.cString(b), c, true) };
+      case 366:
+      case 367: {
+        // The terminating null can be found too, as in Turbo Pascal.
+        const text = this.cString(a) + '\0';
+        const char = String(args[1] ?? '').charAt(0) || '\0';
+        const at = index === 366 ? text.indexOf(char) : text.lastIndexOf(char);
+        return { result: at < 0 ? 0 : a + at };
+      }
+      case 368:
+        return { result: this.cString(a).slice(0, 255) };
+      case 369: {
+        const text = this.cString(a);
+        if (!text) return { result: 0 };
+        return { result: this.host.allocate(text.length + 1, [...text.split(''), '\0']) };
+      }
+      default:
+        if (a) this.host.free(a);
+        return {};
+    }
+  }
   reset(): void {
     this.console.reset();
     this.graphics.reset();
+    this.graph3.reset();
     this.files.reset();
     this.clockOffset = 0;
+    this.overlayBuffer = 0;
+    this.overlayRetry = 0;
+    this.vectors.clear();
     this.host.sound(0);
   }
   invoke(index: number, args: StackValue[], ioChecking = true): Result | undefined {
@@ -95,6 +216,36 @@ export class RuntimeServices {
         return { result: this.host.heapAvailable().largest };
       case 88:
         throw new PascalError(`Run-time error ${String(args.length ? a : 0)}`);
+      case 42:
+        // One address space: a pointer is its offset, and every segment is 0.
+        return { result: a * 16 + b };
+      case 91:
+        return { result: 0 };
+      case 92:
+        return { result: a };
+      case 93:
+        return { result: this.host.stackPointer() };
+      // Turbo Pascal's own generator: RandSeed carries the sequence, so a
+      // program that sets it gets the same numbers again.
+      case 51: {
+        const seedAddress = Number(args[args.length - 1]);
+        const seed = (Math.imul(Number(this.host.read(seedAddress)), 134775813) + 1) | 0;
+        this.host.write(seedAddress, seed);
+        const fraction = (seed >>> 0) / 2 ** 32;
+        if (args.length < 2) return { result: fraction };
+        const range = a;
+        if (!Number.isInteger(range) || range < 0) throw new PascalError('Invalid random range');
+        return { result: Math.floor(fraction * range) };
+      }
+      case 52:
+        this.host.write(Number(args[0]), (Date.now() & 0xffffffff) | 0);
+        return {};
+      case 95:
+        this.host.write(a, this.host.heapTop());
+        return {};
+      case 96:
+        this.host.releaseHeap(Number(this.host.read(a)));
+        return {};
       case 89:
         return { result: 0 };
       case 90:
@@ -188,6 +339,8 @@ export class RuntimeServices {
         this.console.touch();
         return {};
       case 115:
+        // TextMode also ends Turbo Pascal 3's graphics.
+        this.graph3.leave();
         this.console.mode(a);
         return {};
       case 130:
@@ -198,6 +351,40 @@ export class RuntimeServices {
         return {};
       case 132:
         return { delay: Math.max(0, a) };
+      case 308:
+        if (b === 0xf000_0000 + (a & 255)) this.vectors.delete(a & 255);
+        else this.vectors.set(a & 255, b);
+        return {};
+      case 309:
+        this.host.write(b, this.vectors.get(a & 255) ?? 0xf000_0000 + (a & 255));
+        return {};
+      // The Overlay unit: nothing to load, so each call succeeds.
+      case 450:
+      case 451:
+      case 456:
+        return {};
+      case 452:
+        this.overlayBuffer = Math.max(0, a);
+        return {};
+      case 453:
+        return { result: this.overlayBuffer };
+      case 454:
+        this.overlayRetry = Math.max(0, a);
+        return {};
+      case 455:
+        return { result: this.overlayRetry };
+      // Turbo3: the heap in 16-byte paragraphs, and Turbo Pascal 3's video
+      // attributes, yellow and light gray on black.
+      case 461:
+        return { result: Math.floor(this.host.heapAvailable().total / 16) };
+      case 462:
+        return { result: Math.floor(this.host.heapAvailable().largest / 16) };
+      case 466:
+      case 467:
+      case 468:
+        this.console.attribute = index === 468 ? 0x07 : 0x0e;
+        this.console.touch();
+        return {};
       case 140:
         this.console.cursorVisible = false;
         this.console.touch();
@@ -259,46 +446,151 @@ export class RuntimeServices {
           return { result: this.disk.capacity };
       }
     }
-    if (index >= 350 && index <= 356) return this.strings(index, args);
+    if (index >= 350 && index <= 370) return this.strings(index, args);
+    if (index >= 500 && index < 550) return this.turbo3Graphics(index, args);
     return this.files.invoke(index, args, ioChecking);
   }
-  private strings(index: number, args: StackValue[]): Result {
-    const a = Number(args[0]),
-      b = Number(args[1]);
-    const read = (address: number): string => {
-      let text = '';
-      for (let i = 0; i < 65536; i++) {
-        const value = this.host.read(address + i);
-        if (value === 0 || value === '\0' || value === null || value === '') return text;
-        text += typeof value === 'string' ? (value[0] ?? '') : String.fromCharCode(Number(value));
+  /** The Graph3 unit. */
+  private turbo3Graphics(index: number, args: StackValue[]): Result {
+    const g = this.graph3,
+      [a = 0, b = 0, c = 0, d = 0, e = 0] = args.map(Number);
+    const bytes = (address: number, layout: StackValue | undefined) =>
+      encodeBinary(this.host, address, JSON.parse(String(layout)) as BinaryCell[]);
+    const turtle = (action: () => void): Result => {
+      action();
+      return g.delay > 0 ? { delay: g.delay } : {};
+    };
+    switch (index) {
+      case 500:
+        g.setMode('mono');
+        return {};
+      case 501:
+        g.setMode('color');
+        return {};
+      case 502:
+        g.setMode('hires');
+        return {};
+      case 503:
+        g.setHiResColor(a);
+        return {};
+      case 504:
+        g.palette(a);
+        return {};
+      case 505:
+        g.graphBackground(a);
+        return {};
+      case 506:
+        g.graphWindow(a, b, c, d);
+        return {};
+      case 507:
+        g.plot(a, b, c);
+        return {};
+      case 508:
+        g.draw(a, b, c, d, e);
+        return {};
+      case 509:
+        g.colorTable([a, b, c, d]);
+        return {};
+      case 510:
+        g.arc(a, b, c, d, e);
+        return {};
+      case 511:
+        g.circle(a, b, c, d);
+        return {};
+      case 512: {
+        // GetPic fills as much of the buffer variable as it holds.
+        const layout = JSON.parse(String(args[5])) as BinaryCell[];
+        const target = encodeBinary(this.host, a, layout);
+        const picture = g.getPic(b, c, d, e);
+        target.set(picture.subarray(0, target.length));
+        decodeBinary(this.host, a, layout, target);
+        return {};
       }
-      throw new PascalError('Unterminated string');
-    };
-    const write = (address: number, text: string): void => {
-      for (let i = 0; i < text.length; i++) this.host.write(address + i, text[i]!);
-      this.host.write(address + text.length, '\0');
-    };
-    const text = read(a);
-    if (index === 350) return { result: text.length };
-    if (index === 351 || index === 352) {
-      write(a, (index === 352 ? text : '') + read(b));
-      return { result: a };
+      case 513:
+        g.putPic(bytes(a, args[3]), b, c);
+        return {};
+      case 514:
+        return { result: g.getDotColor(a, b) };
+      case 515:
+        g.fillScreen(a);
+        return {};
+      case 516:
+        g.fillShape(a, b, c, d);
+        return {};
+      case 517:
+        g.fillPattern(a, b, c, d, e);
+        return {};
+      case 518:
+        g.pattern(bytes(a, args[1]));
+        return {};
+      case 520:
+        return turtle(() => {
+          g.forward(-a);
+        });
+      case 521:
+        g.clearScreen();
+        return {};
+      case 522:
+        return turtle(() => {
+          g.forward(a);
+        });
+      case 523:
+        return { result: g.heading };
+      case 524:
+        g.setVisible(false);
+        return {};
+      case 525:
+        return turtle(() => {
+          g.home();
+        });
+      case 526:
+        g.setWrap(false);
+        return {};
+      case 527:
+        g.setPen(true);
+        return {};
+      case 528:
+        g.setPen(false);
+        return {};
+      case 529:
+        return turtle(() => {
+          g.setHeading(a);
+        });
+      case 530:
+        g.setPenColor(a);
+        return {};
+      case 531:
+        return turtle(() => {
+          g.setPosition(a, b);
+        });
+      case 532:
+        g.setVisible(true);
+        return {};
+      case 533:
+        return turtle(() => {
+          g.turn(-a);
+        });
+      case 534:
+        return turtle(() => {
+          g.turn(a);
+        });
+      case 535:
+        g.delay = Math.max(0, a);
+        return {};
+      case 536:
+        return { result: g.turtleThere ? 1 : 0 };
+      case 537:
+        g.turtleWindow(a, b, c, d);
+        return {};
+      case 538:
+        g.setWrap(true);
+        return {};
+      case 539:
+        return { result: g.xcor };
+      case 540:
+        return { result: g.ycor };
     }
-    if (index === 353) {
-      const other = read(b);
-      return { result: text === other ? 0 : text < other ? -1 : 1 };
-    }
-    if (index === 354) {
-      const position = text.indexOf(read(b));
-      return { result: position < 0 ? 0 : a + position };
-    }
-    write(
-      a,
-      index === 355
-        ? text.replace(/[a-z]/g, (letter) => letter.toUpperCase())
-        : text.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
-    );
-    return { result: a };
+    throw new PascalError('Unknown Graph3 routine');
   }
   private graph(index: number, args: StackValue[]): Result | undefined {
     const g = this.graphics,

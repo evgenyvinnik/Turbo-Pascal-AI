@@ -69,7 +69,8 @@ src/
 │   ├── parser/            # Node, Parser (AST)
 │   ├── symbols/           # Symbol, SymbolTable
 │   ├── codegen/           # Bytecode, Compiler
-│   ├── runtime/           # Machine (VM), Native, Control
+│   ├── asm/               # Built-in assembler: parse, resolve, inline decoder
+│   ├── runtime/           # Machine (VM), Asm86 (its 8086), Graph3, Native, Control
 │   ├── stdlib/            # builtin, crt, graph
 │   └── errors/            # PascalError
 ├── components/            # Painters, not widgets: each draws into the Screen

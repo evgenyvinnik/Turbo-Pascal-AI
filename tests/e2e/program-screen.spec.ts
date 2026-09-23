@@ -49,6 +49,58 @@ end.`);
   await expect(canvas).toHaveCount(0);
 });
 
+test('asm runs in the P-machine and waits for a BIOS key there, not in DOS', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program AsmDemo;
+uses Crt;
+var value: Word; k: Byte;
+begin
+  asm mov ax, $1234; add ax, 2; mov value, ax end;
+  WriteLn('ASM: ', value);
+  asm mov ah, 0; int 16h; mov k, al end;
+  WriteLn('KEY: ', Chr(k));
+  ReadLn;
+end.`);
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  await expect(page.getByTestId('program-text-screen')).toBeVisible();
+  await expect(ide.row(0)).toContainText('ASM: 4662');
+  await ide.type('q');
+  await expect(ide.row(1)).toContainText('KEY: q');
+  await expect(page.getByRole('region', { name: 'DOS workspace' })).toHaveCount(0);
+  await ide.press('Enter');
+});
+
+test('Graph3 shows the CGA screen in its palette colors until TextMode', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program Turtle;
+uses Crt, Graph3;
+begin
+  GraphColorMode;
+  Palette(2);
+  Plot(0, 0, 3);
+  SetPenColor(2);
+  SetHeading(East);
+  Forwd(100);
+  ReadLn;
+  TextMode(C80);
+end.`);
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('width', '320');
+  await expect(canvas).toHaveAttribute('height', '200');
+  const pixel = (x: number, y: number) => canvas.evaluate((element: HTMLCanvasElement, [px, py]) => Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data), [x, y]);
+  // Palette 2: color 3 is yellow and color 2 light red; the turtle walks east from the middle.
+  await expect.poll(() => pixel(0, 0)).toEqual([255, 255, 85, 255]);
+  await expect.poll(() => pixel(200, 100)).toEqual([255, 85, 85, 255]);
+  await ide.press('Enter');
+  await expect(canvas).toHaveCount(0);
+});
+
 test('the Pascal virtual disk persists text files across a page reload', async ({ page }) => {
   let ide = await Ide.open(page);
   await ide.typeSource(`program SaveData;

@@ -147,6 +147,18 @@ export enum BuiltinProcedure {
   RUNERROR = 88,
   PARAMCOUNT = 89,
   PARAMSTR = 90,
+  SEG = 91,
+  OFS = 92,
+  SPTR = 93,
+  TYPEOF = 94,
+  MARK = 95,
+  RELEASE = 96,
+  SEEKEOF = 97,
+  SEEKEOLN = 98,
+  MKDIR = 99,
+  CHDIR = 108,
+  RMDIR = 109,
+  GETDIR = 116,
 }
 
 /**
@@ -686,6 +698,95 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
     params: [],
     description: 'Return the number of command-line parameters',
     procedureIndex: BuiltinProcedure.PARAMCOUNT,
+  },
+  ...(
+    [
+      ['Seg', 'the segment of a variable, always 0 in the P-machine'],
+      ['CSeg', 'the code segment, always 0 in the P-machine'],
+      ['DSeg', 'the data segment, always 0 in the P-machine'],
+      ['SSeg', 'the stack segment, always 0 in the P-machine'],
+    ] as const
+  ).map(([name, description]) => ({
+    name,
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: name === 'Seg' ? [{ name: 'X', type: TypeKind.POINTER, mode: ParamMode.VAR }] : [],
+    description,
+    procedureIndex: BuiltinProcedure.SEG,
+  })),
+  ...(['SeekEof', 'SeekEoln'] as const).map((name) => ({
+    name,
+    isFunction: true,
+    returnType: TypeKind.BOOLEAN,
+    params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR, optional: true }],
+    description: `Skip blanks${name === 'SeekEof' ? ' and line ends' : ''}, then test for ${name === 'SeekEof' ? 'the end of the file' : 'the end of the line'}`,
+    procedureIndex: name === 'SeekEof' ? BuiltinProcedure.SEEKEOF : BuiltinProcedure.SEEKEOLN,
+  })),
+  ...(
+    [
+      ['MkDir', BuiltinProcedure.MKDIR, 'Make a directory on the virtual drive'],
+      ['ChDir', BuiltinProcedure.CHDIR, 'Change the current directory'],
+      ['RmDir', BuiltinProcedure.RMDIR, 'Remove an empty directory'],
+    ] as const
+  ).map(([name, procedureIndex, description]) => ({
+    name,
+    isFunction: false,
+    params: [{ name: 'S', type: TypeKind.STRING, mode: ParamMode.VALUE }],
+    description,
+    procedureIndex,
+  })),
+  {
+    name: 'GetDir',
+    isFunction: false,
+    params: [
+      { name: 'D', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+      { name: 'S', type: TypeKind.STRING, mode: ParamMode.VAR },
+    ],
+    description: 'Get the current directory of a drive (0 is the current drive)',
+    procedureIndex: BuiltinProcedure.GETDIR,
+  },
+  {
+    name: 'TypeOf',
+    isFunction: true,
+    returnType: TypeKind.POINTER,
+    params: [{ name: 'X', type: TypeKind.POINTER, mode: ParamMode.VALUE }],
+    description: "An object type's identity, as Turbo Pascal's method-table pointer serves",
+    procedureIndex: BuiltinProcedure.TYPEOF,
+  },
+  ...(['Mark', 'Release'] as const).map((name) => ({
+    name,
+    isFunction: false,
+    params: [{ name: 'P', type: TypeKind.POINTER, mode: ParamMode.VAR }],
+    description:
+      name === 'Mark' ? 'Record the current heap top in a pointer' : 'Release the heap back to a marked top',
+    procedureIndex: name === 'Mark' ? BuiltinProcedure.MARK : BuiltinProcedure.RELEASE,
+  })),
+  {
+    name: 'Ofs',
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: [{ name: 'X', type: TypeKind.POINTER, mode: ParamMode.VAR }],
+    description: 'The address of a variable within its segment',
+    procedureIndex: BuiltinProcedure.OFS,
+  },
+  {
+    name: 'SPtr',
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: [],
+    description: 'The current stack pointer',
+    procedureIndex: BuiltinProcedure.SPTR,
+  },
+  {
+    name: 'Ptr',
+    isFunction: true,
+    returnType: TypeKind.POINTER,
+    params: [
+      { name: 'Seg', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+      { name: 'Ofs', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+    ],
+    description: 'A pointer to a segment and offset; the P-machine keeps one address space',
+    procedureIndex: BuiltinProcedure.PTR,
   },
   {
     name: 'ParamStr',

@@ -21,6 +21,11 @@ import { RuntimeServices } from './RuntimeServices';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { roundReal48 } from '../codegen/numeric';
 import { encodeDosText, decodeDosText } from '../encoding';
+import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
+
+/** How many 8086 instructions an asm block runs before the machine lets
+ * the rest of the program, and the page, have a turn. */
+const ASSEMBLY_SLICE = 5_000;
 
 /**
  * Stack value type - can hold numbers, strings, or booleans
@@ -70,6 +75,8 @@ export interface MachineConfig {
 export class Machine {
   /** The bytecode being executed */
   private bytecode: Bytecode;
+  /** The standard variables' cells in the main frame, by name. */
+  private standardCells: Map<string, number>;
 
   /** Data store (stack and heap combined) */
   private dstore: StackValue[];
@@ -107,6 +114,17 @@ export class Machine {
   private inputColumn = 0;
   /** DOS keyboard bytes are independent of the line-oriented Read/ReadLn buffer. */
   private keyQueue = '';
+  /** An asm block that stopped part way, to wait for a key or its turn,
+   * and where it stopped. */
+  private assemblyResume:
+    | { pc: number; sp: number; state: AsmState; key: boolean; handler?: { mp: number; parameters: number; registers: number[] } }
+    | undefined;
+  /** The frames of interrupt procedures running now, innermost last. */
+  private interruptFrames: number[] = [];
+  /** When the timer next ticks, 18.2 times a second. */
+  private nextTick = 0;
+  /** The scan code of the last key pressed. */
+  private lastScanCode = 0;
   private readonly native = new NativeRegistry();
   private readonly services: RuntimeServices;
   private wakeTime = 0;
@@ -118,6 +136,10 @@ export class Machine {
 
   /** The program's ExitCode: Halt sets it, and so does a run-time error. */
   private exitCode = 0;
+  /** A run-time error held while the exit procedures run, reported after
+   * them unless one clears ErrorAddr. */
+  private pendingError: unknown;
+  private inExitChain = false;
 
   /** Configuration options */
   private config: Required<MachineConfig>;
@@ -132,6 +154,7 @@ export class Machine {
    */
   constructor(bytecode: Bytecode, config: MachineConfig = {}) {
     this.bytecode = bytecode;
+    this.standardCells = new Map(bytecode.standardVariables.map((standard) => [standard.name, standard.address]));
     this.config = {
       stackSize: config.stackSize ?? 65536,
       heapSize: config.heapSize ?? 65536,
@@ -156,12 +179,17 @@ export class Machine {
     this.pc = bytecode.startAddress;
     this.mp = bytecode.typedConstants.length;
     this.sp = this.mp - 1;
+    for (const standard of bytecode.standardVariables) this.dstore[this.mp + standard.address] = standard.initial;
+    this.startHeapVariables();
     this.services = new RuntimeServices({
       read: (address) => this.peek(address),
       write: (address, value) => { this.poke(address, value); },
       allocate: (words, defaults) => this.allocate(words, defaults),
       free: (address) => { this.free(address); },
       heapAvailable: () => this.heapAvailable(),
+      stackPointer: () => this.sp,
+      heapTop: () => this.np,
+      releaseHeap: (address) => { this.releaseHeap(address); },
       sound: this.config.onSound,
     }, this.config.fileSystem);
   }
@@ -172,6 +200,8 @@ export class Machine {
   reset(): void {
     this.mp = this.bytecode.typedConstants.length;
     this.sp = this.mp - 1;
+    this.pendingError = undefined;
+    this.inExitChain = false;
     this.pc = this.bytecode.startAddress;
     this.ep = 0;
     this.np = this.config.stackSize + this.config.heapSize;
@@ -183,6 +213,10 @@ export class Machine {
     this.inputPos = 0;
     this.inputColumn = 0;
     this.keyQueue = '';
+    this.assemblyResume = undefined;
+    this.interruptFrames = [];
+    this.nextTick = 0;
+    this.lastScanCode = 0;
     this.instructionCount = 0;
     this.trace = [];
     this.wakeTime = 0;
@@ -197,6 +231,10 @@ export class Machine {
     for (let i = 0; i < this.bytecode.typedConstants.length; i++) {
       this.dstore[i] = this.bytecode.typedConstants[i]!;
     }
+    // The System unit's variables start again with their own values.
+    for (const standard of this.bytecode.standardVariables)
+      this.dstore[this.mp + standard.address] = standard.initial;
+    this.startHeapVariables();
   }
 
   /**
@@ -233,6 +271,9 @@ export class Machine {
       throw new PascalError('Invalid instruction address', this.getSourceLine());
     }
 
+    // The timer interrupt, when the program handles it, between instructions.
+    if ((this.instructionCount & 255) === 0 && this.services.vectors.size && !this.interruptFrames.length) this.timerTick();
+
     const instruction = this.bytecode.istore[this.pc]!;
     const opcode = inst.getOpcode(instruction);
     const p = inst.getOperand1(instruction);
@@ -253,14 +294,30 @@ export class Machine {
       }
       this.execute(opcode as Opcode, p, q);
     } catch (error) {
-      this.state = MachineState.ERROR;
       // As in Turbo Pascal, a run-time error ends the program with its error
       // number as the exit code. One with no Borland number exits with 255.
-      this.exitCode = describePascalDiagnostic(error, 'runtime').code ?? 255;
+      const code = describePascalDiagnostic(error, 'runtime').code ?? 255;
       if (error instanceof PascalError) {
         if (error.lineNumber < 1) Object.assign(error, { lineNumber: this.getSourceLine() });
         if (!('sourceFile' in error) && this.getSourceFile()) Object.assign(error, { sourceFile: this.getSourceFile() });
       }
+      // With an exit procedure installed, the program first runs its exit
+      // procedures, with ExitCode and ErrorAddr set, from the main block.
+      const chain = this.bytecode.exitChain;
+      if (chain !== undefined && !this.inExitChain && this.standardValue('ExitProc')) {
+        this.inExitChain = true;
+        this.pendingError = error;
+        this.setStandardValue('ExitCode', code);
+        this.setStandardValue('ErrorAddr', Math.max(1, this.pc));
+        const main = this.bytecode.debugScopes.find((scope) => chain >= scope.start && chain < scope.end);
+        this.mp = this.bytecode.typedConstants.length;
+        this.sp = this.mp + (main?.frameSize ?? 0) - 1;
+        this.pc = chain;
+        this.state = MachineState.RUNNING;
+        return true;
+      }
+      this.state = MachineState.ERROR;
+      this.exitCode = code;
       throw error;
     }
 
@@ -326,6 +383,7 @@ export class Machine {
           const returnValue =
             (p as TypeCode) !== TypeCode.P ? (this.dstore[this.mp] ?? 0) : 0;
           const oldMp = this.mp;
+          if (this.interruptFrames.at(-1) === oldMp) this.interruptFrames.pop();
           this.sp = oldMp - 1;
           this.pc = this.dstore[oldMp + 4] as number;
           this.mp = this.dstore[oldMp + 2] as number;
@@ -705,10 +763,16 @@ export class Machine {
 
       // ==================== Termination ====================
 
-      case Opcode.STP:
-        // Stop execution
+      case Opcode.STP: {
+        // A program ends with the status ExitCode holds, as Turbo Pascal does.
+        this.exitCode = this.standardValue('ExitCode') ?? this.exitCode;
+        const pending = this.pendingError;
+        this.pendingError = undefined;
+        if (pending !== undefined && this.standardValue('ErrorAddr'))
+          throw pending instanceof Error ? pending : new PascalError('Run-time error');
         this.state = MachineState.STOPPED;
         break;
+      }
 
       // ==================== Data Reference Operations ====================
 
@@ -826,7 +890,7 @@ export class Machine {
   }
 
   private checkAddress(address: number): void {
-    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacters.has(address))) {
+    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacter(address))) {
       throw new PascalError('Invalid memory address');
     }
   }
@@ -851,7 +915,73 @@ export class Machine {
    * @param procIndex - Procedure index
    */
   private callStandardProcedure(argCount: number, procedureIndex: number): void {
+    // Crt's TextAttr, WindMin and WindMax are the screen's own: what the
+    // program stored there takes effect, and what the call changed shows.
+    const attribute = this.standardValue('TextAttr');
+    if (attribute === undefined) {
+      this.standardProcedure(argCount, procedureIndex);
+      return;
+    }
+    const screen = this.services.console;
+    screen.attribute = attribute & 0xff;
+    const min = this.standardValue('WindMin') ?? 0, max = this.standardValue('WindMax') ?? 0;
+    if (min !== screen.windMin || max !== screen.windMax)
+      screen.window((min & 0xff) + 1, (min >> 8) + 1, (max & 0xff) + 1, (max >> 8) + 1);
+    try {
+      this.standardProcedure(argCount, procedureIndex);
+    } finally {
+      this.setStandardValue('TextAttr', screen.attribute);
+      this.setStandardValue('WindMin', screen.windMin);
+      this.setStandardValue('WindMax', screen.windMax);
+      this.setStandardValue('LastMode', screen.lastMode);
+    }
+  }
+  private standardProcedure(argCount: number, procedureIndex: number): void {
+    if (procedureIndex === (InternalProcedure.ASSEMBLY as number)) {
+      this.runAssembly(argCount);
+      return;
+    }
     const procIndex = procedureIndex as BuiltinProcedure | CrtProcedure;
+    // Plain Write, Read, Eof and Eoln use Output and Input. A program that has
+    // assigned one of them to a file on the drive reaches that file instead.
+    const plainRead = [BuiltinProcedure.READ, BuiltinProcedure.READLN, BuiltinProcedure.EOF, BuiltinProcedure.EOLN, BuiltinProcedure.SEEKEOF, BuiltinProcedure.SEEKEOLN].includes(procIndex as BuiltinProcedure);
+    const plainWrite = procIndex === BuiltinProcedure.WRITE || procIndex === BuiltinProcedure.WRITELN;
+    const eofLike = [BuiltinProcedure.EOF, BuiltinProcedure.EOLN, BuiltinProcedure.SEEKEOF, BuiltinProcedure.SEEKEOLN].includes(procIndex as BuiltinProcedure);
+    if ((plainWrite || plainRead) && !(eofLike && argCount > 0)) {
+      const standard = this.standardAddress(plainWrite ? 'Output' : 'Input');
+      if (standard !== undefined && !this.services.files.isConsole(standard, plainWrite ? 'write' : 'read')) {
+        for (let at = this.sp; at > this.sp - argCount; at--) this.dstore[at + 1] = this.dstore[at] ?? 0;
+        this.dstore[this.sp - argCount + 1] = standard;
+        this.sp++;
+        const file = procIndex === BuiltinProcedure.WRITE ? 70 : procIndex === BuiltinProcedure.WRITELN ? 71
+          : procIndex === BuiltinProcedure.READ ? 72 : procIndex === BuiltinProcedure.READLN ? 73 : procedureIndex;
+        this.standardProcedure(argCount + 1, file);
+        return;
+      }
+    }
+    // A text file on the console, such as Input and Output or one assigned to
+    // '': the machine reads and writes it, so a read waits for input as the
+    // console forms do.
+    if ([25, 26, 70, 71, 72, 73, 97, 98].includes(procedureIndex) && argCount >= 1) {
+      const file = Number(this.dstore[this.sp - argCount + 1]);
+      const writing = procedureIndex === 70 || procedureIndex === 71;
+      if (this.services.files.isConsole(file, writing ? 'write' : 'read')) {
+        if (writing) {
+          const text: StackValue[] = [];
+          for (let i = 1; i < argCount; i += 1) text.unshift(this.pop());
+          this.pop();
+          this.writeOutput(text.map((value) => String(value ?? '')).join('') + (procedureIndex === 71 ? '\n' : ''));
+        } else if ((procedureIndex === 72 || procedureIndex === 73) && this.services.files.isKeyboard(file)) {
+          this.keyboardRead(argCount - 1);
+        } else if (procedureIndex === 72 || procedureIndex === 73) {
+          this.consoleRead(argCount - 1, procedureIndex === 73, 1);
+        } else {
+          this.pop();
+          this.standardProcedure(0, procedureIndex);
+        }
+        return;
+      }
+    }
     if ([BuiltinProcedure.READ, BuiltinProcedure.READLN, BuiltinProcedure.WRITE, BuiltinProcedure.WRITELN].includes(procIndex as BuiltinProcedure) && this.services.files.pendingError) {
       const callAddress = this.pc - 1;
       if (this.bytecode.ioChecks[callAddress] ?? true) throw new PascalError(`I/O error ${String(this.services.files.pendingError)}`);
@@ -860,22 +990,7 @@ export class Machine {
       return;
     }
     if (procIndex === BuiltinProcedure.READ || procIndex === BuiltinProcedure.READLN) {
-      const callAddress = this.pc - 1;
-      const checked = this.bytecode.ioChecks[callAddress] ?? true;
-      try {
-        if (!this.readInput(argCount, procIndex === BuiltinProcedure.READLN)) {
-          // Retry this instruction with its arguments intact when input arrives.
-          this.pc -= 1;
-          this.instructionCount -= 1;
-          this.state = MachineState.WAITING;
-        }
-      } catch (error) {
-        this.services.files.recordError(error, checked, true);
-        this.sp -= argCount;
-        this.inputPos++;
-        this.inputColumn = 0;
-        this.pc = this.bytecode.ioErrorTargets[callAddress] ?? this.pc;
-      }
+      this.consoleRead(argCount, procIndex === BuiltinProcedure.READLN, 0);
       return;
     }
     if ((procIndex === CrtProcedure.KEYPRESSED || procIndex === CrtProcedure.READKEY) && !this.services.console.active)
@@ -935,6 +1050,7 @@ export class Machine {
         // A bare Halt is Halt(0), even after the program assigned ExitCode.
         const code = args[0];
         this.exitCode = typeof code === 'number' ? Math.trunc(code) : 0;
+        this.setStandardValue('ExitCode', this.exitCode & 0xffff);
         // Stop as the program's end does. DOS leaves any sound playing, so
         // unlike halt() this does not silence the speaker.
         this.state = MachineState.STOPPED;
@@ -944,6 +1060,23 @@ export class Machine {
         if (args.length) break;
         this.push(this.inputPos >= this.input.length ? 1 : 0);
         return;
+      case BuiltinProcedure.SEEKEOF:
+      case BuiltinProcedure.SEEKEOLN: {
+        if (args.length) break;
+        // Skip blanks, and for SeekEof whole line ends, in the console input.
+        const seekEof = procIndex === BuiltinProcedure.SEEKEOF;
+        for (;;) {
+          const line = this.input[this.inputPos];
+          if (line === undefined) break;
+          while (this.inputColumn < line.length && /[ \t]/.test(line[this.inputColumn]!)) this.inputColumn++;
+          if (!seekEof || this.inputColumn < line.length) break;
+          this.inputPos++;
+          this.inputColumn = 0;
+        }
+        const line = this.input[this.inputPos];
+        this.push(line === undefined || (!seekEof && this.inputColumn >= line.length) ? 1 : 0);
+        return;
+      }
       case BuiltinProcedure.EOLN:
         if (args.length) break;
         this.push(this.inputPos >= this.input.length || this.inputColumn >= (this.input[this.inputPos]?.length ?? 0) ? 1 : 0);
@@ -957,21 +1090,9 @@ export class Machine {
       case CrtProcedure.KEYPRESSED:
         this.push(this.keyQueue.length || this.inputPos < this.input.length ? 1 : 0);
         return;
-      case CrtProcedure.READKEY: {
-        if (this.keyQueue.length) {
-          this.push(this.keyQueue.charAt(0));
-          this.keyQueue = this.keyQueue.slice(1);
-          return;
-        }
-        const line = this.input[this.inputPos] ?? '';
-        this.push(line[this.inputColumn] ?? '\r');
-        this.inputColumn += 1;
-        if (this.inputColumn >= line.length) {
-          this.inputPos += 1;
-          this.inputColumn = 0;
-        }
+      case CrtProcedure.READKEY:
+        this.push(this.takeKey());
         return;
-      }
     }
     const service = this.services.invoke(procedureIndex, args, this.bytecode.ioChecks[this.pc - 1] ?? true);
     if (service) {
@@ -1009,6 +1130,224 @@ export class Machine {
   }
 
   /** Read address/type pairs atomically so a suspended read never loses arguments. */
+  /** Read from the console into the targets on top of the stack, below which
+   * `extra` cells (a file variable) also belong to the call. Without input
+   * yet, the instruction is retried with its arguments intact. */
+  private consoleRead(argCount: number, wholeLine: boolean, extra: number): void {
+    const callAddress = this.pc - 1;
+    const checked = this.bytecode.ioChecks[callAddress] ?? true;
+    try {
+      if (!this.readInput(argCount, wholeLine)) {
+        this.pc -= 1;
+        this.instructionCount -= 1;
+        this.state = MachineState.WAITING;
+        return;
+      }
+      this.sp -= extra;
+    } catch (error) {
+      this.services.files.recordError(error, checked, true);
+      this.sp -= argCount + extra;
+      this.inputPos++;
+      this.inputColumn = 0;
+      this.pc = this.bytecode.ioErrorTargets[callAddress] ?? this.pc;
+    }
+  }
+  /** What an asm block reaches through the machine. */
+  private assemblyHost(): AsmHost {
+    return {
+      read: (address) => this.peek(address),
+      write: (address, value) => {
+        this.checkAddress(address);
+        this.poke(address, value);
+      },
+      output: (text) => {
+        this.writeOutput(text);
+      },
+      keysAvailable: () => this.keysAvailable(),
+      takeKey: () => this.takeKey(),
+      peekKey: () => {
+        if (this.keyQueue.length) return this.keyQueue.charAt(0);
+        if (this.inputPos >= this.input.length) return undefined;
+        return this.input[this.inputPos]?.[this.inputColumn] ?? '\r';
+      },
+      console: this.services.console,
+      sound: (frequency) => {
+        this.config.onSound(frequency);
+      },
+      now: () => new Date(),
+      handles: (number) => this.handler(number) !== undefined,
+      scanCode: () => this.lastScanCode,
+    };
+  }
+  /** The program's interrupt procedure for an interrupt, if it set one. */
+  private handler(number: number): { address: number; parameters: number } | undefined {
+    const vector = this.services.vectors.get(number);
+    return vector === undefined ? undefined : this.bytecode.interruptHandlers[vector];
+  }
+  /** Call the program's interrupt procedure, as the interrupt would, to
+   * return to `returnPc`. Its parameters are the registers it declares. */
+  private callInterrupt(number: number, returnPc: number, registers: number[] = []): number | undefined {
+    const handler = this.handler(number);
+    if (!handler) return undefined;
+    this.push(0);
+    this.push(this.bytecode.typedConstants.length);
+    this.push(this.mp);
+    this.push(0);
+    this.push(0);
+    for (let index = 12 - handler.parameters; index < 12; index++) this.push(registers[index] ?? 0);
+    this.mp = this.sp - MARK_SIZE - handler.parameters + 1;
+    this.dstore[this.mp + 4] = returnPc;
+    this.pc = handler.address;
+    this.interruptFrames.push(this.mp);
+    return this.mp;
+  }
+  /** Interrupts 08h and 1Ch, when the program handles them. */
+  private timerTick(): void {
+    const now = Date.now();
+    if (now < this.nextTick) return;
+    this.nextTick = now + 55;
+    if (this.callInterrupt(0x08, this.pc) === undefined) this.callInterrupt(0x1c, this.pc);
+  }
+  /** Raise an interrupt the program handles, before its next instruction.
+   * False when no interrupt procedure handles it. */
+  raiseInterrupt(number: number): boolean {
+    if (this.state === MachineState.STOPPED || this.state === MachineState.ERROR) return false;
+    return this.callInterrupt(number, this.pc) !== undefined;
+  }
+  /** Run an asm block. Its arguments are its variables' addresses, then the
+   * block's number; an assembler function's result is left on the stack. */
+  private runAssembly(argCount: number): void {
+    const block = this.bytecode.assembly[Number(this.dstore[this.sp])];
+    if (!block) throw new PascalError('Invalid assembler block');
+    // An inline routine's arguments come first; its code pops them.
+    const values = block.stackArguments ?? [];
+    const args: number[] = [];
+    for (let i = values.length; i < argCount - 1; i++) args.push(Number(this.dstore[this.sp - argCount + 1 + i]));
+    const call = this.pc - 1;
+    const saved = this.assemblyResume?.pc === call && this.assemblyResume.sp === this.sp ? this.assemblyResume : undefined;
+    this.assemblyResume = undefined;
+    if (!this.services.console.active) this.services.console.touch();
+    const cpu = new Asm86(block, args, this.assemblyHost(), saved?.state);
+    if (!saved)
+      values.forEach((size, index) => {
+        const value = this.dstore[this.sp - argCount + 1 + index];
+        const number = typeof value === 'string' ? value.charCodeAt(0) || 0 : Number(value);
+        if (size === 4) cpu.state.stack.push((number >>> 16) & 0xffff, number & 0xffff);
+        else cpu.state.stack.push(number & 0xffff);
+      });
+    // Back from an interrupt procedure: its register parameters are still
+    // in its frame, just above the stack.
+    if (saved?.handler) {
+      const { mp, parameters, registers } = saved.handler;
+      const after = [...registers];
+      for (let index = 0; index < parameters; index++) after[12 - parameters + index] = Number(this.dstore[mp + MARK_SIZE + index] ?? 0);
+      cpu.restoreRegisters(registers, after);
+    }
+    const outcome = cpu.run(ASSEMBLY_SLICE);
+    this.instructionCount += cpu.executed;
+    if (this.config.maxInstructions > 0 && this.instructionCount > this.config.maxInstructions)
+      throw new PascalError('Maximum instruction count exceeded');
+    const suspend = (key = false) => {
+      this.assemblyResume = { pc: call, sp: this.sp, state: cpu.state, key };
+      this.pc = call;
+    };
+    switch (outcome.kind) {
+      case 'done':
+        this.sp -= argCount;
+        if (outcome.result) this.push(outcome.result[0] as StackValue);
+        return;
+      case 'key':
+        suspend(true);
+        this.instructionCount -= 1;
+        this.state = MachineState.WAITING;
+        return;
+      case 'yield':
+        suspend();
+        this.state = MachineState.PAUSED;
+        return;
+      case 'delay':
+        suspend();
+        this.wakeTime = Date.now() + outcome.milliseconds;
+        this.state = MachineState.SLEEPING;
+        return;
+      case 'halt':
+        this.haltProgram(outcome.code);
+        return;
+      case 'interrupt': {
+        const registers = cpu.registerValues();
+        suspend();
+        const mp = this.callInterrupt(outcome.number, call, registers)!;
+        this.assemblyResume!.handler = { mp, parameters: this.handler(outcome.number)!.parameters, registers };
+      }
+    }
+  }
+  /** End the program as Halt does: through its exit procedures, from the
+   * main block, with ExitCode set. */
+  private haltProgram(code: number): void {
+    this.exitCode = code;
+    this.setStandardValue('ExitCode', code & 0xffff);
+    const chain = this.bytecode.exitChain;
+    if (chain === undefined) {
+      this.state = MachineState.STOPPED;
+      return;
+    }
+    const main = this.bytecode.debugScopes.find((scope) => chain >= scope.start && chain < scope.end);
+    this.mp = this.bytecode.typedConstants.length;
+    this.sp = this.mp + (main?.frameSize ?? 0) - 1;
+    this.pc = chain;
+  }
+  /** The next key: one pressed, or else the next character of the typed
+   * input, where an empty line is Enter. */
+  private takeKey(): string {
+    if (this.keyQueue.length) {
+      const key = this.keyQueue.charAt(0);
+      this.keyQueue = this.keyQueue.slice(1);
+      return key;
+    }
+    const line = this.input[this.inputPos] ?? '';
+    const key = line[this.inputColumn] ?? '\r';
+    this.inputColumn += 1;
+    if (this.inputColumn >= line.length) {
+      this.inputPos += 1;
+      this.inputColumn = 0;
+    }
+    return key;
+  }
+  /** How many keys takeKey can give without waiting. */
+  private keysAvailable(): number {
+    let keys = this.keyQueue.length;
+    for (let line = this.inputPos; line < this.input.length; line++)
+      keys += Math.max(1, this.input[line]?.length ?? 0) - (line === this.inputPos ? this.inputColumn : 0);
+    return keys;
+  }
+  /** Read(Kbd, ...): each character takes one key, as it is pressed and
+   * without echo. Without enough keys yet, the call waits as ReadKey does. */
+  private keyboardRead(argCount: number): void {
+    const targets: number[] = [];
+    for (let i = 0; i < argCount; i += 2) {
+      if (Number(this.dstore[this.sp - argCount + i + 2]) !== (TypeCode.C as number))
+        throw new PascalError('Only characters can be read from the keyboard');
+      targets.push(Number(this.dstore[this.sp - argCount + i + 1]));
+    }
+    if (!this.services.console.active) this.services.console.touch();
+    if (this.keysAvailable() < targets.length) {
+      this.pc -= 1;
+      this.instructionCount -= 1;
+      this.state = MachineState.WAITING;
+      return;
+    }
+    for (const target of targets) {
+      this.checkAddress(target);
+      this.poke(target, this.takeKey());
+    }
+    this.sp -= argCount + 1;
+  }
+  /** The address of one of the System unit's variables, by name. */
+  private standardAddress(name: string): number | undefined {
+    const address = this.standardCells.get(name);
+    // They live in the main program's frame, whichever routine is running.
+    return address === undefined ? undefined : this.bytecode.typedConstants.length + address;
+  }
   private readInput(argCount: number, wholeLine: boolean): boolean {
     if (argCount % 2 !== 0) throw new PascalError('Invalid input argument list');
     let pos = this.inputPos;
@@ -1094,8 +1433,11 @@ export class Machine {
       ? text
       : encodeDosText(text);
     this.keyQueue += bytes;
+    this.lastScanCode = bytes.charCodeAt(0) === 0 ? bytes.charCodeAt(1) : scanCode(bytes.charAt(0));
     if (this.state === MachineState.WAITING && this.getInputMode() === 'key')
       this.state = MachineState.PAUSED;
+    // A program's keyboard interrupt procedure hears each key.
+    if (this.handler(9)) this.raiseInterrupt(9);
   }
 
   /**
@@ -1140,9 +1482,30 @@ export class Machine {
   }
   getInputMode(): 'key' | 'line' {
     const instruction = this.bytecode.istore[this.pc];
-    return instruction !== undefined && inst.getOpcode(instruction) === (Opcode.CSP as number) && inst.getOperand2(instruction) === (CrtProcedure.READKEY as number) ? 'key' : 'line';
+    if (instruction === undefined || inst.getOpcode(instruction) !== (Opcode.CSP as number)) return 'line';
+    const procedure = inst.getOperand2(instruction), argCount = inst.getOperand1(instruction);
+    if (procedure === (CrtProcedure.READKEY as number)) return 'key';
+    if (procedure === (InternalProcedure.ASSEMBLY as number)) return this.assemblyResume?.key ? 'key' : 'line';
+    // Read(Kbd, ...) waits for keys, not a line.
+    return (procedure === 72 || procedure === 73) && argCount >= 1 &&
+      this.services.files.isKeyboard(Number(this.dstore[this.sp - argCount + 1])) ? 'key' : 'line';
   }
   /** Stable character references preserve aliasing across VAR calls and input. */
+  /** A character within a string, from an address @S[I] produced. The
+   * reference is linear in the index, so a PChar walking the string stays
+   * within it; the capacity of one taken earlier bounds a write. */
+  private stringCharacter(reference: number): { address: number; index: number; capacity: number } | undefined {
+    const known = this.stringCharacters.get(reference);
+    if (known) return known;
+    if (!Number.isInteger(reference) || reference < this.dstore.length) return undefined;
+    const offset = reference - this.dstore.length;
+    const address = Math.floor(offset / 256),
+      index = offset % 256;
+    if (address >= this.dstore.length || typeof this.dstore[address] !== 'string') return undefined;
+    const capacity = this.stringCharacters.get(reference - index)?.capacity ?? 255;
+    return index > capacity ? undefined : { address, index, capacity };
+  }
+
   stringCharacterAddress(address: number, index: number, capacity: number): number {
     this.checkAddress(address);
     if (address >= this.dstore.length || !Number.isInteger(capacity) || capacity < 0 || capacity > 255 ||
@@ -1162,7 +1525,7 @@ export class Machine {
 
   poke(address: number, value: StackValue): void {
     this.checkAddress(address);
-    const character = this.stringCharacters.get(address);
+    const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
       let bytes = this.stringBytes(character.address).padEnd(character.capacity, '\0');
@@ -1195,10 +1558,36 @@ export class Machine {
       address = this.np - words;
       if (address <= this.sp || address < this.config.stackSize) throw new PascalError('Heap overflow');
       this.np = address;
+      this.setStandardValue('HeapPtr', this.np);
     }
     this.allocations.set(address, words);
     for (let i = 0; i < words; i++) this.dstore[address + i] = defaults[i] ?? 0;
     return address;
+  }
+  /** HeapOrg and HeapEnd bound the heap, which grows down from HeapOrg;
+   * HeapPtr follows its top. */
+  private startHeapVariables(): void {
+    this.setStandardValue('HeapOrg', this.config.stackSize + this.config.heapSize);
+    this.setStandardValue('HeapEnd', this.config.stackSize);
+    this.setStandardValue('HeapPtr', this.np);
+  }
+  /** One of the System unit's variables, by name. */
+  private standardValue(name: string): number | undefined {
+    const address = this.standardAddress(name);
+    return address === undefined ? undefined : Number(this.dstore[address] ?? 0);
+  }
+  private setStandardValue(name: string, value: number): void {
+    const address = this.standardAddress(name);
+    if (address !== undefined) this.dstore[address] = value;
+  }
+  /** Release, which drops every block above a mark at once. */
+  private releaseHeap(address: number): void {
+    if (!Number.isInteger(address) || address < this.config.stackSize || address > this.config.stackSize + this.config.heapSize)
+      throw new PascalError('Invalid or disposed pointer');
+    for (const block of [...this.allocations.keys()]) if (block >= this.np && block < address) this.allocations.delete(block);
+    this.freeBlocks = this.freeBlocks.filter((block) => block.address >= address);
+    this.np = address;
+    this.setStandardValue('HeapPtr', this.np);
   }
   /** The heap lies between the stack's reserve and np, plus disposed blocks. */
   private heapAvailable(): { total: number; largest: number } {
@@ -1254,7 +1643,7 @@ export class Machine {
    * @param address - The stack address
    */
   peek(address: number): StackValue {
-    const character = this.stringCharacters.get(address);
+    const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
       return character.index === 0 ? String.fromCharCode(text.length)

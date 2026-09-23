@@ -6,6 +6,8 @@
 import { applyCompilerSwitches, DEFAULT_SWITCHES, type CompilerSwitches } from '../directives';
 import { Lexer, Token } from '../lexer';
 import { PascalError } from '../errors';
+import { TokenType } from '../types';
+import { parseAssembly } from '../asm/parse';
 import {
   Node,
   NodeType,
@@ -252,10 +254,11 @@ export class Parser {
    * Parses a block
    * block ::= declarations compound-statement
    */
-  private parseBlock(): BlockNode {
+  private parseBlock(assembler = false): BlockNode {
     const line = this.lineNumber;
     const declarations = this.parseDeclarations();
-    const statements = this.parseCompoundStatement();
+    // An assembler routine's body is one asm statement.
+    const statements = assembler ? [this.parseAsmStatement(true)] : this.parseCompoundStatement();
 
     return {
       type: NodeType.BLOCK,
@@ -779,7 +782,8 @@ export class Parser {
         if (methods.length)
           throw new PascalError('Object fields must precede its methods', fieldLine);
         this.expectSymbol(':');
-        const varType = this.parseType(); this.expectSymbol(';');
+        const varType = this.parseType();
+        if (!this.isReservedWord('end')) this.expectSymbol(';');
         fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType, privateMember }, fieldLine));
       }
     }
@@ -802,17 +806,94 @@ export class Parser {
     this.expectSymbol(';');
     const type = isFunction ? NodeType.FUNCTION : NodeType.PROCEDURE;
     let farCalls = headerFarCalls || this.interfaceDeclarations;
-    while (['far', 'near'].includes(this.currentToken.value.toLowerCase())) {
-      farCalls = this.currentToken.value.toLowerCase() === 'far'; this.advance(); this.expectSymbol(';');
+    let assembler = false,
+      interrupt = false;
+    // Directives, in any order: far, near, assembler and interrupt.
+    for (;;) {
+      const directive = this.currentToken.isIdentifier() ? this.currentToken.value.toLowerCase() : '';
+      if (directive === 'far' || directive === 'near') farCalls = directive === 'far';
+      else if (directive === 'assembler') assembler = true;
+      else if (directive === 'interrupt') interrupt = true;
+      else break;
+      this.advance();
+      this.expectSymbol(';');
     }
-    const props = { name, parameters, returnType, routineKind, farCalls };
+    const props = { name, parameters, returnType, routineKind, farCalls, ...(assembler ? { assembler } : {}), ...(interrupt ? { interrupt } : {}) };
+    // An inline routine's body is machine code, inserted where it is called.
+    if (this.isReservedWord('inline')) {
+      const inlineCode = this.parseInline();
+      this.expectSymbol(';');
+      return this.node(type, { ...props, inlineCode }, line);
+    }
     if (this.interfaceDeclarations) return this.node(type, { ...props, isForward: true }, line);
-    if (this.isReservedWord('forward')) {
+    // `forward` is a directive, so a routine may also be named Forward; no
+    // block starts with an identifier.
+    if (this.currentToken.isIdentifier() && this.currentToken.value.toLowerCase() === 'forward') {
       this.advance(); this.expectSymbol(';');
       return this.node(type, { ...props, isForward: true }, line);
     }
-    const block = this.parseBlock(); this.expectSymbol(';');
+    const block = this.parseBlock(assembler); this.expectSymbol(';');
     return this.node(type, { ...props, block }, line);
+  }
+
+  /** asm ... end: the lexer hands over its text as one token. */
+  private parseAsmStatement(assembler = false): Node {
+    const line = this.lineNumber;
+    if (!this.isReservedWord('asm')) throw new PascalError(`Expected 'asm', found '${this.currentToken.value}'`, line);
+    this.advance();
+    const token = this.currentToken;
+    if (token.type !== TokenType.ASSEMBLY) throw new PascalError('Assembler statement expected', line);
+    this.advance();
+    // Assembled as it is read, as Turbo Pascal does; names are resolved when
+    // the statement is compiled.
+    const instructions = parseAssembly(token.value, token.lineNumber);
+    this.lastCompoundBeginLine = line;
+    this.lastCompoundEndLine = this.lineNumber;
+    this.expectReservedWord('end');
+    return this.node(NodeType.ASM_STATEMENT, { instructions, ...(assembler ? { assembler } : {}) }, line);
+  }
+
+  /** inline(Element / Element ...): each element a constant or a variable,
+   * plus or minus constants, with < for one byte or > for two. */
+  private parseInline(): Node {
+    const line = this.lineNumber;
+    this.expectReservedWord('inline');
+    this.expectSymbol('(');
+    const elements: { size?: 1 | 2; parts: { negative: boolean; value?: number; name?: string; location?: boolean }[] }[] = [];
+    for (;;) {
+      let size: 1 | 2 | undefined;
+      if (this.isSymbol('<') || this.isSymbol('>')) {
+        size = this.isSymbol('<') ? 1 : 2;
+        this.advance();
+      }
+      const parts: (typeof elements)[number]['parts'] = [];
+      let negative = false;
+      for (;;) {
+        if (this.currentToken.isNumber()) {
+          parts.push({ negative, value: Number(this.currentToken.value) });
+          this.advance();
+        } else if (this.currentToken.isIdentifier()) {
+          let name = this.currentToken.value;
+          this.advance();
+          while (this.isSymbol('.')) {
+            this.advance();
+            name += '.' + this.expectIdentifier();
+          }
+          parts.push({ negative, name });
+        } else if (this.isSymbol('*')) {
+          parts.push({ negative, location: true });
+          this.advance();
+        } else throw new PascalError('Inline element expected', this.lineNumber);
+        if (!this.isSymbol('+') && !this.isSymbol('-')) break;
+        negative = this.isSymbol('-');
+        this.advance();
+      }
+      elements.push({ ...(size ? { size } : {}), parts });
+      if (!this.isSymbol('/')) break;
+      this.advance();
+    }
+    this.expectSymbol(')');
+    return this.node(NodeType.INLINE_STATEMENT, { elements }, line);
   }
 
   /**
@@ -934,6 +1015,8 @@ export class Parser {
       return null;
     }
 
+    if (this.isReservedWord('asm')) return this.parseAsmStatement();
+    if (this.isReservedWord('inline')) return this.parseInline();
     if (this.isReservedWord('goto')) {
       this.advance();
       if (!this.currentToken.isIdentifier() && !this.currentToken.isNumber())
@@ -1264,9 +1347,13 @@ export class Parser {
       } else if (this.isSymbol('(')) {
         this.advance();
         const args: Node[] = [];
+        // System.WriteLn takes widths as WriteLn does.
+        const formatting = node.type === NodeType.FIELD_ACCESS && (node.record as Node).type === NodeType.IDENTIFIER &&
+          String((node.record as Node).name).toLowerCase() === 'system' &&
+          ['write', 'writeln', 'str'].includes(String(node.field).toLowerCase());
         if (!this.isSymbol(')')) {
-          args.push(this.parseExpression());
-          while (this.isSymbol(',')) { this.advance(); args.push(this.parseExpression()); }
+          args.push(this.parseCallArgument(formatting));
+          while (this.isSymbol(',')) { this.advance(); args.push(this.parseCallArgument(formatting)); }
         }
         this.expectSymbol(')');
         node = node.type === NodeType.FIELD_ACCESS

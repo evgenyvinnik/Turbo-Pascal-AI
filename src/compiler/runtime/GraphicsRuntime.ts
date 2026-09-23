@@ -26,6 +26,10 @@ export class GraphicsRuntime {
   customScale = { x: 1, y: 1 };
   horizontalJustify = 0;
   verticalJustify = 2;
+  /** Graph3's CGA screens hold color numbers, which this maps to colors. */
+  palette: number[] | null = null;
+  /** Dots shown over the screen without being part of it: Graph3's turtle. */
+  decoration: { x: number; y: number; color: number }[] = [];
   private viewport = { left: 0, top: 0, right: 639, bottom: 479, clip: true };
 
   reset(): void {
@@ -39,6 +43,8 @@ export class GraphicsRuntime {
       this.revision++;
       return;
     }
+    this.palette = null;
+    this.decoration = [];
     this.driver = driver === 0 ? 9 : driver;
     this.mode = driver === 0 ? 2 : mode;
     this.width = 640;
@@ -55,6 +61,14 @@ export class GraphicsRuntime {
     this.verticalJustify = 2;
     this.viewport = { left: 0, top: 0, right: this.width - 1, bottom: this.height - 1, clip: true };
     this.revision++;
+  }
+  /** The screen as colors, for display. */
+  display(): Uint8Array {
+    const palette = this.palette;
+    const shown = palette ? this.pixels.map((color) => palette[color] ?? 0) : this.pixels.slice();
+    for (const dot of this.decoration)
+      if (dot.x >= 0 && dot.y >= 0 && dot.x < this.width && dot.y < this.height) shown[dot.y * this.width + dot.x] = dot.color;
+    return shown;
   }
   view(left: number, top: number, right: number, bottom: number, clip: boolean): void {
     if (

@@ -12,6 +12,8 @@ export class TextConsole {
   revision = 0;
   attribute = 7;
   cursorVisible = true;
+  /** The mode TextMode last set, which Crt's LastMode reports. */
+  lastMode = 3;
   private left = 0;
   private top = 0;
   private right = 79;
@@ -25,6 +27,7 @@ export class TextConsole {
     this.active = false;
   }
   mode(mode: number): void {
+    this.lastMode = mode;
     this.cols = (mode & 3) < 2 ? 40 : 80;
     this.rows = mode & 256 ? 43 : 25;
     this.chars = Array<string>(this.cols * this.rows).fill(' ');
@@ -45,6 +48,13 @@ export class TextConsole {
     this.bottom = y2 - 1;
     this.x = this.y = 1;
     this.touch();
+  }
+  /** Crt's WindMin and WindMax: the window's corners, row in the high byte. */
+  get windMin(): number {
+    return (this.top << 8) | this.left;
+  }
+  get windMax(): number {
+    return (this.bottom << 8) | this.right;
   }
   goto(x: number, y: number): void {
     if (x >= 1 && y >= 1 && x <= this.right - this.left + 1 && y <= this.bottom - this.top + 1) {

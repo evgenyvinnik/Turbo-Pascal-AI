@@ -6,6 +6,7 @@
  */
 
 import { inst, Opcode } from '../types';
+import type { AsmBlock } from '../asm/types';
 
 /**
  * Interface for native procedure registry
@@ -64,6 +65,22 @@ export class Bytecode {
    * Typed constants - copied to the start of dstore when bytecode is loaded
    */
   public typedConstants: number[] = [];
+
+  /** The System unit's own variables, by address, with the value each starts
+   * with: ExitCode, RandSeed, FileMode, Test8087 and Test8086. */
+  public standardVariables: { name: string; address: number; initial: number }[] = [];
+
+  /** The program's asm statements and inline code, which the machine's
+   * 8086 runs over Pascal variables. */
+  public assembly: AsmBlock[] = [];
+
+  /** Interrupt procedures, by the value @Handler gives: where each starts
+   * and how many of the register parameters it declares. */
+  public interruptHandlers: Record<number, { address: number; parameters: number }> = {};
+
+  /** Where the program's exit procedures run: the end of the main block,
+   * which Halt and a run-time error reach as well. */
+  public exitChain?: number;
 
   /**
    * Index into istore where program should start

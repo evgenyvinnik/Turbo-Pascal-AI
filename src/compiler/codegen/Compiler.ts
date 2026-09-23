@@ -36,9 +36,15 @@ import {
 } from '../parser/Node';
 import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
+import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/FileRuntime';
 import type { BinaryCell } from '../runtime/BinaryCodec';
+import type { RawInstruction } from '../asm/parse';
+import { assemble, type AsmName } from '../asm/resolve';
+import type { AsmBlock, AsmVariable } from '../asm/types';
+import { NativePascalRequired } from '../errors/NativePascalRequired';
+import { decodeInline, type InlineByte } from '../asm/inline';
 import { ModuleLoader, StandardUnit } from '../stdlib/modules';
-import { BuiltinProcedure, ParamMode, type BuiltinDef } from '../stdlib/builtin';
+import { ParamMode, type BuiltinDef } from '../stdlib/builtin';
 import { TypeKind } from '../symbols/Symbol';
 import { Bytecode, type DebugType } from './Bytecode';
 import {
@@ -201,6 +207,51 @@ const LONGINT: PascalType = {
 };
 const REAL: PascalType = { kind: 'real', size: 1, byteSize: 6 };
 const UNTYPED: PascalType = { kind: 'untyped', size: 1, byteSize: 0 };
+/** The System unit's variables. They sit at fixed addresses just past the
+ * program's mark, so a unit and the program that uses it see the same cells. */
+interface StandardVariable {
+  name: string;
+  kind: 'word' | 'longint' | 'integer' | 'byte' | 'boolean' | 'pointer' | 'text';
+  initial: number;
+  /** A unit's variable, declared only where that unit is used. */
+  unit?: string;
+}
+const STANDARD_VARIABLES: readonly StandardVariable[] = [
+  { name: 'ExitCode', kind: 'word', initial: 0 },
+  { name: 'RandSeed', kind: 'longint', initial: 0 },
+  { name: 'FileMode', kind: 'word', initial: 2 },
+  { name: 'Test8087', kind: 'byte', initial: 3 },
+  { name: 'Test8086', kind: 'byte', initial: 3 },
+  { name: 'ExitProc', kind: 'pointer', initial: 0 },
+  { name: 'ErrorAddr', kind: 'pointer', initial: 0 },
+  // The heap's bounds and top, which the machine keeps current. It grows
+  // down from HeapOrg towards HeapEnd.
+  { name: 'HeapOrg', kind: 'pointer', initial: 0 },
+  { name: 'HeapPtr', kind: 'pointer', initial: 0 },
+  { name: 'HeapEnd', kind: 'pointer', initial: 0 },
+  // Input and Output start on the console's handles; a program may assign
+  // them to files on the drive.
+  { name: 'Input', kind: 'text', initial: CONSOLE_INPUT },
+  { name: 'Output', kind: 'text', initial: CONSOLE_OUTPUT },
+  // The Crt unit's; the machine keeps the first four in step with the screen.
+  { name: 'TextAttr', kind: 'byte', initial: 7, unit: 'crt' },
+  { name: 'WindMin', kind: 'word', initial: 0, unit: 'crt' },
+  { name: 'WindMax', kind: 'word', initial: 0x184f, unit: 'crt' },
+  { name: 'LastMode', kind: 'word', initial: 3, unit: 'crt' },
+  { name: 'CheckBreak', kind: 'boolean', initial: 1, unit: 'crt' },
+  { name: 'CheckEOF', kind: 'boolean', initial: 0, unit: 'crt' },
+  { name: 'CheckSnow', kind: 'boolean', initial: 0, unit: 'crt' },
+  { name: 'DirectVideo', kind: 'boolean', initial: 1, unit: 'crt' },
+  // The Printer unit's Lst, opened on LPT1 when the program starts.
+  { name: 'Lst', kind: 'text', initial: 0, unit: 'printer' },
+  { name: 'OvrResult', kind: 'integer', initial: 0, unit: 'overlay' },
+  { name: 'OvrTrapCount', kind: 'word', initial: 0, unit: 'overlay' },
+  { name: 'OvrLoadCount', kind: 'word', initial: 0, unit: 'overlay' },
+  { name: 'OvrFileMode', kind: 'byte', initial: 0, unit: 'overlay' },
+  // Turbo3's keyboard file, read without echo, and its Ctrl+Break switch.
+  { name: 'Kbd', kind: 'text', initial: CONSOLE_KEYBOARD, unit: 'turbo3' },
+  { name: 'CBreak', kind: 'boolean', initial: 1, unit: 'turbo3' },
+];
 /** Builtins of the System unit, which extended syntax does not cover. */
 const SYSTEM_UNIT: string = StandardUnit.SYSTEM;
 /** What 8087 arithmetic produces; stores round it to the variable's type. */
@@ -227,6 +278,15 @@ export class Compiler {
   private initializationOrder: CompiledUnit[] = [];
   private compilerOptions: CompilerOptions = {};
   private globalOffset = MARK_SIZE;
+  /** Whether a module uses the Printer unit, whose Lst the program opens. */
+  private printerUsed = false;
+  /** The standard units any module uses, whose variables the machine sets up. */
+  private standardUnits = new Set<string>();
+  /** The standard units' types, variables and constants, for qualified names
+   * such as System.Integer and Crt.TextAttr. */
+  private standardSymbols = new Map<string, Map<string, Symbol>>();
+  /** Halt statements, which jump to the program's exit procedures. */
+  private haltJumps: number[] = [];
   /** The program's name, which ParamStr(0) reports. */
   private programName = 'PROGRAM';
   /** Typed constants, set once when the program starts. */
@@ -251,7 +311,10 @@ export class Compiler {
     this.units = new Map();
     this.initializationOrder = [];
     this.compilerOptions = options;
-    this.globalOffset = MARK_SIZE;
+    this.globalOffset = MARK_SIZE + STANDARD_VARIABLES.length;
+    this.printerUsed = false;
+    this.standardUnits = new Set();
+    this.haltJumps = [];
     this.objectTypes = [];
     this.routineValues = [];
     this.typedConstants = [];
@@ -261,6 +324,7 @@ export class Compiler {
     const program = root as ProgramNode;
     this.programName = program.name;
     this.scope = this.newScope(null, program.name);
+    this.scope.nextOffset = this.globalOffset;
     this.scope.coprocessor = this.usesCoprocessor(root);
     this.addBuiltins();
     const programScope = this.scope;
@@ -283,13 +347,27 @@ export class Compiler {
       ...this.initializationOrder.map(unit => ({ type: NodeType.UNIT_INITIALIZATION, unit })),
       ...program.block.statements,
     ] };
+    // The machine sets up the System unit's variables and those of the
+    // standard units in use.
+    this.bytecode.standardVariables = STANDARD_VARIABLES.flatMap((standard, index) =>
+      standard.unit && !this.standardUnits.has(standard.unit)
+        ? []
+        : [{ name: standard.name, address: MARK_SIZE + index, initial: standard.initial }]
+    );
     this.compileBody(block, undefined);
     return this.bytecode;
   }
 
   private importUnits(names: string[], node: Node): void {
     for (const name of names) {
-      if (this.modules.useUnit(name)) continue;
+      if (this.modules.useUnit(name)) {
+        // A standard unit's variables join the module that uses it.
+        this.standardUnits.add(name.toLowerCase());
+        for (const standard of STANDARD_VARIABLES)
+          if (standard.unit === name.toLowerCase()) this.declareStandard(standard);
+        if (name.toLowerCase() === 'printer') this.printerUsed = true;
+        continue;
+      }
       const unit = this.loadUnit(name, node);
       this.scope.imports.set(name.toLowerCase(), unit.exports);
     }
@@ -334,6 +412,9 @@ export class Compiler {
         return { ...node, type: NodeType.IDENTIFIER, name: `${name}.${String(node.field)}` };
       }
     }
+    // The standard units qualify their names too, as in System.MemAvail.
+    if ((key === 'system' || this.standardUnits.has(key)) && !this.lookup(name))
+      return { ...node, type: NodeType.IDENTIFIER, name: `${name}.${String(node.field)}` };
     return node;
   }
 
@@ -377,10 +458,15 @@ export class Compiler {
       pointer: POINTER,
       text: TEXTFILE,
     };
-    for (const [name, type] of Object.entries(types))
-      this.scope.symbols.set(name, { kind: 'type', type });
+    this.standardSymbols = new Map([['system', new Map<string, Symbol>()]]);
+    const system = (name: string, symbol: Symbol) => {
+      this.scope.symbols.set(name, symbol);
+      this.standardSymbols.get('system')!.set(name, symbol);
+    };
+    for (const [name, type] of Object.entries(types)) system(name, { kind: 'type', type });
+    for (const standard of STANDARD_VARIABLES) if (!standard.unit) this.declareStandard(standard);
     for (const [name, value] of Object.entries({ maxint: 32767, pi: Math.PI }))
-      this.scope.symbols.set(name, {
+      system(name, {
         kind: 'constant',
         type: name === 'pi' ? this.realResult() : INTEGER,
         value: name === 'pi' && !this.coprocessorMode() ? roundReal48(value) : value,
@@ -442,6 +528,14 @@ export class Compiler {
           reference: false,
           container: record.pointer,
         };
+    }
+    const [qualifier, member] = name.toLowerCase().split('.');
+    const standard = member === undefined ? undefined : this.standardSymbols.get(qualifier!);
+    if (standard && (qualifier === 'system' || this.standardUnits.has(qualifier!))) {
+      const symbol = standard.get(member!);
+      if (symbol) return symbol;
+      const constant = this.modules.lookupConstant(name);
+      return constant ? { kind: 'constant', type: INTEGER, value: constant.value } : undefined;
     }
     for (let scope: Scope | null = this.scope; scope; scope = scope.parent) {
       const symbol = scope.symbols.get(name.toLowerCase());
@@ -822,6 +916,14 @@ export class Compiler {
             : declaration.routineKind === 'constructor' ? BOOLEAN : VOID;
           if (this.aggregate(type) || type.procedureSignature)
             this.fail(node, 'Functions returning arrays or records are not supported');
+          if (declaration.interrupt) {
+            // The registers, from Flags to BP, as Word value parameters; a
+            // handler may declare only the last of them.
+            if (declaration.type === NodeType.FUNCTION) this.fail(node, 'An interrupt routine must be a procedure');
+            if (this.scope.parent || declaration.name.includes('.')) this.fail(node, 'Interrupt procedures cannot be nested or methods');
+            if (parameters.length > 12 || parameters.some((parameter) => parameter.reference || parameter.type.kind !== 'integer' || parameter.type.byteSize !== 2))
+              this.fail(node, 'Interrupt procedure parameters must be Word registers');
+          }
           if (
             previous?.kind === 'routine' &&
             previous.declaration.isForward &&
@@ -1379,6 +1481,8 @@ export class Compiler {
 
   private compileRoutine(routine: Routine): void {
     const declaration = routine.declaration;
+    // An inline routine has no code of its own; each call inserts it.
+    if (declaration.inlineCode) return;
     if (!declaration.block)
       this.fail(declaration, `Unresolved forward declaration "${routine.name}"`);
     const parent = this.scope, previousFile = this.sourceFile;
@@ -1426,6 +1530,8 @@ export class Compiler {
     for (const child of this.scope.routines) this.compileRoutine(child);
     routine.address = this.bytecode.getNextAddress();
     for (const patch of routine.patches) this.patch(patch, routine.address);
+    if (declaration.interrupt)
+      this.bytecode.interruptHandlers[routine.proceduralId] = { address: routine.address, parameters: routine.parameters.length };
     this.compileBody(declaration.block, routine);
     this.scope = parent;
     this.sourceFile = previousFile;
@@ -1436,6 +1542,15 @@ export class Compiler {
     this.line = block.lineNumber ?? routine?.declaration.lineNumber ?? this.line;
     const entry = this.emit(Opcode.ENT);
     for (const local of this.scope.locals) this.initialize(local.type, local.offset);
+    // Lst is open for writing before any unit initialization runs.
+    if (!routine && this.printerUsed) {
+      const lst = { type: NodeType.IDENTIFIER, name: 'Lst', internalVariable: this.printerFile() } as Node;
+      const call = (name: string, args: Node[]) => {
+        this.statement({ type: NodeType.CALL, name, arguments: args, lineNumber: block.lineNumber } as Node);
+      };
+      call('Assign', [lst, { type: NodeType.STRING, value: 'LPT1' } as Node]);
+      call('Rewrite', [lst]);
+    }
     // Typed constants have their values before any unit initialization runs.
     if (!routine)
       for (const { variable, stores } of this.typedConstants) {
@@ -1478,6 +1593,7 @@ export class Compiler {
       this.addressVariable(variable);
       this.emit(Opcode.CSP, 1, InternalProcedure.FREE_HEAP_COPY);
     }
+    if (!routine) this.exitChain(block);
     this.emit(routine ? Opcode.RTN : Opcode.STP, routine ? this.typeCode(routine.type) : 0);
     if (this.scope.nextOffset > 32767) this.fail(block, 'Frame storage exceeds supported size');
     this.bytecode.setOperand2(entry, this.scope.nextOffset);
@@ -1624,8 +1740,7 @@ export class Compiler {
    * program, even when a routine declares it, and keeps its value between
    * calls. Its value is worked out here, in the declaring scope. */
   private typedConstant(name: string, type: PascalType, node: TypedConstDeclarationNode): void {
-    if (type.kind === 'file' || type.object || type.procedureSignature)
-      this.fail(node, 'Typed constants of this type are not supported');
+    if (type.kind === 'file') this.fail(node, 'Typed constants of this type are not supported');
     let root = this.scope;
     while (root.parent) root = root.parent;
     // Module-level constants sit among the globals; a routine's go after them.
@@ -1682,10 +1797,13 @@ export class Compiler {
     }
     if (type.kind === 'record' && type.fields) {
       if (node.type !== NodeType.RECORD_CONSTANT) this.fail(node, 'Record constant expected');
+      // An object constant's method table is set, so its virtual methods work
+      // without a constructor call, as in Turbo Pascal.
+      if (type.object) stores.push({ offset, type: INTEGER, value: type.object.id });
       // Fields are given in declaration order, from the first; any after the
       // last one given stay zero. Only the fields of other variant cases,
       // which share storage with the ones given, may be passed over.
-      const fields = [...type.fields.entries()];
+      const fields = [...type.fields.entries()].filter(([key]) => !key.startsWith('$'));
       let next = 0;
       for (const { name, value } of (node as RecordConstantNode).fields) {
         const key = name.toLowerCase();
@@ -1700,8 +1818,31 @@ export class Compiler {
       }
       return;
     }
-    if (type.kind === 'pointer' && !type.procedureSignature && node.type !== NodeType.NIL) {
-      stores.push({ offset, type, value: this.staticAddress(node) });
+    if (type.procedureSignature) {
+      // A procedural constant holds a routine, known when it is declared.
+      if (node.type === NodeType.NIL) {
+        stores.push({ offset, type, value: 0 });
+        return;
+      }
+      const routine = node.type === NodeType.IDENTIFIER ? this.lookup(String(node.name)) : undefined;
+      if (routine?.kind !== 'routine') this.fail(node, 'Procedure or function expected');
+      if (routine.parent.level !== 0 || routine.methodOwner)
+        this.fail(node, 'Procedural values require a non-nested procedure or function');
+      if (!routine.declaration.farCalls)
+        this.fail(node, 'Procedural values require a FAR procedure or function');
+      if (!this.proceduralCompatible(type, this.proceduralType(routine)))
+        this.fail(node, 'Type mismatch: the routine does not fit the procedural type');
+      stores.push({ offset, type, value: routine.proceduralId });
+      return;
+    }
+    if (type.kind === 'pointer' && node.type !== NodeType.NIL) {
+      const text = this.charPointer(type) ? this.textConstant(node) : undefined;
+      if (text === undefined) {
+        stores.push({ offset, type, value: this.staticAddress(node) });
+        return;
+      }
+      const block = this.staticText(text, node);
+      stores.push(...block.stores, { offset, type, value: block.offset });
       return;
     }
     const constant = this.constant(node);
@@ -1724,6 +1865,62 @@ export class Compiler {
     stores.push({ offset, type, value });
   }
 
+  /** The text of a string or character constant, when the node is one. */
+  private textConstant(node: Node): string | undefined {
+    if (node.extendedSyntax === false || !this.constantExpression(node)) return undefined;
+    const value = this.constant(node);
+    return this.text(value.type) ? String(value.value) : undefined;
+  }
+  /** Under {$X+} a zero-based array of Char stands for a PChar to its first
+   * character. Leaves that address on the stack when the node is one. */
+  private emitCharArrayPointer(node: Node): boolean {
+    if (node.extendedSyntax === false) return false;
+    const type = this.expressionType(node);
+    if (type.kind !== 'array' || type.openArray || type.element?.kind !== 'char' || type.low !== 0) return false;
+    this.address(node);
+    return true;
+  }
+  /** A string constant used as a PChar: its characters are written to their
+   * own storage where it is used, and its address is left on the stack. */
+  private emitStaticText(text: string, node: Node): void {
+    const { offset, stores } = this.staticText(text, node);
+    for (const store of stores) {
+      this.emit(Opcode.LDA, this.scope.level, store.offset);
+      this.literal(store.value, store.type);
+      this.emit(Opcode.STI, this.typeCode(store.type));
+    }
+    this.literal(offset, POINTER);
+  }
+  /** Whether a type is a pointer to Char, which {$X+} lets hold a string. */
+  private charPointer(type: PascalType): boolean {
+    return type.kind === 'pointer' && type.base?.kind === 'char';
+  }
+  /** A null-terminated copy of a string constant, in storage that lasts as
+   * long as the program: its address and the cells that fill it. */
+  private staticText(text: string, node: Node): { offset: number; stores: StaticStore[] } {
+    const element = CHAR;
+    const type: PascalType = {
+      kind: 'array',
+      size: text.length + 1,
+      byteSize: text.length + 1,
+      low: 0,
+      high: text.length,
+      element,
+      index: INTEGER,
+    };
+    let root = this.scope;
+    while (root.parent) root = root.parent;
+    // The program's frame grows to hold the text, whether it is filled when
+    // the program starts or where the constant is used.
+    const offset = Math.max(this.globalOffset, root.nextOffset);
+    this.globalOffset = root.nextOffset = offset + type.size;
+    if (offset + type.size > 32767)
+      this.fail(node, 'Variable storage exceeds the supported frame size');
+    const stores: StaticStore[] = [];
+    for (let index = 0; index <= text.length; index++)
+      stores.push({ offset: offset + index, type: element, value: text.charAt(index) || '\0' });
+    return { offset, stores };
+  }
   /** A pointer typed constant's value: the address of a global variable, a
    * typed constant, or a part of one, which is fixed when the program starts
    * since the program's frame begins at address 0. */
@@ -1829,6 +2026,9 @@ export class Compiler {
         let destination: Scope | null = this.scope;
         while (destination && !destination.labels.has(key)) destination = destination.parent;
         if (!destination) this.fail(node, 'Undeclared label');
+        // Turbo Pascal's goto stays within the routine or program block that
+        // declares the label.
+        if (destination !== this.scope) this.fail(node, 'Label not within current block');
         const label = destination.labels.get(key)!;
         label.uses.push(node);
         const jump = this.emit(
@@ -1902,6 +2102,15 @@ export class Compiler {
       case NodeType.EXIT:
         this.scope.exits.push(this.emit(Opcode.UJP));
         return;
+      case NodeType.ASM_STATEMENT:
+        this.assemblyStatement(node);
+        return;
+      case NodeType.INLINE_STATEMENT: {
+        const variables: Variable[] = [];
+        const block = this.inlineBlock(node, variables);
+        this.emitAssembly(block, variables);
+        return;
+      }
       default:
         this.fail(node, `Unsupported statement: ${node.type}`);
     }
@@ -2065,6 +2274,13 @@ export class Compiler {
       return;
     }
     this.address(node.target);
+    // {$X+} lets a string constant become a PChar, in storage of its own.
+    const text = this.charPointer(targetType) ? this.textConstant(node.value) : undefined;
+    if (text !== undefined || (this.charPointer(targetType) && this.emitCharArrayPointer(node.value))) {
+      if (text !== undefined) this.emitStaticText(text, node.value);
+      this.emit(Opcode.STI, this.typeCode(targetType));
+      return;
+    }
     this.requireType(node.value, targetType, targetType.procedureSignature ? this.proceduralValue(node.value) : this.expression(node.value));
     this.checkRange(targetType, node);
     this.emit(Opcode.STI, this.typeCode(targetType));
@@ -2095,6 +2311,7 @@ export class Compiler {
       case NodeType.SET_LITERAL:
         return this.setLiteralType(node);
       case NodeType.ADDRESS_OF: {
+        if (this.routineAddress(node.operand as Node)) return POINTER;
         // The address of an untyped parameter is an untyped Pointer.
         const base = this.expressionType(node.operand as Node);
         return base.kind === 'untyped' ? POINTER : { ...POINTER, base };
@@ -2137,6 +2354,7 @@ export class Compiler {
       case NodeType.ARRAY_ACCESS: {
         const access = node as ArrayAccessNode;
         let type = this.expressionType(access.array);
+        if (this.charPointer(type) && access.indices.length === 1) return CHAR;
         for (const index of access.indices) {
           if (type.kind === 'string') type = CHAR;
           else if (type.kind === 'array') type = type.element!;
@@ -2170,6 +2388,7 @@ export class Compiler {
         const left = this.expressionType(binary.left),
           right = this.expressionType(binary.right);
         if (operator === '+' && this.text(left) && this.text(right)) return STRING;
+        if (operator === '-' && this.charPointer(left) && this.charPointer(right)) return WORD;
         if (operator === '/' || left.kind === 'real' || right.kind === 'real')
           return this.coprocessorArithmetic(left, right) ? EXTENDED : REAL;
         if (left.kind === 'integer' && right.kind === 'integer')
@@ -2205,6 +2424,12 @@ export class Compiler {
       case NodeType.SET_LITERAL:
         return this.setLiteral(node);
       case NodeType.ADDRESS_OF: {
+        // @P of a procedure is a value ExitProc and procedural calls can use.
+        const routine = this.routineAddress(node.operand as Node);
+        if (routine) {
+          this.literal(routine.proceduralId, POINTER);
+          return POINTER;
+        }
         const base = this.address(node.operand as Node);
         return base.kind === 'untyped' ? POINTER : { ...POINTER, base };
       }
@@ -2331,6 +2556,17 @@ export class Compiler {
       right = this.expression(node.right),
       operator = node.operator.toLowerCase();
     this.line = node.lineNumber ?? this.line;
+    // {$X+} moves a PChar by a count, or measures the distance between two.
+    if (node.extendedSyntax !== false && (operator === '+' || operator === '-') && this.charPointer(left)) {
+      if (right.kind === 'integer' && !right.enumeration) {
+        this.emit(operator === '+' ? Opcode.ADI : Opcode.SBI);
+        return left;
+      }
+      if (operator === '-' && this.charPointer(right)) {
+        this.emit(Opcode.SBI);
+        return WORD;
+      }
+    }
     if (operator === 'in') {
       if (
         right.kind !== 'set' ||
@@ -2452,6 +2688,14 @@ export class Compiler {
     }
     if (node.type === NodeType.ARRAY_ACCESS) {
       const access = node as ArrayAccessNode;
+      // {$X+} indexes a PChar from the character it points at.
+      if (this.charPointer(this.expressionType(access.array)) && access.indices.length === 1) {
+        if (node.extendedSyntax === false) this.fail(node, 'Array or string expected');
+        this.expression(access.array);
+        this.requireType(access.indices[0]!, INTEGER, this.expression(access.indices[0]!));
+        this.emit(Opcode.ADI);
+        return CHAR;
+      }
       let type = this.address(access.array);
       if (type.kind === 'string') {
         if (access.indices.length !== 1) this.fail(node, 'A string requires one index');
@@ -2611,6 +2855,7 @@ export class Compiler {
           node,
           `Wrong number of arguments for "${node.name}" (expected ${String(routine.parameters.length)})`
         );
+      if (routine.declaration.inlineCode) return this.inlineCall(node, routine);
       this.emit(Opcode.MST, this.scope.level - routine.parent.level);
       let words = 0;
       if (bound) { this.loadVariable(bound); words++; }
@@ -2642,8 +2887,14 @@ export class Compiler {
             words++;
           }
         } else {
-          this.requireType(argument, parameter.type, parameter.type.procedureSignature ? this.proceduralValue(argument) : this.expression(argument));
-          this.checkRange(parameter.type, argument);
+          const text = this.charPointer(parameter.type) ? this.textConstant(argument) : undefined;
+          if (text !== undefined) this.emitStaticText(text, argument);
+          else if (this.charPointer(parameter.type) && this.emitCharArrayPointer(argument)) {
+            // passed as a pointer to its first character
+          } else {
+            this.requireType(argument, parameter.type, parameter.type.procedureSignature ? this.proceduralValue(argument) : this.expression(argument));
+            this.checkRange(parameter.type, argument);
+          }
           words++;
         }
         if (parameter.type.openString) {
@@ -2676,6 +2927,238 @@ export class Compiler {
     if (parameter.reference && !parameter.readOnly) this.requireWritable(argument);
     if (type.openHigh) this.loadVariable(type.openHigh);
     else this.literal((type.high ?? 0) - (type.low ?? 0), INTEGER);
+  }
+  /** The end of a program. While ExitProc holds a procedure, it is cleared
+   * and that procedure called, so each exit procedure can chain to the one it
+   * replaced; Halt and run-time errors come here too. */
+  private exitChain(block: Node): void {
+    const chain = this.bytecode.getNextAddress();
+    for (const jump of this.haltJumps) this.patch(jump, chain);
+    this.bytecode.exitChain = chain;
+    const exitProc = this.standardVariable('ExitProc');
+    const signature: PascalType = { ...POINTER, procedureSignature: { parameters: [], result: VOID } };
+    const held = this.temp(signature);
+    this.emit(Opcode.LDA, 0, exitProc);
+    this.emit(Opcode.LDI, TypeCode.A);
+    this.literal(0, POINTER);
+    this.emit(Opcode.NEQ, TypeCode.A);
+    const done = this.emit(Opcode.FJP);
+    this.addressVariable(held);
+    this.emit(Opcode.LDA, 0, exitProc);
+    this.emit(Opcode.LDI, TypeCode.A);
+    this.emit(Opcode.STI, TypeCode.A);
+    this.emit(Opcode.LDA, 0, exitProc);
+    this.literal(0, POINTER);
+    this.emit(Opcode.STI, TypeCode.A);
+    const target = { type: NodeType.IDENTIFIER, name: 'ExitProc', internalVariable: held } as Node;
+    const call = { type: NodeType.CALL, name: 'ExitProc', arguments: [], lineNumber: block.endLineNumber } as CallNode;
+    this.proceduralCall(call, false, { node: target, type: signature });
+    this.emit(Opcode.UJP, 0, chain);
+    this.patch(done);
+  }
+  /** Assembly the P-machine does not run goes to the native compiler. */
+  private unsupportedAssembly(reason: string): never {
+    throw new NativePascalRequired(this.sourceFile ?? this.programName, `${reason} requires the native DOS compiler`);
+  }
+  /** The function result the current routine returns, if any. */
+  private resultVariable(): Variable | undefined {
+    for (const symbol of this.scope.symbols.values()) if (symbol.kind === 'variable' && symbol.result) return symbol;
+    return undefined;
+  }
+  /** The byte offset of a cell within a type, in Turbo Pascal's layout. */
+  private byteOffset(type: PascalType, cellOffset: number): number {
+    return this.cells(type).filter((cell) => cell.offset < cellOffset).reduce((sum, cell) => sum + cell.type.byteSize, 0);
+  }
+  /** A name in an asm statement: a variable, with any fields after it, a
+   * constant, or a record type's field offset. */
+  private assemblyName(path: string[], line: number, pointers: Map<Variable, Variable>, assembler: boolean): AsmName | undefined {
+    const at = { type: NodeType.IDENTIFIER, lineNumber: line } as Node;
+    const fields = (type: PascalType, names: string[]): { type: PascalType; offset: number } => {
+      let offset = 0;
+      for (const name of names) {
+        const field = type.kind === 'record' ? type.fields?.get(name.toLowerCase()) : undefined;
+        if (!field) this.fail(at, `Unknown record field "${name}"`);
+        offset += this.byteOffset(type, field.offset);
+        type = field.type;
+      }
+      return { type, offset };
+    };
+    const first = path[0]!;
+    const symbol = first.toLowerCase() === '@result' ? this.resultVariable() : this.lookup(first);
+    if (!symbol) {
+      if (first.toLowerCase() === '@result') this.fail(at, '@Result is only valid in a function');
+      return undefined;
+    }
+    if (symbol.kind === 'constant') {
+      if (path.length > 1) this.fail(at, 'Invalid assembler operand');
+      const value = symbol.value;
+      if (typeof value === 'number' && Number.isInteger(value)) return { kind: 'constant', value };
+      if (typeof value === 'boolean') return { kind: 'constant', value: value ? 1 : 0 };
+      if (typeof value === 'string' && value.length === 1) return { kind: 'constant', value: value.charCodeAt(0) };
+      return this.fail(at, 'Integer constant expected');
+    }
+    if (symbol.kind === 'type') {
+      const { type, offset } = fields(symbol.type, path.slice(1));
+      return { kind: 'type', size: type.byteSize, offset };
+    }
+    if (symbol.kind === 'routine') return this.unsupportedAssembly('Naming a routine in assembler');
+    if (symbol.container) return this.unsupportedAssembly('Fields reached through WITH or Self in assembler');
+    if (symbol.type.openArray || symbol.type.openString) return this.unsupportedAssembly('Open parameters in assembler');
+    const { type, offset } = fields(symbol.type, path.slice(1));
+    // A var parameter holds its variable's address, as it does on the 8086
+    // stack. So does a large value parameter of an assembler routine, which
+    // Turbo Pascal does not copy.
+    const indirect = symbol.reference || (assembler && symbol.parameter === true && symbol.type.byteSize > 4);
+    if (indirect) {
+      let key = symbol;
+      if (!symbol.reference) {
+        key = pointers.get(symbol) ?? this.temp(POINTER);
+        pointers.set(symbol, key);
+      }
+      const target = symbol.type.kind === 'untyped' ? undefined : this.binaryLayout(symbol.type);
+      return {
+        kind: 'variable',
+        key,
+        variable: { name: symbol.name, layout: [{ kind: 'pointer', bytes: 4 }], pointer: true, ...(target ? { target } : {}) },
+        displacement: offset,
+        size: type.byteSize,
+      };
+    }
+    const variable: AsmVariable = { name: symbol.name, layout: this.binaryLayout(symbol.type) };
+    if (symbol.type.kind === 'pointer' && symbol.type.base) variable.target = this.binaryLayout(symbol.type.base);
+    return { kind: 'variable', key: symbol, variable, displacement: offset, size: type.byteSize };
+  }
+  /** asm ... end: the block runs on the machine's 8086, over the cells of
+   * the variables it names, whose addresses are its arguments. */
+  private assemblyStatement(node: Node): void {
+    const assembler = node.assembler === true;
+    const line = node.lineNumber ?? this.line;
+    const raw = node.instructions as RawInstruction[];
+    const pointers = new Map<Variable, Variable>();
+    const { block, keys } = assemble(raw, {
+      resolve: (path, at) => this.assemblyName(path, at, pointers, assembler),
+      unsupported: (reason) => this.unsupportedAssembly(reason),
+    }, line);
+    const result = assembler ? this.resultVariable() : undefined;
+    if (result) {
+      const type = result.type;
+      const kind = type.kind === 'char' ? 'char' : type.kind === 'boolean' ? 'boolean' : type.kind === 'pointer' ? 'pointer' : 'integer';
+      if (!['integer', 'char', 'boolean', 'pointer'].includes(type.kind) || ![1, 2, 4].includes(type.byteSize))
+        this.unsupportedAssembly('An assembler function of this result type');
+      block.result = { size: type.byteSize as 1 | 2 | 4, kind, signed: (type.low ?? 0) < 0 };
+      this.emit(Opcode.LDA, 0, result.offset);
+    }
+    for (const [parameter, pointer] of pointers) {
+      this.emit(Opcode.LDA, 0, pointer.offset);
+      this.emit(Opcode.LDA, this.scope.level - parameter.scope.level, parameter.offset);
+      this.emit(Opcode.STI, TypeCode.A);
+    }
+    this.emitAssembly(block, keys as Variable[]);
+    if (result) this.emit(Opcode.STI, this.typeCode(result.type));
+  }
+  /** inline(...): its elements' bytes, decoded into the 8086's
+   * instructions. A variable's name stands for its address. */
+  private inlineBlock(node: Node, variables: Variable[]): AsmBlock {
+    const line = node.lineNumber ?? this.line;
+    const layouts: AsmVariable[] = [];
+    const pointers = new Map<Variable, Variable>();
+    const bytes: InlineByte[] = [];
+    type Part = { negative: boolean; value?: number; name?: string; location?: boolean };
+    for (const element of node.elements as { size?: 1 | 2; parts: Part[] }[]) {
+      let value = 0;
+      let reference: { index: number; displacement: number } | undefined;
+      for (const part of element.parts) {
+        const sign = part.negative ? -1 : 1;
+        if (part.value !== undefined) value += sign * part.value;
+        else if (part.location) value += sign * bytes.length;
+        else {
+          const name = this.assemblyName(part.name!.split('.'), line, pointers, false);
+          if (!name) this.fail(node, `Unknown identifier "${part.name!}"`);
+          if (name.kind === 'constant') value += sign * name.value;
+          else if (name.kind === 'type') value += sign * name.offset;
+          else {
+            if (reference || part.negative) this.fail(node, 'Invalid inline element');
+            let index = variables.indexOf(name.key as Variable);
+            if (index < 0) {
+              index = variables.push(name.key as Variable) - 1;
+              layouts.push(name.variable);
+            }
+            reference = { index, displacement: name.displacement };
+          }
+        }
+      }
+      const size = element.size ?? (reference || value < 0 || value > 255 ? 2 : 1);
+      bytes.push({ value: value & 0xff, ...(reference ? { variable: reference.index, displacement: reference.displacement + value } : {}) });
+      if (size === 2) bytes.push({ value: (value >> 8) & 0xff });
+    }
+    const instructions = decodeInline(bytes, line, (reason) => this.unsupportedAssembly(reason));
+    return { instructions, variables: layouts, line };
+  }
+  /** A call to an inline routine runs its code in place, with the
+   * arguments pushed on the stack for the code to take. */
+  private inlineCall(node: CallNode, routine: Routine): PascalType {
+    const sizes: (1 | 2 | 4)[] = [];
+    routine.parameters.forEach((parameter, index) => {
+      const type = parameter.type;
+      if (parameter.reference || !['integer', 'char', 'boolean', 'pointer'].includes(type.kind) || ![1, 2, 4].includes(type.byteSize))
+        this.unsupportedAssembly('This parameter of an inline routine');
+      const argument = node.arguments[index]!;
+      this.requireType(argument, type, this.expression(argument));
+      sizes.push(type.byteSize as 1 | 2 | 4);
+    });
+    const variables: Variable[] = [];
+    const block = this.inlineBlock(routine.declaration.inlineCode as Node, variables);
+    if (variables.length) this.unsupportedAssembly('Variables named in an inline routine');
+    block.stackArguments = sizes;
+    const type = routine.type;
+    if (type.kind !== 'void') {
+      if (!['integer', 'char', 'boolean', 'pointer'].includes(type.kind) || ![1, 2, 4].includes(type.byteSize))
+        this.unsupportedAssembly('An inline function of this result type');
+      block.result = {
+        size: type.byteSize as 1 | 2 | 4,
+        kind: type.kind === 'char' ? 'char' : type.kind === 'boolean' ? 'boolean' : type.kind === 'pointer' ? 'pointer' : 'integer',
+        signed: (type.low ?? 0) < 0,
+      };
+    }
+    const index = this.bytecode.assembly.push(block) - 1;
+    this.literal(index, INTEGER);
+    this.emit(Opcode.CSP, sizes.length + 1, InternalProcedure.ASSEMBLY);
+    return type;
+  }
+  private emitAssembly(block: AsmBlock, variables: Variable[]): void {
+    const index = this.bytecode.assembly.push(block) - 1;
+    for (const variable of variables) this.emit(Opcode.LDA, this.scope.level - variable.scope.level, variable.offset);
+    this.literal(index, INTEGER);
+    this.emit(Opcode.CSP, variables.length + 1, InternalProcedure.ASSEMBLY);
+  }
+  /** A System or standard-unit variable, in its fixed cell. */
+  private declareStandard(standard: StandardVariable): void {
+    const types = { word: WORD, longint: LONGINT, integer: INTEGER, byte: BYTE, boolean: BOOLEAN, pointer: POINTER, text: TEXTFILE };
+    const symbol = this.standardSymbol(standard.name, types[standard.kind]), unit = standard.unit ?? 'system';
+    this.scope.symbols.set(standard.name.toLowerCase(), symbol);
+    if (!this.standardSymbols.has(unit)) this.standardSymbols.set(unit, new Map());
+    this.standardSymbols.get(unit)!.set(standard.name.toLowerCase(), symbol);
+  }
+  private standardSymbol(name: string, type: PascalType): Variable {
+    let root = this.scope;
+    while (root.parent) root = root.parent;
+    return { kind: 'variable', name, type, offset: this.standardVariable(name), scope: root, reference: false };
+  }
+  /** Lst: output to the printer, which is the file LPT1 on the virtual drive. */
+  private printerFile(): Variable {
+    return this.standardSymbol('Lst', TEXTFILE);
+  }
+  /** The address of one of the System unit's own variables. */
+  private standardVariable(name: string): number {
+    return MARK_SIZE + STANDARD_VARIABLES.findIndex((standard) => standard.name === name);
+  }
+  /** The routine @P names, when P is a procedure or function rather than a
+   * variable. */
+  private routineAddress(node: Node): Routine | undefined {
+    const resolved = this.qualified(node);
+    if (resolved.type !== NodeType.IDENTIFIER) return undefined;
+    const symbol = this.lookup(String(resolved.name));
+    return symbol?.kind === 'routine' ? symbol : undefined;
   }
   /** A typecast T(x) of an untyped parameter x, which gives it a type. */
   private untypedCast(node: Node): { type: PascalType; operand: Node } | undefined {
@@ -2899,6 +3382,9 @@ export class Compiler {
     }
     if (name === 'random' && arguments_.length === 0) return this.realResult();
     if (name === 'memavail' || name === 'maxavail') return LONGINT;
+    // The Strings unit's pointers are PChars, which {$X+} can index and move.
+    if (builtin.procedureIndex >= 350 && builtin.procedureIndex <= 370 && builtin.returnType === TypeKind.POINTER)
+      return { ...POINTER, base: CHAR };
     if (name === 'hi' || name === 'lo') return BYTE;
     if (name === 'swap' && arguments_[0]) return this.promoteInteger(this.expressionType(arguments_[0]));
     if (['trunc', 'round', 'filepos', 'filesize'].includes(name)) return LONGINT;
@@ -2913,7 +3399,8 @@ export class Compiler {
     return builtin.isFunction ? (types[builtin.returnType!] ?? INTEGER) : VOID;
   }
   private builtin(node: CallNode, builtin: BuiltinDef, expression: boolean): PascalType {
-    const name = node.name.toLowerCase(),
+    // System.WriteLn is WriteLn.
+    const name = node.name.toLowerCase().replace(/^.*\./, ''),
       args = node.arguments;
     if (expression && !builtin.isFunction && builtin.name.toLowerCase() !== 'new')
       this.fail(node, 'Procedure cannot be used as an expression');
@@ -3050,6 +3537,55 @@ export class Compiler {
       this.emit(Opcode.CSP, name === 'getmem' ? 3 : 2, builtin.procedureIndex);
       return VOID;
     }
+    if (name === 'typeof') {
+      // Turbo Pascal gives a pointer to the object's method table; the
+      // P-machine identifies the type instead, which compares the same way.
+      const argument = args[0]!;
+      const symbol = argument.type === NodeType.IDENTIFIER ? this.lookup(String(argument.name)) : undefined;
+      const type = symbol?.kind === 'type' ? symbol.type : this.expressionType(argument);
+      if (!type.object) this.fail(argument, 'Object type or variable required');
+      // Only an object with virtual methods has a method table to point at.
+      if (!type.object.hasVirtual) this.fail(argument, 'TypeOf needs an object type with virtual methods');
+      this.literal(type.object.id, POINTER);
+      return POINTER;
+    }
+    if (name === 'mark' || name === 'release') {
+      this.requireWritable(args[0]!);
+      const pointer = this.address(args[0]!);
+      if (pointer.kind !== 'pointer') this.fail(args[0]!, 'Pointer variable required');
+      this.emit(Opcode.CSP, 1, builtin.procedureIndex);
+      return VOID;
+    }
+    if (name === 'random' || name === 'randomize') {
+      // Turbo Pascal's own sequence, which RandSeed carries.
+      for (const argument of args) this.requireType(argument, INTEGER, this.expression(argument));
+      this.literal(this.standardVariable('RandSeed'), INTEGER);
+      this.emit(Opcode.CSP, args.length + 1, builtin.procedureIndex);
+      return name === 'random' ? (args.length ? LONGINT : this.realResult()) : VOID;
+    }
+    if (builtin.procedureIndex === 512 || builtin.procedureIndex === 513 || builtin.procedureIndex === 518) {
+      // Graph3's GetPic, PutPic and Pattern read or fill a variable's bytes.
+      if (args.length !== builtin.params.length) this.fail(node, `Wrong number of arguments for "${builtin.name}"`);
+      if (builtin.procedureIndex === 512) this.requireWritable(args[0]!);
+      const type = this.address(args[0]!);
+      if (type.kind === 'untyped' || type.openArray) this.fail(args[0]!, `${builtin.name} needs a variable whose type is known here`);
+      for (const argument of args.slice(1)) this.requireType(argument, INTEGER, this.expression(argument));
+      this.literal(JSON.stringify(this.binaryLayout(type)), STRING);
+      this.emit(Opcode.CSP, args.length + 1, builtin.procedureIndex);
+      return VOID;
+    }
+    if (builtin.procedureIndex >= 450 && builtin.procedureIndex <= 456) {
+      // Every unit is resident, so the Overlay unit's procedures succeed:
+      // OvrResult is ovrOk after each one.
+      for (const [index, argument] of args.entries())
+        this.requireType(argument, builtin.params[index]?.type === TypeKind.STRING ? STRING : INTEGER, this.expression(argument));
+      this.emit(Opcode.CSP, args.length, builtin.procedureIndex);
+      if (builtin.isFunction) return LONGINT;
+      this.emit(Opcode.LDA, this.scope.level, this.standardVariable('OvrResult'));
+      this.literal(0, INTEGER);
+      this.emit(Opcode.STI, TypeCode.I);
+      return VOID;
+    }
     if (name === 'paramstr') {
       this.requireType(args[0]!, INTEGER, this.expression(args[0]!));
       this.literal(`C:\\${this.programName.toUpperCase()}.EXE`, STRING);
@@ -3077,6 +3613,8 @@ export class Compiler {
         'close',
         'eof',
         'eoln',
+        'seekeof',
+        'seekeoln',
         'filepos',
         'filesize',
         'seek',
@@ -3177,9 +3715,13 @@ export class Compiler {
       return VOID;
     }
     if (name === 'halt') {
-      // The VM records the exit code, then stops as at the program's end.
+      // Halt sets ExitCode, then ends the program through its exit
+      // procedures, as the end of the main block does.
+      this.emit(Opcode.LDA, this.scope.level, this.standardVariable('ExitCode'));
       if (args[0]) this.requireType(args[0], INTEGER, this.expression(args[0]));
-      this.emit(Opcode.CSP, args[0] ? 1 : 0, BuiltinProcedure.HALT);
+      else this.literal(0, INTEGER);
+      this.emit(Opcode.STI, TypeCode.I);
+      this.haltJumps.push(this.emit(Opcode.UJP, this.scope.level, 0));
       return VOID;
     }
     if (name === 'break' || name === 'continue') {
@@ -3196,6 +3738,12 @@ export class Compiler {
         if (parameter.type !== TypeKind.POINTER && parameter.type !== (type.kind as TypeKind))
           this.fail(arg, `Type mismatch in VAR argument for ${node.name}`);
       } else {
+        const text = parameter?.type === TypeKind.POINTER ? this.textConstant(arg) : undefined;
+        if (text !== undefined) {
+          this.emitStaticText(text, arg);
+          return;
+        }
+        if (parameter?.type === TypeKind.POINTER && this.emitCharArrayPointer(arg)) return;
         const type = this.expression(arg);
         if (['ord', 'succ', 'pred'].includes(name)) {
           if (!this.ordinal(type)) this.fail(arg, `${node.name} requires an ordinal argument`);
