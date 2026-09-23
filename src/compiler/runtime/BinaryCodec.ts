@@ -118,3 +118,43 @@ export function decodeBinary(
     offset += cell.bytes;
   });
 }
+
+/** The cells of a layout that hold bytes [start, start + length), with the
+ * byte each starts at. */
+function covering(layout: BinaryCell[], start: number, length: number): { index: number; at: number; cell: BinaryCell }[] {
+  const cells: { index: number; at: number; cell: BinaryCell }[] = [];
+  let at = 0;
+  layout.forEach((cell, index) => {
+    if (at < start + length && at + cell.bytes > start) cells.push({ index, at, cell });
+    at += cell.bytes;
+  });
+  const total = layout.reduce((sum, cell) => sum + cell.bytes, 0);
+  if (start < 0 || start + length > total) throw new PascalError('Access beyond the variable');
+  return cells;
+}
+
+/** Some of a variable's bytes, encoding only the cells that hold them. */
+export function readBytes(memory: MemoryAccess, address: number, layout: BinaryCell[], start: number, length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  for (const { index, at, cell } of covering(layout, start, length)) {
+    const encoded = encodeBinary(memory, address + (cell.offset ?? index), [{ ...cell, offset: 0 }]);
+    for (let byte = 0; byte < cell.bytes; byte++) {
+      const target = at + byte - start;
+      if (target >= 0 && target < length) bytes[target] = encoded[byte] ?? 0;
+    }
+  }
+  return bytes;
+}
+
+/** Store bytes into a variable, decoding only the cells that hold them. */
+export function writeBytes(memory: MemoryAccess, address: number, layout: BinaryCell[], start: number, bytes: Uint8Array): void {
+  for (const { index, at, cell } of covering(layout, start, bytes.length)) {
+    const cellAddress = address + (cell.offset ?? index);
+    const encoded = encodeBinary(memory, cellAddress, [{ ...cell, offset: 0 }]);
+    for (let byte = 0; byte < cell.bytes; byte++) {
+      const source = at + byte - start;
+      if (source >= 0 && source < bytes.length) encoded[byte] = bytes[source] ?? 0;
+    }
+    decodeBinary(memory, cellAddress, [{ ...cell, offset: 0 }], encoded);
+  }
+}

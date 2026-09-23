@@ -11,7 +11,7 @@
  */
 
 import { Opcode, TypeCode, Register, MARK_SIZE, inst } from '../types/inst';
-import { Bytecode } from '../codegen/Bytecode';
+import { Bytecode, shapeCell, type ViewShape } from '../codegen/Bytecode';
 import { PascalError } from '../errors/PascalError';
 import { describePascalDiagnostic } from '../errors/diagnostics';
 import { InternalProcedure, NativeRegistry } from './Native';
@@ -23,6 +23,21 @@ import { roundReal48 } from '../codegen/numeric';
 import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
 import { VariantRuntime } from './Variants';
+import { decodeBinary, encodeBinary, readBytes, writeBytes, type BinaryCell } from './BinaryCodec';
+
+/** A variable's bytes shown as another type. Its cells are addresses past
+ * every real one; loading one decodes it from the variable's bytes, and
+ * storing one encodes it into them. */
+interface View {
+  target: number;
+  layout: BinaryCell[];
+  shape: ViewShape;
+  start: number;
+  refresh: number;
+  syncs: { base: number; part: number; case: number }[];
+}
+/** How many cells one view can show. */
+const VIEW_SPAN = 1 << 20;
 
 /** How many 8086 instructions an asm block runs before the machine lets
  * the rest of the program, and the page, have a turn. */
@@ -122,6 +137,10 @@ export class Machine {
     | undefined;
   /** Keeps variant records' cases in step with their bytes. */
   private variants: VariantRuntime;
+  /** Views of variables' bytes, by number, and their numbers by what they
+   * show, so one view has one address. */
+  private views: View[] = [];
+  private viewKeys = new Map<string, number>();
   /** The frames of interrupt procedures running now, innermost last. */
   private interruptFrames: number[] = [];
   /** When the timer next ticks, 18.2 times a second. */
@@ -198,6 +217,7 @@ export class Machine {
       heapTop: () => this.np,
       releaseHeap: (address) => { this.releaseHeap(address); },
       sound: this.config.onSound,
+      layout: (id) => this.bytecode.layouts[id] ?? [],
     }, this.config.fileSystem);
   }
 
@@ -220,6 +240,8 @@ export class Machine {
     this.inputPos = 0;
     this.inputColumn = 0;
     this.keyQueue = '';
+    this.views = [];
+    this.viewKeys.clear();
     this.assemblyResume = undefined;
     this.interruptFrames = [];
     this.nextTick = 0;
@@ -896,8 +918,43 @@ export class Machine {
     return (type as TypeCode) === TypeCode.S || (type as TypeCode) === TypeCode.C ? String(this.pop()) : this.popNumber();
   }
 
+  /** VIEW: the address of a cell of a view, made once for what it shows. */
+  private view(args: number[]): number {
+    const [target = 0, layout = 0, map = 0, start = 0, refresh = -1, count = 0] = args;
+    const syncs = Array.from({ length: count }, (_, index) => ({
+      base: args[6 + index * 3] ?? 0,
+      part: args[7 + index * 3] ?? 0,
+      case: args[8 + index * 3] ?? 0,
+    }));
+    const cell = args[6 + count * 3] ?? target;
+    const key = JSON.stringify(args.slice(0, 6 + count * 3));
+    let id = this.viewKeys.get(key);
+    if (id === undefined) {
+      id = this.views.push({
+        target,
+        layout: this.bytecode.layouts[layout] ?? [],
+        shape: this.bytecode.viewMaps[map] ?? { kind: 'record', fields: [] },
+        start,
+        refresh,
+        syncs,
+      }) - 1;
+      this.viewKeys.set(key, id);
+    }
+    return this.dstore.length * 1024 + id * VIEW_SPAN + (cell - target);
+  }
+  /** The view and cell an address shows, if it is a view's. */
+  private viewCell(address: number): { view: View; byte: number; cell: BinaryCell } | undefined {
+    const offset = address - this.dstore.length * 1024;
+    if (offset < 0) return undefined;
+    const view = this.views[Math.floor(offset / VIEW_SPAN)];
+    const entry = view && shapeCell(view.shape, offset % VIEW_SPAN);
+    return view && entry ? { view, ...entry } : undefined;
+  }
+  private get memory(): { read: (address: number) => StackValue; write: (address: number, value: StackValue) => void } {
+    return { read: (address) => this.peek(address), write: (address, value) => { this.poke(address, value); } };
+  }
   private checkAddress(address: number): void {
-    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacter(address))) {
+    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacter(address) && !this.viewCell(address))) {
       throw new PascalError('Invalid memory address');
     }
   }
@@ -1026,6 +1083,10 @@ export class Machine {
         if (bytes !== undefined) this.stringBacking.set(copy + cell, bytes);
       }
       this.push(copy);
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.VIEW as number)) {
+      this.push(this.view(args.map(Number)));
       return;
     }
     if (procedureIndex === (InternalProcedure.VARIANT_SYNC as number)) {
@@ -1541,6 +1602,18 @@ export class Machine {
 
   poke(address: number, value: StackValue): void {
     this.checkAddress(address);
+    const shown = this.viewCell(address);
+    if (shown) {
+      // Into the viewed variable's bytes; a string stores only its length
+      // and characters, as Turbo Pascal copies it.
+      const { view, byte, cell } = shown;
+      const bytes = encodeBinary({ read: () => value, write: () => undefined }, 0, [{ ...cell, offset: 0 }]);
+      const used = cell.kind === 'string' ? (bytes[0] ?? 0) + 1 : bytes.length;
+      writeBytes(this.memory, view.target, view.layout, view.start + byte, bytes.subarray(0, used));
+      for (const { part, offset } of this.bytecode.variantRefreshes[view.refresh] ?? []) this.variants.refresh(view.target + offset, part);
+      for (const sync of view.syncs) this.variants.sync(sync.base, sync.part, sync.case);
+      return;
+    }
     const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
@@ -1659,6 +1732,14 @@ export class Machine {
    * @param address - The stack address
    */
   peek(address: number): StackValue {
+    const shown = this.viewCell(address);
+    if (shown) {
+      const { view, byte, cell } = shown;
+      let value: StackValue = 0;
+      decodeBinary({ read: () => 0, write: (_, decoded) => { value = decoded; } }, 0, [{ ...cell, offset: 0 }],
+        readBytes(this.memory, view.target, view.layout, view.start + byte, cell.bytes));
+      return value;
+    }
     const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');

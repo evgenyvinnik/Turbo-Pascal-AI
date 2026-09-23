@@ -22,6 +22,8 @@ interface Host extends MemoryAccess {
   heapTop(): number;
   releaseHeap(address: number): void;
   sound(frequency: number): void;
+  /** A layout by its number, as an untyped parameter's caller passes it. */
+  layout?(id: number): BinaryCell[];
 }
 interface Result {
   result?: StackValue;
@@ -50,7 +52,7 @@ export class RuntimeServices {
     private host: Host,
     private disk: VirtualFileSystem
   ) {
-    this.files = new FileRuntime(host, disk);
+    this.files = new FileRuntime(host, disk, (value) => this.layoutOf(value));
     this.dos = new DosUnit(host, disk, this.files);
   }
   readonly dos: DosUnit;
@@ -169,6 +171,11 @@ export class RuntimeServices {
     this.vectors.clear();
     this.host.sound(0);
   }
+  /** A byte layout: written out, or by its number. */
+  layoutOf(value: StackValue | undefined): BinaryCell[] {
+    if (typeof value === 'number') return this.host.layout?.(value) ?? [];
+    return JSON.parse(String(value ?? '[]')) as BinaryCell[];
+  }
   invoke(index: number, args: StackValue[], ioChecking = true): Result | undefined {
     const a = Number(args[0]),
       b = Number(args[1]),
@@ -188,15 +195,15 @@ export class RuntimeServices {
       // FillChar and Move work on the variables' bytes, in the layout their
       // types give, so a cell holding a word changes byte by byte.
       case 60: {
-        const layout = JSON.parse(String(args[3])) as BinaryCell[];
+        const layout = this.layoutOf(args[3]);
         const bytes = encodeBinary(this.host, a, layout);
         bytes.fill(typeof args[2] === 'string' ? args[2].charCodeAt(0) : c & 255, 0, Math.max(0, Math.min(b, bytes.length)));
         decodeBinary(this.host, a, layout, bytes);
         return {};
       }
       case 61: {
-        const source = encodeBinary(this.host, a, JSON.parse(String(args[3])) as BinaryCell[]);
-        const layout = JSON.parse(String(args[4])) as BinaryCell[];
+        const source = encodeBinary(this.host, a, this.layoutOf(args[3]));
+        const layout = this.layoutOf(args[4]);
         const target = encodeBinary(this.host, b, layout);
         target.set(source.subarray(0, Math.max(0, Math.min(c, source.length, target.length))));
         decodeBinary(this.host, b, layout, target);
@@ -444,7 +451,7 @@ export class RuntimeServices {
           return { result: this.disk.capacity };
       }
     }
-    if (index >= 310 && index <= 330) return this.dos.invoke(index, args);
+    if (index >= 310 && index <= 333) return this.dos.invoke(index, args);
     if (index >= 350 && index <= 370) return this.strings(index, args);
     if (index >= 500 && index < 550) return this.turbo3Graphics(index, args);
     return this.files.invoke(index, args, ioChecking);

@@ -9,6 +9,31 @@ import { inst, Opcode } from '../types';
 import type { AsmBlock } from '../asm/types';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 
+/** How a type's cells lie in its bytes: one cell, an array of elements that
+ * are `cells` cells and `bytes` bytes each, or a record's fields, each at a
+ * cell offset and a byte. */
+export type ViewShape =
+  | { kind: 'cell'; cell: BinaryCell }
+  | { kind: 'array'; count: number; cells: number; bytes: number; element: ViewShape }
+  | { kind: 'record'; fields: { offset: number; cells: number; byte: number; shape: ViewShape }[] };
+
+/** The cell at a cell offset in a shape, and the byte it starts at. */
+export function shapeCell(shape: ViewShape, offset: number): { byte: number; cell: BinaryCell } | undefined {
+  if (shape.kind === 'cell') return offset === 0 ? { byte: 0, cell: shape.cell } : undefined;
+  if (shape.kind === 'array') {
+    const index = Math.floor(offset / shape.cells);
+    if (index < 0 || index >= shape.count) return undefined;
+    const inner = shapeCell(shape.element, offset - index * shape.cells);
+    return inner && { byte: index * shape.bytes + inner.byte, cell: inner.cell };
+  }
+  for (const field of shape.fields) {
+    if (offset < field.offset || offset >= field.offset + field.cells) continue;
+    const inner = shapeCell(field.shape, offset - field.offset);
+    if (inner) return { byte: field.byte + inner.byte, cell: inner.cell };
+  }
+  return undefined;
+}
+
 /** A variant part of a record: its cases, each in cells of its own, and its
  * shadow, the part's bytes as Turbo Pascal stores them. Offsets are cells
  * from the start of the record. */
@@ -89,6 +114,14 @@ export class Bytecode {
   /** The program's asm statements and inline code, which the machine's
    * 8086 runs over Pascal variables. */
   public assembly: AsmBlock[] = [];
+
+  /** Byte layouts of types, by number: what an untyped parameter's caller
+   * passes, and what an absolute variable and its variable are copied by. */
+  public layouts: BinaryCell[][] = [];
+
+  /** How types' cells lie in their bytes, by number. A view shows a
+   * variable's bytes as such a type. */
+  public viewMaps: ViewShape[] = [];
 
   /** Every variant part of the program's record types, by number. */
   public variantParts: VariantPartInfo[] = [];
