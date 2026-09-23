@@ -21,6 +21,8 @@ interface FileHandle {
   console?: boolean;
   /** Turbo3's keyboard: reads take keys as they are pressed, without echo. */
   keyboard?: boolean;
+  /** The name as Assign was given it, which FileRec and TextRec show. */
+  given?: string;
 }
 
 /** The handles Input and Output start with. */
@@ -35,7 +37,8 @@ export class FileRuntime {
   private lastError = 0;
   constructor(
     private memory: MemoryAccess,
-    readonly disk: VirtualFileSystem
+    readonly disk: VirtualFileSystem,
+    private layoutOf: (value: StackValue | undefined) => BinaryCell[] = (value) => JSON.parse(String(value ?? '[]')) as BinaryCell[]
   ) {
     // Every run starts in the root directory, whatever the last one left.
     disk.changeDirectory('\\');
@@ -49,6 +52,17 @@ export class FileRuntime {
   }
   private consoleHandle(mode: FileHandle['mode']): FileHandle {
     return { name: '', words: 0, recordSize: 128, layout: [], mode, position: 0, console: true };
+  }
+  /** What FileRec and TextRec show of a file variable: its DOS handle, its
+   * mode, its record size and the name it was assigned. */
+  fileRecord(address: number): { handle: number; mode: FileHandle['mode'] | 'none'; recordSize: number; name: string; text: boolean } {
+    const id = Number(this.memory.read(address));
+    const file = this.handles.get(id);
+    if (!file) return { handle: 0, mode: 'none', recordSize: 128, name: '', text: false };
+    // DOS gives the standard input and output handles 0 and 1, and files
+    // handles from 5.
+    const handle = id === CONSOLE_OUTPUT ? 1 : file.console ? 0 : id + 1;
+    return { handle, mode: file.mode, recordSize: file.recordSize, name: file.given ?? '', text: file.words === 0 };
   }
   /** The name a file variable was assigned, and whether it is open. */
   fileName(address: number): { name: string; open: boolean } | undefined {
@@ -177,6 +191,7 @@ export class FileRuntime {
       this.handles.set(id, {
         ...(console ? { console } : {}),
         name: console ? '' : this.disk.resolveName(String(args[1])),
+        given: String(args[1]),
         words: Number(args[2] ?? 0),
         layout,
         recordSize: layout.length ? layout.reduce((size, cell) => size + cell.bytes, 0) : 128,
@@ -385,7 +400,7 @@ export class FileRuntime {
         this.handle(address, index === 80 ? 'read' : 'write');
         const count = Number(args[2]),
           resultAddress = Number(args[3]),
-          layout = JSON.parse(String(args[4])) as BinaryCell[];
+          layout = this.layoutOf(args[4]);
         const bufferSize = layout.reduce((total, cell) => total + cell.bytes, 0);
         const size = count * file.recordSize;
         if (!Number.isInteger(count) || count < 0 || size > bufferSize)

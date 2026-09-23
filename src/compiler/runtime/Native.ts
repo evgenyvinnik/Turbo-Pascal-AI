@@ -34,6 +34,12 @@ export enum InternalProcedure {
   /** After a variable's bytes changed as a whole: its address and the list
    * of variant parts in its type, whose cases follow their bytes. */
   VARIANT_REFRESH = 907,
+  /** An address that shows a variable's bytes as another type: an absolute
+   * variable, a typecast of an untyped parameter, or a pointer into a
+   * variant case. Its arguments are the variable's address, its layout,
+   * the view's map, the byte the view starts at, the variable's variant
+   * parts, the variant cases the variable lies in, and the cell wanted. */
+  VIEW = 908,
 }
 
 /**

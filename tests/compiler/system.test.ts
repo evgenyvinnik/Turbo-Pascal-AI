@@ -41,7 +41,7 @@ describe('System unit additions', () => {
   });
 
   it('rejects what these routines cannot do', () => {
-    expect(() => compile('program T; procedure P(var x); begin FillChar(x, 2, 0) end; begin end.')).toThrow(
+    expect(() => compile('program T; procedure P(x: array of Byte); begin FillChar(x, 2, 0) end; begin end.')).toThrow(
       /FillChar needs a variable whose type is known here/
     );
     expect(() => compile('program T; var w: Word absolute $0040:$0017; begin end.')).toThrow(

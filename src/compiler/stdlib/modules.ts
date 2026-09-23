@@ -153,7 +153,22 @@ export class ModuleLoader {
             1: (AL, AH, BL, BH, CL, CH, DL, DH: Byte)
         end;
         SearchRec = record Fill: array[1..21] of Byte; Attr: Byte; Time: Longint; Size: Longint; Name: string[12] end;
-        DateTime = record Year, Month, Day, Hour, Min, Sec: Word end;`,
+        DateTime = record Year, Month, Day, Hour, Min, Sec: Word end;
+        FileRec = record
+          Handle, Mode, RecSize: Word;
+          Private: array[1..26] of Byte;
+          UserData: array[1..16] of Byte;
+          Name: array[0..79] of Char
+        end;
+        TextBuf = array[0..127] of Char;
+        TextRec = record
+          Handle, Mode, BufSize, Private, BufPos, BufEnd: Word;
+          BufPtr: ^TextBuf;
+          OpenFunc, InOutFunc, FlushFunc, CloseFunc: Pointer;
+          UserData: array[1..16] of Byte;
+          Name: array[0..79] of Char;
+          Buffer: TextBuf
+        end;`,
     });
 
     // Register STRINGS unit (stub for null-terminated strings)

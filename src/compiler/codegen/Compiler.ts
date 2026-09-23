@@ -46,7 +46,7 @@ import { decodeInline, type InlineByte } from '../asm/inline';
 import { ModuleLoader, StandardUnit } from '../stdlib/modules';
 import { ParamMode, type BuiltinDef } from '../stdlib/builtin';
 import { TypeKind } from '../symbols/Symbol';
-import { Bytecode, type DebugType, type VariantPartInfo } from './Bytecode';
+import { Bytecode, type DebugType, type VariantPartInfo, type ViewShape } from './Bytecode';
 import {
   roundReal48,
   integerOperation,
@@ -109,6 +109,11 @@ interface PascalType {
   /** The variant parts in a record, its fields' records included, to bring
    * up to date when its bytes change as a whole. */
   variantRefresh?: { part: number; offset: number }[];
+  /** The record's own variant parts, nested ones too, and the byte each
+   * starts at. */
+  variantParts?: { part: number; byteStart: number }[];
+  /** An untyped parameter's hidden companion: the layout its caller passed. */
+  untypedLayout?: Variable;
   /** Nominal identity shared by aliases and subranges of one enumeration. */
   enumeration?: object;
   procedureSignature?: { parameters: Parameter[]; result: PascalType };
@@ -124,6 +129,9 @@ interface Variable {
   result?: boolean;
   parameter?: boolean;
   container?: Variable;
+  /** A variable declared absolute over one of another layout: it is a view
+   * of that variable's bytes, with no storage of its own. */
+  view?: { target: Variable };
   /** A field reached through WITH that lies in variant cases: those cases,
    * and the record type it is a field of. */
   variants?: { part: number; case: number }[];
@@ -307,6 +315,10 @@ export class Compiler {
   private standardSymbols = new Map<string, Map<string, Symbol>>();
   /** The types standard units declare in Pascal, by unit. */
   private unitDeclarations = new Map<string, Map<string, Symbol>>();
+  /** Byte layouts and view maps already numbered, by their JSON. */
+  private layoutIds = new Map<string, number>();
+  private viewMapIds = new Map<string, number>();
+  private refreshIds = new Map<string, number>();
   /** Halt statements, which jump to the program's exit procedures. */
   private haltJumps: number[] = [];
   /** The program's name, which ParamStr(0) reports. */
@@ -337,6 +349,9 @@ export class Compiler {
     this.printerUsed = false;
     this.standardUnits = new Set();
     this.unitDeclarations = new Map();
+    this.layoutIds = new Map();
+    this.viewMapIds = new Map();
+    this.refreshIds = new Map();
     this.haltJumps = [];
     this.objectTypes = [];
     this.routineValues = [];
@@ -647,6 +662,12 @@ export class Compiler {
     return variable;
   }
   private addressVariable(variable: Variable): void {
+    if (variable.view) {
+      const target = variable.view.target;
+      this.emitView(() => { this.addressVariable(target); }, () => { this.emitLayoutOf(target); }, variable.type, 0,
+        target.type.kind === 'untyped' ? -1 : this.refreshListId(target.type), []);
+      return;
+    }
     if (variable.container) {
       if (variable.container.type.object) this.addressVariable(variable.container);
       else this.loadVariable(variable.container);
@@ -940,7 +961,12 @@ export class Compiler {
           const declaration = node as VarDeclarationNode;
           // The names are declared as their type is read, so a type cannot
           // name a variable it declares, even one a System type shares.
-          const names = new Set(declaration.names.map((name) => name.toLowerCase()));
+          const standard = [...this.standardSymbols.values()].flatMap((unit) => [...unit.values()]);
+          const names = new Set(
+            declaration.names
+              .map((name) => name.toLowerCase())
+              .filter((name) => { const existing = this.scope.symbols.get(name); return existing !== undefined && standard.includes(existing); })
+          );
           const mentions = (type: unknown): boolean =>
             typeof type === 'object' && type !== null &&
             (((type as Node).type === NodeType.IDENTIFIER && names.has(String((type as Node).name).toLowerCase())) ||
@@ -948,12 +974,19 @@ export class Compiler {
           if (mentions(declaration.varType)) this.fail(node, 'Error in type definition');
           const type = this.resolveType(declaration.varType);
           if (declaration.absolute) {
-            // The new names are views of the other variable's storage.
-            const target = this.lookup(declaration.absolute);
-            if (target?.kind !== 'variable')
+            const found = this.lookup(declaration.absolute);
+            if (found?.kind !== 'variable')
               this.fail(node, `Variable expected: "${declaration.absolute}"`);
+            // A name over a variable of the same layout shares its cells. One
+            // of another layout is a view of its bytes, as Turbo Pascal
+            // overlays them.
+            const target = found.view?.target ?? found;
+            const same = !found.view && target.type.kind !== 'untyped' &&
+              JSON.stringify(this.binaryLayout(target.type)) === JSON.stringify(this.binaryLayout(type));
             for (const name of declaration.names)
-              this.declare(name, { ...target, name, type, parameter: false, readOnly: false }, node);
+              this.declare(name, same
+                ? { ...found, name, type, parameter: false, readOnly: false }
+                : { kind: 'variable', name, type, offset: target.offset, scope: target.scope, reference: false, view: { target } }, node);
             break;
           }
           for (const name of declaration.names)
@@ -1235,7 +1268,9 @@ export class Compiler {
           if (low === undefined || high === undefined)
             this.fail(indexNode, 'Array index type requires finite bounds');
           const size = (high - low + 1) * element.size;
-          if (size < 1 || size > 32760) this.fail(node, 'Array size exceeds supported storage');
+          // Turbo Pascal's limit on a structure is 65520 bytes. Variables are
+          // held to the frame's; a type this large serves typecasts and views.
+          if (size < 1 || (high - low + 1) * element.byteSize > 65520) this.fail(node, 'Array size exceeds supported storage');
           element = {
             kind: 'array',
             size,
@@ -1303,6 +1338,7 @@ export class Compiler {
             });
           }
           this.bytecode.variantParts[part] = { shadow: cell, bytes: largest, cases };
+          ownParts.push({ part, byteStart: byteStart + bytes });
           for (let index = 0; index < largest; index++) {
             storage.push({ offset: cell, type: BYTE });
             all.push({ offset: cell++, type: BYTE });
@@ -1310,13 +1346,14 @@ export class Compiler {
           nested.push({ part, offset: 0 });
           return { cell, bytes: bytes + largest, storage, all, nested };
         };
+        const ownParts: { part: number; byteStart: number }[] = [];
         const placed = place(record.fields, record.variant, 0, 0, []);
         return {
           kind: 'record',
           size: placed.cell,
           byteSize: placed.bytes,
           fields,
-          ...(record.variant ? { layout: placed.storage, initialLayout: placed.all } : {}),
+          ...(record.variant ? { layout: placed.storage, initialLayout: placed.all, variantParts: ownParts } : {}),
           ...(placed.nested.length ? { variantRefresh: placed.nested } : {}),
         };
       }
@@ -1568,9 +1605,11 @@ export class Compiler {
         result: true,
       });
     for (const parameter of routine.parameters) {
-      // Each activation's open parameters get their own hidden High.
+      // Each activation's open parameters get their own hidden High, and its
+      // untyped ones the layout of what was passed.
       const open = parameter.openString || parameter.type.openArray;
-      const type = open ? { ...parameter.type } : parameter.type;
+      const untyped = parameter.type.kind === 'untyped';
+      const type = open || untyped ? { ...parameter.type } : parameter.type;
       if (parameter.openString) type.openString = true;
       const variable = this.variable(
         parameter.name,
@@ -1580,6 +1619,7 @@ export class Compiler {
       );
       variable.parameter = true;
       if (parameter.readOnly) variable.readOnly = true;
+      if (untyped) type.untypedLayout = this.variable(`$layout_${parameter.name}`, INTEGER, declaration);
       if (parameter.openString) {
         const capacity = this.variable(`$high_${parameter.name}`, INTEGER, declaration);
         type.openCapacity = capacity;
@@ -2447,7 +2487,7 @@ export class Compiler {
     if (!parts.length) return;
     if ('variable' in target) this.addressVariable(target.variable);
     else this.address(target.node);
-    this.literal(this.bytecode.variantRefreshes.push(parts) - 1, INTEGER);
+    this.literal(this.refreshListId(type), INTEGER);
     this.emit(Opcode.CSP, 2, InternalProcedure.VARIANT_REFRESH);
   }
   /** The arguments a call may store into: those passed to var parameters. */
@@ -2629,7 +2669,19 @@ export class Compiler {
           this.literal(routine.proceduralId, POINTER);
           return POINTER;
         }
-        const base = this.address(node.operand as Node);
+        // A pointer into a variant case views its record's bytes, so what is
+        // stored through it reaches the other cases.
+        const operand = node.operand as Node;
+        const chain = this.variantChain(operand);
+        if (chain.length) {
+          const inner = chain[0]!;
+          const record = this.expressionType(inner.base);
+          const base = this.expressionType(operand);
+          this.emitView(() => { this.address(inner.base); }, () => { this.literal(this.layoutId(record), INTEGER); }, record, 0,
+            this.refreshListId(record), chain.slice(1), () => { this.address(operand); });
+          return { ...POINTER, base };
+        }
+        const base = this.address(operand);
         return base.kind === 'untyped' ? POINTER : { ...POINTER, base };
       }
       case NodeType.POINTER_DEREF: {
@@ -2961,9 +3013,20 @@ export class Compiler {
     }
     const cast = this.untypedCast(node);
     if (cast) {
-      // T(x) for an untyped parameter x: its storage, seen as a T.
-      this.address(cast.operand);
+      this.castAddress(cast);
       return cast.type;
+    }
+    const record = this.fileRecordCast(node);
+    if (record) {
+      // FileRec(F) and TextRec(F): a record of the file's state, as DOS and
+      // the System unit keep it. Stores into it do not change the file.
+      const temp = this.temp(record.type);
+      this.address(record.operand);
+      this.addressVariable(temp);
+      this.literal(JSON.stringify(this.binaryLayout(record.type)), STRING);
+      this.emit(Opcode.CSP, 3, 333);
+      this.addressVariable(temp);
+      return record.type;
     }
     this.fail(node, 'Variable required');
   }
@@ -3044,10 +3107,13 @@ export class Compiler {
       // variant records, bring those records up to date afterwards.
       const written = this.writtenArguments(node);
       if (!written.length) return this.compileCall(node, expression);
-      const builtin = !this.lookupRoutine(node.name) && !node.receiver && this.modules.lookupProcedure(node.name) !== undefined;
+      const routine = node.receiver ? undefined : this.lookupRoutine(node.name);
+      const builtin = !routine && !node.receiver && this.modules.lookupProcedure(node.name) !== undefined;
+      // A routine may change an untyped parameter's bytes as a whole, by
+      // FillChar or a typecast; so may a standard routine.
       return this.withVariantSyncs(
         written.map((index) => node.arguments[index]!),
-        written.map(() => builtin),
+        written.map((index) => builtin || routine?.parameters[index]?.type.kind === 'untyped'),
         (targets) => {
           const args = [...node.arguments];
           written.forEach((index, at) => (args[index] = targets[at]!));
@@ -3078,10 +3144,14 @@ export class Compiler {
           this.openArrayArgument(argument, parameter);
           words += 2;
         } else if (parameter.type.kind === 'untyped') {
-          // Any variable: the routine sees only its address.
-          this.address(argument);
+          // Any variable: its address, and the layout of its bytes, which
+          // FillChar, Move and typecasts in the routine go by.
+          const type = this.address(argument);
           if (!parameter.readOnly) this.requireWritable(argument);
-          words++;
+          if (type.kind !== 'untyped') this.literal(this.layoutId(type), INTEGER);
+          else if (type.untypedLayout) this.loadVariable(type.untypedLayout);
+          else this.literal(-1, INTEGER);
+          words += 2;
         } else if (parameter.reference) {
           this.requireType({ ...argument, strictVarStrings: node.strictVarStrings }, parameter.type, this.address(argument), true);
           this.requireWritable(argument);
@@ -3239,7 +3309,10 @@ export class Compiler {
     }
     const variable: AsmVariable = { name: symbol.name, layout: this.binaryLayout(symbol.type) };
     if (symbol.type.kind === 'pointer' && symbol.type.base) variable.target = this.binaryLayout(symbol.type.base);
-    return { kind: 'variable', key: symbol, variable, displacement: offset, size: type.byteSize };
+    // An array's operand size is its element's, as the built-in assembler has it.
+    let sized = type;
+    while (sized.kind === 'array' && sized.element) sized = sized.element;
+    return { kind: 'variable', key: symbol, variable, displacement: offset, size: sized.byteSize };
   }
   /** asm ... end: the block runs on the machine's 8086, over the cells of
    * the variables it names, whose addresses are its arguments. */
@@ -3344,6 +3417,7 @@ export class Compiler {
     const index = this.bytecode.assembly.push(block) - 1;
     for (const variable of variables) {
       if ('node' in variable) this.address(variable.node);
+      else if (variable.view) this.addressVariable(variable);
       else this.emit(Opcode.LDA, this.scope.level - variable.scope.level, variable.offset);
     }
     this.literal(index, INTEGER);
@@ -3415,6 +3489,26 @@ export class Compiler {
     if (resolved.type !== NodeType.IDENTIFIER) return undefined;
     const symbol = this.lookup(String(resolved.name));
     return symbol?.kind === 'routine' ? symbol : undefined;
+  }
+  /** T(x) for an untyped parameter x: the bytes its caller passed, seen as
+   * a T, however large, as TByteArray(x) is. */
+  private castAddress(cast: { type: PascalType; operand: Node }): void {
+    const operand = this.qualified(cast.operand);
+    const source = operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
+    if (source?.kind !== 'variable') {
+      this.address(cast.operand);
+      return;
+    }
+    this.emitView(() => { this.address(cast.operand); }, () => { this.emitLayoutOf(source); }, cast.type, 0, -1, []);
+  }
+  /** FileRec(F) or TextRec(F) of a file variable. */
+  private fileRecordCast(node: Node): { type: PascalType; operand: Node } | undefined {
+    if (node.type !== NodeType.CALL) return undefined;
+    const { name, arguments: [operand, ...rest] } = node as CallNode;
+    const target = this.lookup(name);
+    if (!operand || rest.length || target?.kind !== 'type') return undefined;
+    if (target.type !== this.unitType('dos', 'FileRec') && target.type !== this.unitType('dos', 'TextRec')) return undefined;
+    return this.expressionType(operand).kind === 'file' ? { type: target.type, operand } : undefined;
   }
   /** A typecast T(x) of an untyped parameter x, which gives it a type. */
   private untypedCast(node: Node): { type: PascalType; operand: Node } | undefined {
@@ -3587,7 +3681,7 @@ export class Compiler {
     if (cast) {
       if (this.aggregate(cast.type))
         this.fail(node, 'Array or record value requires an assignment or matching parameter');
-      this.address(cast.operand);
+      this.castAddress(cast);
       this.emit(Opcode.LDI, this.typeCode(cast.type));
       return cast.type;
     }
@@ -3740,12 +3834,19 @@ export class Compiler {
     if (['delete', 'insert', 'str', 'val'].includes(name))
       return this.stringMutation(node, builtin);
     if (name === 'fillchar' || name === 'move') {
-      // They change bytes, so the runtime needs each variable's byte layout.
-      const layout = (argument: Node) => {
+      // They change bytes, so the runtime needs each variable's byte layout:
+      // its type's, or an untyped parameter's caller's.
+      const layout = (argument: Node): (() => void) => {
         const type = this.expressionType(argument);
-        if (type.kind === 'untyped' || type.openArray)
-          this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
-        return JSON.stringify(this.binaryLayout(type));
+        if (type.openArray) this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
+        if (type.kind === 'untyped') {
+          const operand = this.qualified(argument);
+          const source = operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
+          if (source?.kind !== 'variable') this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
+          return () => { this.emitLayoutOf(source); };
+        }
+        const text = JSON.stringify(this.binaryLayout(type));
+        return () => { this.literal(text, STRING); };
       };
       if (name === 'fillchar') {
         this.requireWritable(args[0]!);
@@ -3754,7 +3855,7 @@ export class Compiler {
         this.requireType(args[1]!, INTEGER, this.expression(args[1]!));
         if (!this.ordinal(this.expression(args[2]!)))
           this.fail(args[2]!, 'FillChar needs a byte or character value');
-        this.literal(target, STRING);
+        target();
         this.emit(Opcode.CSP, 4, builtin.procedureIndex);
       } else {
         this.requireWritable(args[1]!);
@@ -3763,8 +3864,8 @@ export class Compiler {
         this.address(args[0]!);
         this.address(args[1]!);
         this.requireType(args[2]!, INTEGER, this.expression(args[2]!));
-        this.literal(source, STRING);
-        this.literal(target, STRING);
+        source();
+        target();
         this.emit(Opcode.CSP, 5, builtin.procedureIndex);
       }
       return VOID;
@@ -3856,7 +3957,11 @@ export class Compiler {
       this.requireType(args[2]!, INTEGER, this.expression(args[2]!));
       if (args[3]) this.requireType(args[3], INTEGER, this.address(args[3]));
       else this.literal(-1, INTEGER);
-      this.literal(JSON.stringify(this.binaryLayout(buffer)), STRING);
+      // An untyped parameter's buffer goes by its caller's layout.
+      const operand = this.qualified(args[1]!);
+      const source = buffer.kind === 'untyped' && operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
+      if (source?.kind === 'variable') this.emitLayoutOf(source);
+      else this.literal(JSON.stringify(this.binaryLayout(buffer)), STRING);
       this.emit(Opcode.CSP, 5, builtin.procedureIndex);
       return VOID;
     }
@@ -4061,6 +4166,98 @@ export class Compiler {
       signed: (type.low ?? 0) < 0,
       ...(type.kind === 'set' ? { setByteOffset: Math.floor((type.low ?? 0) / 8) } : {}),
     };
+  }
+  /** A type's byte layout, by number. */
+  private layoutId(type: PascalType): number {
+    const layout = this.binaryLayout(type);
+    const key = JSON.stringify(layout);
+    let id = this.layoutIds.get(key);
+    if (id === undefined) {
+      id = this.bytecode.layouts.push(layout) - 1;
+      this.layoutIds.set(key, id);
+    }
+    return id;
+  }
+  /** Where each cell of a type lies in its bytes, the cases of variant parts
+   * and their shadows included: how a view shows bytes as the type. Arrays
+   * stay one element and a count, however large. */
+  private viewShape(type: PascalType): ViewShape {
+    if (type.kind === 'array' && type.element) {
+      const element = type.element;
+      return { kind: 'array', count: type.size / element.size, cells: element.size, bytes: element.byteSize, element: this.viewShape(element) };
+    }
+    if (type.kind === 'record' && type.fields) {
+      const fields = [...type.fields.values()].map((field) => ({
+        offset: field.offset,
+        cells: field.type.size,
+        byte: field.byteOffset ?? this.byteOffset(type, field.offset),
+        shape: this.viewShape(field.type),
+      }));
+      const shadows = (type.variantParts ?? []).map(({ part, byteStart }) => {
+        const info = this.bytecode.variantParts[part]!;
+        const shape: ViewShape = { kind: 'array', count: info.bytes, cells: 1, bytes: 1, element: { kind: 'cell', cell: this.binaryCell(BYTE) } };
+        return { offset: info.shadow, cells: info.bytes, byte: byteStart, shape };
+      });
+      return { kind: 'record', fields: [...fields, ...shadows] };
+    }
+    return { kind: 'cell', cell: this.binaryCell(type) };
+  }
+  private viewMapId(type: PascalType): number {
+    const map = this.viewShape(type);
+    const key = JSON.stringify(map);
+    let id = this.viewMapIds.get(key);
+    if (id === undefined) {
+      id = this.bytecode.viewMaps.push(map) - 1;
+      this.viewMapIds.set(key, id);
+    }
+    return id;
+  }
+  /** The list of variant parts a change to a type's bytes brings up to
+   * date, by number, or -1 for none. */
+  private refreshListId(type: PascalType): number {
+    const parts = this.variantRefreshes(type, 0);
+    if (!parts.length) return -1;
+    const key = JSON.stringify(parts);
+    let id = this.refreshIds.get(key);
+    if (id === undefined) {
+      id = this.bytecode.variantRefreshes.push(parts) - 1;
+      this.refreshIds.set(key, id);
+    }
+    return id;
+  }
+  /** The layout of a variable's bytes: its type's, or for an untyped
+   * parameter, the one its caller passed. */
+  private emitLayoutOf(variable: Variable): void {
+    if (variable.type.kind === 'untyped') {
+      if (variable.type.untypedLayout) this.loadVariable(variable.type.untypedLayout);
+      else this.literal(-1, INTEGER);
+    } else this.literal(this.layoutId(variable.type), INTEGER);
+  }
+  /** VIEW: an address that shows a variable's bytes as `type`, from `start`.
+   * The variable's variant parts follow what is stored through it, as do the
+   * variant cases in `syncs`; `cell` picks a cell of the view. */
+  private emitView(
+    target: () => void,
+    layout: () => void,
+    type: PascalType,
+    start: number,
+    refresh: number,
+    syncs: { base: Node; part: number; case: number }[],
+    cell?: () => void
+  ): void {
+    target();
+    layout();
+    this.literal(this.viewMapId(type), INTEGER);
+    this.literal(start, INTEGER);
+    this.literal(refresh, INTEGER);
+    this.literal(syncs.length, INTEGER);
+    for (const sync of syncs) {
+      this.address(sync.base);
+      this.literal(sync.part, INTEGER);
+      this.literal(sync.case, INTEGER);
+    }
+    cell?.();
+    this.emit(Opcode.CSP, 6 + syncs.length * 3 + (cell ? 1 : 0), InternalProcedure.VIEW);
   }
   /** The variant parts inside a type, at an offset, to bring up to date
    * after its bytes change as a whole. */

@@ -134,6 +134,9 @@ export class DosUnit {
         this.memory.write(Number(args[3]), (dot < 0 ? '' : rest.slice(dot)).slice(0, 4));
         return {};
       }
+      case 333:
+        this.fileRecord(a, Number(args[1]), this.layout(args[2]));
+        return {};
       case 329:
         return { result: ENVIRONMENT.length };
       case 330: {
@@ -144,6 +147,19 @@ export class DosUnit {
     return undefined;
   }
 
+  /** FileRec and TextRec: the handle DOS gave the file, its mode, its record
+   * or buffer size and the name it was assigned, in either record's layout. */
+  private fileRecord(file: number, record: number, layout: BinaryCell[]): void {
+    const state = this.files.fileRecord(file);
+    const bytes = new Uint8Array(layout.reduce((size, cell) => size + cell.bytes, 0));
+    const view = new DataView(bytes.buffer);
+    const modes = { none: 0xd7b0, closed: 0xd7b0, read: 0xd7b1, write: 0xd7b2, update: 0xd7b3 };
+    view.setUint16(0, state.handle, true);
+    view.setUint16(2, modes[state.mode], true);
+    view.setUint16(4, state.text ? 128 : state.recordSize & 0xffff, true);
+    for (let index = 0; index < Math.min(79, state.name.length); index++) bytes[48 + index] = state.name.charCodeAt(index) & 0xff;
+    decodeBinary(this.memory, record, layout, bytes);
+  }
   private layout(value: StackValue | undefined): BinaryCell[] {
     return JSON.parse(String(value ?? '[]')) as BinaryCell[];
   }
