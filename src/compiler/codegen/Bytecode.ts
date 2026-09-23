@@ -7,6 +7,22 @@
 
 import { inst, Opcode } from '../types';
 import type { AsmBlock } from '../asm/types';
+import type { BinaryCell } from '../runtime/BinaryCodec';
+
+/** A variant part of a record: its cases, each in cells of its own, and its
+ * shadow, the part's bytes as Turbo Pascal stores them. Offsets are cells
+ * from the start of the record. */
+export interface VariantPartInfo {
+  shadow: number;
+  bytes: number;
+  cases: {
+    /** The case's cells in byte order, with a nested variant part's shadow
+     * standing for that part. */
+    cells: { offset: number; cell: BinaryCell }[];
+    /** Variant parts inside the case, to bring up to date after it. */
+    nested: { part: number; offset: number }[];
+  }[];
+}
 
 /**
  * Interface for native procedure registry
@@ -73,6 +89,13 @@ export class Bytecode {
   /** The program's asm statements and inline code, which the machine's
    * 8086 runs over Pascal variables. */
   public assembly: AsmBlock[] = [];
+
+  /** Every variant part of the program's record types, by number. */
+  public variantParts: VariantPartInfo[] = [];
+
+  /** Lists of variant parts inside a type, by number, which a byte-level
+   * change to a variable of that type brings up to date. */
+  public variantRefreshes: { part: number; offset: number }[][] = [];
 
   /** Interrupt procedures, by the value @Handler gives: where each starts
    * and how many of the register parameters it declares. */

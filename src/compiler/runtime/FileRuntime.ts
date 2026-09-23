@@ -50,6 +50,11 @@ export class FileRuntime {
   private consoleHandle(mode: FileHandle['mode']): FileHandle {
     return { name: '', words: 0, recordSize: 128, layout: [], mode, position: 0, console: true };
   }
+  /** The name a file variable was assigned, and whether it is open. */
+  fileName(address: number): { name: string; open: boolean } | undefined {
+    const file = this.handles.get(Number(this.memory.read(address)));
+    return file && !file.console ? { name: file.name, open: file.mode !== 'closed' } : undefined;
+  }
   /** Whether a text file variable is the keyboard, open for reading. */
   isKeyboard(address: number): boolean {
     const file = this.handles.get(Number(this.memory.read(address)));
@@ -338,7 +343,7 @@ export class FileRuntime {
       case 78: {
         this.handle(address, 'write');
         const values = args.slice(1);
-        if (!typed || values.length !== file.words || file.layout.length !== file.words)
+        if (!typed || values.length !== file.words)
           throw new PascalError('Typed file record size mismatch');
         const data = encodeBinary(
           { read: (offset) => values[offset] ?? 0, write: () => undefined },
@@ -360,7 +365,7 @@ export class FileRuntime {
       }
       case 79: {
         this.handle(address, 'read');
-        if (!typed || Number(args[2]) !== file.words || file.layout.length !== file.words)
+        if (!typed || Number(args[2]) !== file.words)
           throw new PascalError('Typed file record size mismatch');
         const position = file.position * file.recordSize;
         const data = this.disk.read(file.name).slice(position, position + file.recordSize);

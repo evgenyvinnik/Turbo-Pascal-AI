@@ -4,6 +4,7 @@ import type { StackValue } from './Machine';
 import { TextConsole } from './TextConsole';
 import { GraphicsRuntime } from './GraphicsRuntime';
 import { Graph3 } from './Graph3';
+import { DosUnit, ENVIRONMENT } from './DosUnit';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont } from './StrokeFont';
@@ -26,6 +27,8 @@ interface Result {
   result?: StackValue;
   delay?: number;
   ioError?: number;
+  /** What the Dos unit's DosError becomes. */
+  dosError?: number;
 }
 
 /** Stateful standard-library services called by the VM's CSP instruction. */
@@ -48,7 +51,9 @@ export class RuntimeServices {
     private disk: VirtualFileSystem
   ) {
     this.files = new FileRuntime(host, disk);
+    this.dos = new DosUnit(host, disk, this.files);
   }
+  readonly dos: DosUnit;
   /** The characters of a null-terminated string. A nil PChar reads as empty. */
   private cString(address: number): string {
     let text = '';
@@ -157,6 +162,7 @@ export class RuntimeServices {
     this.graphics.reset();
     this.graph3.reset();
     this.files.reset();
+    this.dos.reset();
     this.clockOffset = 0;
     this.overlayBuffer = 0;
     this.overlayRetry = 0;
@@ -429,15 +435,7 @@ export class RuntimeServices {
           return {};
         }
         case 304:
-          return {
-            result:
-              (
-                { COMSPEC: 'C:\\COMMAND.COM', PATH: 'C:\\', TEMP: 'C:\\TEMP' } as Record<
-                  string,
-                  string
-                >
-              )[String(args[0]).toUpperCase()] ?? '',
-          };
+          return { result: ENVIRONMENT.find(([name]) => name === String(args[0]).toUpperCase())?.[1] ?? '' };
         case 305:
           return { result: 0x1606 };
         case 306:
@@ -446,6 +444,7 @@ export class RuntimeServices {
           return { result: this.disk.capacity };
       }
     }
+    if (index >= 310 && index <= 330) return this.dos.invoke(index, args);
     if (index >= 350 && index <= 370) return this.strings(index, args);
     if (index >= 500 && index < 550) return this.turbo3Graphics(index, args);
     return this.files.invoke(index, args, ioChecking);

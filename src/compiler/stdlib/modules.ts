@@ -34,6 +34,8 @@ export interface UnitDefinition {
   constants: Map<string, number>;
   /** Type definitions exported by the unit */
   types?: Map<string, TypeInfo>;
+  /** The unit's own types and constants, in Pascal, declared where it is used. */
+  declarations?: string;
   /** Variables exported by the unit */
   variables?: Map<string, { type: TypeInfo; value?: unknown }>;
   /** Whether this unit requires initialization */
@@ -136,7 +138,22 @@ export class ModuleLoader {
         ['DIRECTORY', 0x10],
         ['ARCHIVE', 0x20],
         ['ANYFILE', 0x3F],
+        ['FCARRY', 0x0001],
+        ['FPARITY', 0x0004],
+        ['FAUXILIARY', 0x0010],
+        ['FZERO', 0x0040],
+        ['FSIGN', 0x0080],
+        ['FOVERFLOW', 0x0800],
       ]),
+      declarations: `type
+        ComStr = string[127]; PathStr = string[79]; DirStr = string[67]; NameStr = string[8]; ExtStr = string[4];
+        Registers = record
+          case Integer of
+            0: (AX, BX, CX, DX, BP, SI, DI, DS, ES, Flags: Word);
+            1: (AL, AH, BL, BH, CL, CH, DL, DH: Byte)
+        end;
+        SearchRec = record Fill: array[1..21] of Byte; Attr: Byte; Time: Longint; Size: Longint; Name: string[12] end;
+        DateTime = record Year, Month, Day, Hour, Min, Sec: Word end;`,
     });
 
     // Register STRINGS unit (stub for null-terminated strings)
@@ -195,7 +212,43 @@ export class ModuleLoader {
    * Create DOS unit procedure stubs
    */
   private createDosProcs(): BuiltinDef[] {
+    const value = (name: string, type = TypeKind.INTEGER) => ({ name, type, mode: ParamMode.VALUE });
+    const out = (name: string, type = TypeKind.INTEGER) => ({ name, type, mode: ParamMode.VAR });
+    const record = (name: string, typeName: string) => ({ name, type: TypeKind.RECORD, mode: ParamMode.VAR, typeName });
+    const routine = (name: string, procedureIndex: number, params: BuiltinDef['params'], description: string, returnType?: TypeKind): BuiltinDef => ({
+      name,
+      isFunction: returnType !== undefined,
+      ...(returnType === undefined ? {} : { returnType }),
+      params,
+      description,
+      procedureIndex,
+    });
+    const S = TypeKind.STRING,
+      B = TypeKind.BOOLEAN;
     return [
+      routine('GetCBreak', 310, [out('Break', B)], 'Whether DOS checks for Ctrl+Break'),
+      routine('SetCBreak', 311, [value('Break', B)], 'Set whether DOS checks for Ctrl+Break'),
+      routine('GetVerify', 312, [out('Verify', B)], 'Whether DOS verifies disk writes'),
+      routine('SetVerify', 313, [value('Verify', B)], 'Set whether DOS verifies disk writes'),
+      routine('GetFAttr', 314, [out('F', TypeKind.FILE), out('Attr')], "A file's attributes"),
+      routine('SetFAttr', 315, [out('F', TypeKind.FILE), value('Attr')], "Set a file's attributes"),
+      routine('GetFTime', 316, [out('F', TypeKind.FILE), out('Time')], 'When a file was last written, packed'),
+      routine('SetFTime', 317, [out('F', TypeKind.FILE), value('Time')], 'Set when a file was last written'),
+      routine('FindFirst', 318, [value('Path', S), value('Attr'), record('F', 'SearchRec')], 'Find the first file that matches'),
+      routine('FindNext', 319, [record('F', 'SearchRec')], 'Find the next file that matches'),
+      routine('UnpackTime', 320, [value('P'), record('T', 'DateTime')], 'A packed time as a DateTime'),
+      routine('PackTime', 321, [record('T', 'DateTime'), out('P')], 'A DateTime as a packed time'),
+      routine('SwapVectors', 322, [], 'Swap the interrupt vectors the System unit took'),
+      routine('Keep', 323, [value('ExitCode')], 'End the program, staying resident'),
+      routine('Exec', 324, [value('Path', S), value('ComLine', S)], 'Run another program'),
+      routine('DosExitCode', 325, [], 'The exit code of the program Exec ran', TypeKind.INTEGER),
+      routine('FSearch', 326, [value('Path', S), value('DirList', S)], 'Find a file in a list of directories', S),
+      routine('FExpand', 327, [value('Path', S)], 'A file name with its drive and full path', S),
+      routine('FSplit', 328, [value('Path', S), out('Dir', S), out('Name', S), out('Ext', S)], 'Split a file name into its directory, name and extension'),
+      routine('EnvCount', 329, [], 'The number of environment strings', TypeKind.INTEGER),
+      routine('EnvStr', 330, [value('Index')], 'An environment string, NAME=value', S),
+      routine('Intr', 331, [value('IntNo'), record('Regs', 'Registers')], 'Call a software interrupt'),
+      routine('MsDos', 332, [record('Regs', 'Registers')], 'Call DOS, interrupt 21h'),
       {
         name: 'GetDate',
         isFunction: false,

@@ -27,6 +27,13 @@ export enum InternalProcedure {
   FREE_HEAP_COPY = 904,
   /** Run an asm block: its variables' addresses, then the block's index. */
   ASSEMBLY = 905,
+  /** After a store into one case of a variant part: the record's address,
+   * the part and the case. The part's bytes follow the case, and every
+   * other case follows the bytes. */
+  VARIANT_SYNC = 906,
+  /** After a variable's bytes changed as a whole: its address and the list
+   * of variant parts in its type, whose cases follow their bytes. */
+  VARIANT_REFRESH = 907,
 }
 
 /**

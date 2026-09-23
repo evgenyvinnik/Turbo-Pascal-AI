@@ -329,5 +329,14 @@ describe('Standard units beyond System', () => {
     expect(
       execute('program T; type R = record MemAvail: Integer end; var System: R; begin System.MemAvail := 4; WriteLn(System.MemAvail) end.')
     ).toEqual(['4']);
+    // A program may declare a System name again, as Turbo Pascal lets it.
+    expect(
+      execute(`program T; var Double: string[5]; procedure MaxInt; begin Write('proc ') end;
+      begin Double := 'abcdefg'; MaxInt; WriteLn(Double, ' ', System.MaxInt, ' ', SizeOf(System.Double)) end.`)
+    ).toEqual(['proc abcde 32767 8']);
+    expect(() => compile('program T; var x: Integer; x: Integer; begin end.')).toThrow(/Duplicate identifier "x"/);
+    // A variable's type cannot name the variable, even where a System type
+    // has that name, as Free Pascal's tbf0345 checks.
+    expect(() => compile('program T; var Word: array[1..2] of Word; begin end.')).toThrow(/Error in type definition/);
   });
 });
