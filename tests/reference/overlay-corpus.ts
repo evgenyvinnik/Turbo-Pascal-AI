@@ -45,6 +45,25 @@ end.`,
     output: ['6', '327689', '327681', '1.0', '1065353217'],
   },
   {
+    name: 'overlay-pointers-of-another-type-see-bytes',
+    source: `program T;
+type TBytes = array[0..3] of Byte; PBytes = ^TBytes; TR = packed record a: Byte; w: Word end;
+  PNode = ^TNode; TNode = record v: Integer; next: PNode end;
+var l: LongInt; pw: ^Word; pb: ^Byte; ps: ^Single; pt: PBytes; p: Pointer; r: TR;
+  head, n: PNode; pp: ^PNode; i: Integer;
+procedure Take(var x: LongInt); var pv: ^Word; begin pv := @x; pv^ := 1 end;
+begin
+  l := $00050006; pw := @l; WriteLn(pw^); pw^ := 9; WriteLn(l); p := @l; pb := p; pb^ := 1; WriteLn(l);
+  l := $3F800000; ps := @l; WriteLn(ps^:0:1); pt := @l; WriteLn(pt^[3]); pt^[0] := 7; WriteLn(l);
+  r.w := $0102; pb := @r.w; WriteLn(pb^); Inc(pb^); WriteLn(r.w);
+  l := $00050006; Take(l); WriteLn(l);
+  head := nil;
+  for i := 1 to 3 do begin pp := @head; while pp^ <> nil do pp := @pp^^.next; New(pp^); pp^^.v := i; pp^^.next := nil end;
+  n := head; while n <> nil do begin Write(n^.v); n := n^.next end; WriteLn
+end.`,
+    output: ['6', '327689', '327681', '1.0', '63', '1065353223', '2', '259', '327681', '123'],
+  },
+  {
     name: 'overlay-address-is-untyped-by-default',
     source: `program T;
 type TA = array[0..3] of Byte; PA = ^TA;
