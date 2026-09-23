@@ -2551,9 +2551,10 @@ export class Compiler {
         return this.setLiteralType(node);
       case NodeType.ADDRESS_OF: {
         if (this.routineAddress(node.operand as Node)) return POINTER;
-        // The address of an untyped parameter is an untyped Pointer.
+        // The address of an untyped parameter is an untyped Pointer, as is
+        // any address unless {$T+} types it.
         const base = this.expressionType(node.operand as Node);
-        return base.kind === 'untyped' ? POINTER : { ...POINTER, base };
+        return base.kind === 'untyped' || node.typedPointer !== true ? POINTER : { ...POINTER, base };
       }
       case NodeType.POINTER_DEREF: {
         const pointer = this.expressionType(node.pointer as Node);
@@ -2679,10 +2680,10 @@ export class Compiler {
           const base = this.expressionType(operand);
           this.emitView(() => { this.address(inner.base); }, () => { this.literal(this.layoutId(record), INTEGER); }, record, 0,
             this.refreshListId(record), chain.slice(1), () => { this.address(operand); });
-          return { ...POINTER, base };
+          return node.typedPointer === true ? { ...POINTER, base } : POINTER;
         }
         const base = this.address(operand);
-        return base.kind === 'untyped' ? POINTER : { ...POINTER, base };
+        return base.kind === 'untyped' || node.typedPointer !== true ? POINTER : { ...POINTER, base };
       }
       case NodeType.POINTER_DEREF: {
         const type = this.address(node);
@@ -2914,6 +2915,14 @@ export class Compiler {
       const variable = node.internalVariable as Variable; this.addressVariable(variable); return variable.type;
     }
     if (node.type === NodeType.POINTER_DEREF) {
+      // PWord(@L)^: the address of a variable, as a pointer to another type,
+      // is that variable seen as the type, as a typecast is.
+      const reinterpreted = this.addressReinterpretation(node.pointer as Node);
+      if (reinterpreted) {
+        this.emitView(() => { this.address(reinterpreted.operand); }, () => { this.literal(this.layoutId(reinterpreted.source), INTEGER); },
+          reinterpreted.type, 0, this.refreshListId(reinterpreted.source), this.variantChain(reinterpreted.operand));
+        return reinterpreted.type;
+      }
       const pointer = this.expression(node.pointer as Node);
       if (pointer.kind !== 'pointer' || !pointer.base || pointer.base.kind === 'void')
         this.fail(node, 'Typed pointer required');
@@ -3015,6 +3024,11 @@ export class Compiler {
     if (cast) {
       this.castAddress(cast);
       return cast.type;
+    }
+    const variableCast = this.variableCast(node);
+    if (variableCast) {
+      this.castView(variableCast);
+      return variableCast.type;
     }
     const record = this.fileRecordCast(node);
     if (record) {
@@ -3501,6 +3515,48 @@ export class Compiler {
     }
     this.emitView(() => { this.address(cast.operand); }, () => { this.emitLayoutOf(source); }, cast.type, 0, -1, []);
   }
+  /** T(V) of a variable V of another type: V's storage seen as a T. */
+  private variableCast(node: Node): { type: PascalType; operand: Node; source: PascalType } | undefined {
+    if (node.type !== NodeType.CALL || (node as CallNode).receiver) return undefined;
+    const { name, arguments: [operand, ...rest] } = node as CallNode;
+    const target = this.lookup(name);
+    if (!operand || rest.length || target?.kind !== 'type') return undefined;
+    const inner = this.qualified(operand);
+    const designator =
+      [NodeType.FIELD_ACCESS, NodeType.ARRAY_ACCESS, NodeType.POINTER_DEREF].includes(inner.type) ||
+      (inner.type === NodeType.IDENTIFIER && (inner.internalVariable !== undefined || this.lookup(String(inner.name))?.kind === 'variable')) ||
+      (inner.type === NodeType.CALL && (this.variableCast(inner) !== undefined || this.untypedCast(inner) !== undefined));
+    if (!designator) return undefined;
+    const source = this.expressionType(operand);
+    if (source.kind === 'untyped' || source.kind === 'file' || target.type.kind === 'file' || target.type.object || source.object) return undefined;
+    return { type: target.type, operand, source };
+  }
+  /** A variable typecast: the variable's address where the layouts match,
+   * or else a view of its bytes. Their sizes must match, as in Turbo Pascal. */
+  private castView(cast: { type: PascalType; operand: Node; source: PascalType }): void {
+    if (cast.type.byteSize !== cast.source.byteSize) this.fail(cast.operand, 'Invalid typecast: the variable and the type differ in size');
+    if (JSON.stringify(this.binaryLayout(cast.type)) === JSON.stringify(this.binaryLayout(cast.source))) {
+      this.address(cast.operand);
+      return;
+    }
+    this.emitView(() => { this.address(cast.operand); }, () => { this.literal(this.layoutId(cast.source), INTEGER); }, cast.type, 0,
+      this.refreshListId(cast.source), this.variantChain(cast.operand));
+  }
+  /** P(@V) for a pointer type P = ^T and a variable V of another layout:
+   * what P(@V)^ reads is V's bytes as a T. */
+  private addressReinterpretation(node: Node): { type: PascalType; operand: Node; source: PascalType } | undefined {
+    if (node.type !== NodeType.CALL || (node as CallNode).receiver) return undefined;
+    const { name, arguments: [argument, ...rest] } = node as CallNode;
+    const target = this.lookup(name);
+    if (!argument || rest.length || argument.type !== NodeType.ADDRESS_OF || target?.kind !== 'type') return undefined;
+    const base = target.type.kind === 'pointer' ? target.type.base : undefined;
+    const operand = argument.operand as Node;
+    if (!base || base.kind === 'void' || this.routineAddress(operand)) return undefined;
+    const source = this.expressionType(operand);
+    if (source.kind === 'untyped' || source.kind === 'file' || base.kind === 'file' || source.object || base.object) return undefined;
+    if (JSON.stringify(this.binaryLayout(base)) === JSON.stringify(this.binaryLayout(source))) return undefined;
+    return { type: base, operand, source };
+  }
   /** FileRec(F) or TextRec(F) of a file variable. */
   private fileRecordCast(node: Node): { type: PascalType; operand: Node } | undefined {
     if (node.type !== NodeType.CALL) return undefined;
@@ -3688,8 +3744,20 @@ export class Compiler {
     if (shadow?.kind === 'type') {
       if (!expression || node.arguments.length !== 1)
         this.fail(node, 'Typecast requires one value');
-      const target = shadow.type,
-        source = this.expression(node.arguments[0]!);
+      const target = shadow.type;
+      // A variable typecast that no value conversion does, as LongInt(S) of
+      // a Single, reads the variable's bytes as the type.
+      const variableCast = this.variableCast(node);
+      if (variableCast) {
+        const from = variableCast.source;
+        if (!(this.ordinal(target) && this.ordinal(from)) && !(target.kind === 'pointer' && from.kind === 'pointer')) {
+          if (this.aggregate(target)) this.fail(node, 'Array or record value requires an assignment or matching parameter');
+          this.castView(variableCast);
+          this.emit(Opcode.LDI, this.typeCode(target));
+          return target;
+        }
+      }
+      const source = this.expression(node.arguments[0]!);
       // A pointer typecast keeps the address and changes what it points to.
       if (target.kind === 'pointer' && source.kind === 'pointer') return target;
       if (!this.ordinal(target) || !this.ordinal(source))

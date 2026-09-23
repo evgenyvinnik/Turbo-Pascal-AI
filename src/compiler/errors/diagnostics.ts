@@ -87,7 +87,7 @@ const COMPILE_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^IN requires|^Invalid set operator$|^AND, OR and XOR require|^NOT requires|^Numeric operands required/, 41],
   [/^Unexpected token in expression:|^Invalid constant expression$/, 42], [/^Unknown record field\b/, 44],
   [/^Expected 'to' or 'downto',/, 58], [/^Unresolved forward declaration\b/, 59],
-  [/^Ordinal typecast required$|^Typecast requires one value$/, 61], [/^Division by zero/, 62],
+  [/^Ordinal typecast required$|^Typecast requires one value$|^Invalid typecast/, 61], [/^Division by zero/, 62],
   [/^ReadLn\/WriteLn require a text file$|^Untyped files require BlockRead\/BlockWrite$/, 63],
   [/^Read requires a scalar or string variable$|^Write requires a scalar or string value$/, 64],
   [/^Pointer variable required$/, 65], [/^Concat requires strings$/, 67],

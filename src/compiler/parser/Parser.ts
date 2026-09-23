@@ -1570,7 +1570,8 @@ export class Parser {
     if (this.isSymbol('@')) {
       this.advance();
       const operand = this.parseVariable();
-      return this.node(NodeType.ADDRESS_OF, { operand }, line);
+      // {$T+} makes @X a pointer to X's type; by default it is untyped.
+      return this.node(NodeType.ADDRESS_OF, { operand, typedPointer: this.switches.typedPointers }, line);
     }
 
     // Parenthesized expression
