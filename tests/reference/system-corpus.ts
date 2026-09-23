@@ -68,6 +68,31 @@ end.`,
     output: ['to output', 'same line', 'first line 42 FALSE TRUE'],
   },
   {
+    name: 'system-output-can-be-redirected-and-passed',
+    source: `program T; var f: Text; s: string;
+procedure Say(var target: Text; const t: string); begin WriteLn(target, '> ', t) end;
+begin
+  Say(Output, 'screen'); Flush(Output);
+  Assign(Output, 'log.txt'); Rewrite(Output); WriteLn('into the log'); Say(Output, 'too'); Close(Output);
+  Assign(Output, ''); Rewrite(Output);
+  Assign(f, 'log.txt'); Reset(f);
+  while not Eof(f) do begin ReadLn(f, s); WriteLn('log: ', s) end;
+  Close(f)
+end.`,
+    output: ['> screen', 'log: into the log', 'log: > too'],
+  },
+  {
+    name: 'system-names-can-be-qualified-with-the-unit',
+    source: `program T; type R = record Length: Integer end;
+var i: System.Integer; s: string; c: System.Char; System2: R;
+begin
+  i := System.MaxInt; s := 'abc'; System2.Length := System.Length(s);
+  System.WriteLn(i, System.Length(s):3, ' ', System.Pi:5:2, ' ', System2.Length, ' ', System.Ord('A'));
+  c := System.UpCase('q'); System.Write(c); System.WriteLn
+end.`,
+    output: ['32767  3  3.14 3 65', 'Q'],
+  },
+  {
     name: 'system-pchar-holds-text-and-is-indexed',
     source: `program T;
 const Names: array[0..1] of PChar = ('one', 'two'); Greeting: PChar = 'hi';

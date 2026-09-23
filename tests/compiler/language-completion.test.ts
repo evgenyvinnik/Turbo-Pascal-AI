@@ -185,15 +185,20 @@ it('reads hexadecimal integers and adjacent Pascal character-code strings', () =
   expect(() => compile('program T;begin WriteLn(#256)end.')).toThrow(/Character code out of range/);
 });
 
-it('unwinds nested function calls when jumping to an outer label', () => {
-  expect(
+it('keeps goto within the block that declares its label, as Turbo Pascal does', () => {
+  expect(() =>
     execute(`program T;label done;var n:Integer;
     function Outer:Integer;
       function Inner:Integer;
       begin n:=7;goto done;Inner:=99 end;
     begin Outer:=100+Inner end;
-    begin n:=1;n:=2+Outer;n:=99;done:WriteLn(n);WriteLn(3+4)end.`).getOutput()
-  ).toEqual(['7', '7']);
+    begin n:=1;n:=2+Outer;n:=99;done:WriteLn(n);WriteLn(3+4)end.`)
+  ).toThrow(/Label not within current block/);
+  expect(
+    execute(`program T;procedure P;label again;var n:Integer;
+    begin n:=0;again:Inc(n);if n<3 then goto again;WriteLn(n) end;
+    begin P end.`).getOutput()
+  ).toEqual(['3']);
 });
 
 it('compiles CRT, Graph and DOS services through their actual Pascal signatures', () => {

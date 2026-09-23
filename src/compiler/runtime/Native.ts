@@ -25,6 +25,8 @@ export enum InternalProcedure {
   COPY_TO_HEAP = 903,
   /** Release a block from COPY_TO_HEAP when the routine returns. */
   FREE_HEAP_COPY = 904,
+  /** Run an asm block: its variables' addresses, then the block's index. */
+  ASSEMBLY = 905,
 }
 
 /**

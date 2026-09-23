@@ -13,6 +13,8 @@ export enum TokenType {
   STRING = 4,
   EOF = 5,
   RESERVED_WORD = 6,
+  /** The text of an asm statement, up to its `end`. */
+  ASSEMBLY = 7,
 }
 
 /**
@@ -78,6 +80,8 @@ export const RESERVED_WORDS: readonly string[] = [
   'label',
   'goto',
   'packed',
+  'asm',
+  'inline',
 ] as const;
 
 /**

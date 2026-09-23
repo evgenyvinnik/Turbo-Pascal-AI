@@ -36,12 +36,14 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Every mode fills a 4:3 monitor, so the CGA's 320x200 and 640x200
+  // screens stretch as they did on one.
   canvas: {
     imageRendering: 'pixelated',
     backgroundColor: dosColors.black,
-    maxWidth: '100vw',
-    maxHeight: '100vh',
-    objectFit: 'contain',
+    width: 'min(100vw, calc(100vh * 4 / 3))',
+    height: 'auto',
+    aspectRatio: '4 / 3',
   },
   hint: {
     position: 'absolute',

@@ -53,6 +53,13 @@ begin end.`,
     reject: true,
   },
   {
+    name: 'reject-goto-out-of-a-routine',
+    source: `program T; label done;
+procedure P; begin goto done end;
+begin P; done: WriteLn('here') end.`,
+    reject: true,
+  },
+  {
     name: 'empty-case-branches-still-check-their-labels',
     source: `program T; var c: Char;
 begin c := 'b'; case c of 'a': ; 'b': WriteLn('two'); else WriteLn('other') end end.`,

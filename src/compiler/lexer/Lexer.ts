@@ -24,6 +24,9 @@ export class Lexer {
   /** Whether to print tokens for debugging */
   private readonly debugPrintTokens: boolean;
 
+  /** After `asm`, the statement's text comes as one token. */
+  private assemblyNext = false;
+
   /**
    * Creates a new Lexer
    * @param stream - The character stream to tokenize
@@ -80,6 +83,10 @@ export class Lexer {
    * @throws PascalError if an unexpected character is encountered
    */
   private readNextToken(): Token {
+    if (this.assemblyNext) {
+      this.assemblyNext = false;
+      return this.readAssembly();
+    }
     this.skipWhitespace();
 
     const lineNumber = this.stream.getLineNumber();
@@ -378,10 +385,57 @@ export class Lexer {
     // Check if it's a reserved word (case-insensitive)
     const lowerValue = value.toLowerCase();
     if (this.reservedWordSet.has(lowerValue)) {
+      if (lowerValue === 'asm') this.assemblyNext = true;
       return this.createToken(value, TokenType.RESERVED_WORD, lineNumber);
     }
 
     return this.createToken(value, TokenType.IDENTIFIER, lineNumber);
+  }
+
+  /**
+   * Reads an asm statement's text, up to the `end` that closes it. Comments
+   * become spaces, keeping their line breaks, which separate instructions.
+   */
+  private readAssembly(): Token {
+    const lineNumber = this.stream.getLineNumber();
+    let text = '';
+    const take = (): string => this.stream.next() ?? '';
+    for (;;) {
+      const ch = this.stream.peek();
+      if (ch === null) throw new PascalError('Unexpected end of file in asm statement', lineNumber);
+      if (ch === '{' || (ch === '(' && this.peekAhead(1) === '*')) {
+        const close = ch === '{' ? '}' : '*)';
+        take();
+        if (close === '*)') take();
+        for (;;) {
+          const next = this.stream.peek();
+          if (next === null) throw new PascalError('Unterminated comment', lineNumber);
+          if (close === '}' ? next === '}' : next === '*' && this.peekAhead(1) === ')') break;
+          text += take() === '\n' ? '\n' : ' ';
+        }
+        take();
+        if (close === '*)') take();
+        text += ' ';
+      } else if (ch === "'" || ch === '"') {
+        text += take();
+        for (;;) {
+          const next = this.stream.peek();
+          if (next === null || next === '\n') throw new PascalError('String constant exceeds line', this.stream.getLineNumber());
+          text += take();
+          if (next === ch) break;
+        }
+      } else if (this.isIdentifierStart(ch) || ch === '@') {
+        let word = '';
+        for (let at = 0; ; at++) {
+          const next = at === 0 ? ch : this.peekAhead(at);
+          if (next === null || !(this.isIdentifierChar(next) || (next === '@' && /^@*$/.test(word)))) break;
+          word += next;
+        }
+        if (word.toLowerCase() === 'end') break;
+        for (let i = 0; i < word.length; i++) text += take();
+      } else text += take();
+    }
+    return this.createToken(text, TokenType.ASSEMBLY, lineNumber);
   }
 
   /**

@@ -16,11 +16,22 @@ interface FileHandle {
   layout: BinaryCell[];
   mode: 'closed' | 'read' | 'write' | 'update';
   position: number;
+  /** The console, as Input and Output are and Assign(F, '') makes a file:
+   * the machine reads and writes it, not the drive. */
+  console?: boolean;
+  /** Turbo3's keyboard: reads take keys as they are pressed, without echo. */
+  keyboard?: boolean;
 }
+
+/** The handles Input and Output start with. */
+export const CONSOLE_INPUT = 1;
+export const CONSOLE_OUTPUT = 2;
+/** Turbo3's Kbd. */
+export const CONSOLE_KEYBOARD = 3;
 
 export class FileRuntime {
   private handles = new Map<number, FileHandle>();
-  private nextHandle = 1;
+  private nextHandle = CONSOLE_KEYBOARD + 1;
   private lastError = 0;
   constructor(
     private memory: MemoryAccess,
@@ -28,11 +39,32 @@ export class FileRuntime {
   ) {
     // Every run starts in the root directory, whatever the last one left.
     disk.changeDirectory('\\');
+    this.openConsole();
+  }
+  /** Input and Output, open on the console, and Turbo3's Kbd. */
+  private openConsole(): void {
+    this.handles.set(CONSOLE_INPUT, this.consoleHandle('read'));
+    this.handles.set(CONSOLE_OUTPUT, this.consoleHandle('write'));
+    this.handles.set(CONSOLE_KEYBOARD, { ...this.consoleHandle('read'), keyboard: true });
+  }
+  private consoleHandle(mode: FileHandle['mode']): FileHandle {
+    return { name: '', words: 0, recordSize: 128, layout: [], mode, position: 0, console: true };
+  }
+  /** Whether a text file variable is the keyboard, open for reading. */
+  isKeyboard(address: number): boolean {
+    const file = this.handles.get(Number(this.memory.read(address)));
+    return Boolean(file?.keyboard && file.mode === 'read');
+  }
+  /** Whether a text file variable is the console, and open in that mode. */
+  isConsole(address: number, mode: 'read' | 'write'): boolean {
+    const file = this.handles.get(Number(this.memory.read(address)));
+    return Boolean(file?.console && file.mode === mode);
   }
   reset(): void {
     this.disk.changeDirectory('\\');
     this.handles.clear();
-    this.nextHandle = 1;
+    this.openConsole();
+    this.nextHandle = CONSOLE_KEYBOARD + 1;
     this.lastError = 0;
   }
   private handle(address: number, mode?: FileHandle['mode']): FileHandle {
@@ -88,10 +120,14 @@ export class FileRuntime {
     if (
       ![
         25, 26, 46, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 82,
-        97, 98, 99, 108, 109, 116,
+        97, 98, 99, 108, 109, 116, 460, 463, 464, 465,
       ].includes(index)
     )
       return undefined;
+    // Turbo3's LongFileSize, LongFilePos and LongSeek: FileSize, FilePos and
+    // Seek with real numbers.
+    if (index === 463 || index === 464) return this.invoke(index === 463 ? 67 : 66, args, checked);
+    if (index === 465) return this.invoke(68, [args[0] ?? 0, Math.trunc(Number(args[1]))], checked);
     const empty = [25, 26, 66, 67, 97, 98].includes(index) ? { result: 0 } : {};
     if (this.lastError) {
       if (checked) throw new PascalError(`I/O error ${String(this.lastError)}`);
@@ -117,6 +153,12 @@ export class FileRuntime {
       this.memory.write(Number(args[1]), this.disk.currentDirectory);
       return {};
     }
+    if (index === 460) {
+      const id = this.nextHandle++;
+      this.handles.set(id, { ...this.consoleHandle('closed'), keyboard: true });
+      this.memory.write(address, id);
+      return {};
+    }
     // Writes reach the drive at once, so Flush only checks the file is open.
     if (index === 82) {
       this.handle(address, 'write');
@@ -125,8 +167,11 @@ export class FileRuntime {
     if (index === 46) {
       const id = this.nextHandle++;
       const layout = JSON.parse(String(args[3] ?? '[]')) as BinaryCell[];
+      // An empty name is the console, as in Turbo Pascal.
+      const console = String(args[1]) === '';
       this.handles.set(id, {
-        name: this.disk.resolveName(String(args[1])),
+        ...(console ? { console } : {}),
+        name: console ? '' : this.disk.resolveName(String(args[1])),
         words: Number(args[2] ?? 0),
         layout,
         recordSize: layout.length ? layout.reduce((size, cell) => size + cell.bytes, 0) : 128,
@@ -143,6 +188,20 @@ export class FileRuntime {
     )
       return undefined;
     const file = this.handle(address);
+    // The console opens and closes without the drive; the machine does its
+    // reading and writing.
+    if (file.console) {
+      if (index === 47 || index === 48 || index === 49) {
+        file.mode = index === 47 ? 'read' : 'write';
+        return {};
+      }
+      if (index === 50) {
+        file.mode = 'closed';
+        return {};
+      }
+      this.handle(address, [25, 26, 72, 73, 97, 98].includes(index) ? 'read' : 'write');
+      throw new PascalError('Invalid file operation on the console');
+    }
     const typed = file.words > 0;
     const length = () =>
       Math.floor(this.disk.read(file.name).length / (file.words === 0 ? 1 : file.recordSize));

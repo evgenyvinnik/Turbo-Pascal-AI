@@ -169,7 +169,7 @@ function publish(session: Session, extra?: string): void {
   const graphicsChanged = screen.graphics?.revision !== graphics.revision;
   useProgramScreenStore.setState({
     ...(consoleChanged ? { console: { cols: console.cols, rows: console.rows, chars: [...console.chars], attributes: console.attributes.slice(), x: cursor.x, y: cursor.y, cursorVisible: console.cursorVisible, revision: console.revision, attribute: console.attribute } } : {}),
-    ...(graphicsChanged ? { graphics: { width: graphics.width, height: graphics.height, pixels: graphics.pixels.slice(), revision: graphics.revision } } : {}),
+    ...(graphicsChanged ? { graphics: { width: graphics.width, height: graphics.height, pixels: graphics.display(), revision: graphics.revision } } : {}),
     ...((console.active && consoleChanged) || (graphics.initialized && graphicsChanged) ? { visible: true, kind: graphics.initialized ? 'graphics' : 'text' } : {}),
   });
   if (!graphics.initialized && screen.kind === 'graphics' && screen.visible) useProgramScreenStore.setState({ kind: 'text', visible: console.active });

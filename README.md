@@ -16,7 +16,8 @@ A web-based recreation of the classic Turbo Pascal V7 IDE, bringing the authenti
 - **P-Machine VM**: Execute Pascal programs in the browser
 - **Program runtime**: Console input, CRT video memory, VGA graphics, sound, delays, and persistent virtual files
 - **Source debugger**: Trace, step over, go to cursor, conditional breakpoints, watches, call stack, and evaluate/modify
-- **Native DOS tools**: Real x86 execution, DEBUG/DEBUGX, and a browser-hosted Free Pascal compiler for assembly programs
+- **Built-in assembler**: `asm` statements, `assembler` routines, `inline` machine code and `interrupt` procedures run on an 8086 inside the P-machine
+- **Native DOS tools**: Real x86 execution, DEBUG/DEBUGX, and a browser-hosted Free Pascal compiler for assembly beyond the P-machine's
 - **Help**: Linked language, library, IDE, and diagnostic topics with keyboard navigation
 - **Offline Support**: PWA caching for the IDE; the DOS runtime and compiler load on demand
 - **Multi-language**: English, German, and Russian translations
@@ -151,8 +152,9 @@ src/
 │   ├── parser/        # AST parser
 │   ├── symbols/       # Symbol tables
 │   ├── codegen/       # Bytecode generator, Real48 and 8087 arithmetic
-│   ├── runtime/       # P-machine VM, virtual files, source debugger
-│   ├── stdlib/        # Standard library (System, CRT, Graph, DOS)
+│   ├── asm/           # Built-in assembler and inline machine code decoder
+│   ├── runtime/       # P-machine VM and its 8086, virtual files, source debugger
+│   ├── stdlib/        # Standard units (System, Crt, Graph, Dos, Graph3, ...)
 │   └── errors/        # Pascal diagnostics
 ├── components/        # Painters that draw into the cell buffer
 ├── routes/            # TanStack Router
@@ -240,17 +242,20 @@ copied for the routine. Standard functions such as `Ord`, `Chr`, `SizeOf` and
 constant that cannot fit is reported then rather than at run time. Beyond the
 core language:
 
-- **Units:** source units with interface/implementation sections, private declarations, qualified names, dependencies, and ordered initialization. Compilation resolves unsaved buffers and the virtual drive, including configured unit/include directories. Units can compile independently; run a program that uses them to execute initialization. Source errors, breakpoints, and watches retain the originating unit/include file.
+- **Units:** source units with interface/implementation sections, private declarations, qualified names (the standard units' too, as in `System.MemAvail` or `Crt.TextAttr`), dependencies, and ordered initialization. Compilation resolves unsaved buffers and the virtual drive, including configured unit/include directories. Units can compile independently; run a program that uses them to execute initialization. Source errors, breakpoints, and watches retain the originating unit/include file.
 - **Objects:** fields, inheritance, virtual methods, constructors/destructors, `Self`, `inherited`, private members, constructor `Fail`, `New`/`Dispose`, and object value assignment. FAR procedural variables support callbacks, signature checks, and nil/`Assigned`.
 - **Sets and records:** set constructors, ranges, membership, union/intersection/difference, comparisons, and `with` scopes.
-- **Pointers and control flow:** typed pointers, recursive records, address-of, `New`/`Dispose`, nil checks, labels, and local/nonlocal `goto`.
+- **Pointers and control flow:** typed pointers, recursive records, address-of, `New`/`Dispose`, nil checks, labels, and `goto` within the routine or program block that declares the label.
 - **Strings and sizes:** short-string capacities, length byte `s[0]`, `Delete`, `Insert`, `Str`, `Val`, and Pascal byte sizes from `SizeOf`.
 - **Files:** text, typed, and untyped files; `Assign`, `Reset`, `Rewrite`, `Append`, `Close`, `Seek`, `FilePos`, `FileSize`, `Eof`/`Eoln`, `Truncate`, `Erase`, `Rename`, and `BlockRead`/`BlockWrite`. Typed and untyped files share little-endian binary encoding, including six-byte Real values. `{$I-}` and `IOResult` support recoverable file and console-input errors.
-- **CRT:** cursor positioning, windows, colors, clearing, line insertion/deletion, scrolling, text modes, keyboard input, sound, and nonblocking delays.
+- **CRT:** cursor positioning, windows, colors, clearing, line insertion/deletion, scrolling, text modes, keyboard input, sound, and nonblocking delays. `TextAttr`, `WindMin`, `WindMax` and `LastMode` follow the screen, and storing into them changes it; `CheckBreak`, `CheckEOF`, `CheckSnow` and `DirectVideo` are there for programs that set them.
 - **Graph:** a palette-index VGA framebuffer with pixels, lines, rectangles, bars, arcs/ellipses, sectors, flood fills, viewports, line/fill styles, and bitmap/stroke text. The default font is the IBM 8×8 bitmap. Non-default fonts load `.CHR` files from the virtual drive using the path supplied to `InitGraph`; original Borland font files are not bundled. `SetUserCharSize` supports custom stroke scaling.
-- **DOS:** date/time getters and setters use a virtual clock; environment values and disk-capacity queries refer to the virtual DOS environment.
-- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `TypeOf`, `GetMem`/`FreeMem`, `Mark`/`Release`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `SeekEof`/`SeekEoln`, `MkDir`/`ChDir`/`RmDir`/`GetDir`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables that share another variable's storage. The System variables `ExitCode` (the program's exit status), `RandSeed` (the seed of Borland's generator, so setting it repeats a sequence), `FileMode`, `Test8087` and `Test8086` exist. `Input` and `Output` name the console in `Read`, `Write`, `Eof`, `Eoln` and `Flush`. Each run starts in the drive's root directory.
+- **DOS:** date/time getters and setters use a virtual clock; environment values and disk-capacity queries refer to the virtual DOS environment. `SetIntVec` and `GetIntVec` install interrupt procedures (see [Built-in assembler](#built-in-assembler)).
+- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `TypeOf`, `GetMem`/`FreeMem`, `Mark`/`Release`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `SeekEof`/`SeekEoln`, `MkDir`/`ChDir`/`RmDir`/`GetDir`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables that share another variable's storage. The System variables `ExitCode` (the program's exit status), `RandSeed` (the seed of Borland's generator, so setting it repeats a sequence), `FileMode`, `Test8087` and `Test8086` exist. Exit procedures installed in `ExitProc` run, the last installed first, when the program ends, calls `Halt` or stops on a run-time error; there `ExitCode` and `ErrorAddr` describe the error, and an exit procedure that clears `ErrorAddr` ends the program quietly. `HeapOrg`, `HeapPtr` and `HeapEnd` bound the heap, which grows down from `HeapOrg`. `Input` and `Output` are text files on the console: `Assign(Output, 'LOG.TXT')` sends plain `Write` to a file, `Assign(Output, '')` brings it back, and both can be passed as `var` Text parameters. Each run starts in the drive's root directory.
 - **Strings and Printer:** under `{$X+}` a `PChar` holds a string constant in storage of its own that ends with `#0`, can be indexed and moved by a count, and a zero-based `array of Char` passes as one. The `Strings` unit's routines work on them. The `Printer` unit's `Lst` writes to the file `LPT1` on the virtual drive.
+- **Overlay:** every unit is resident, so `OvrInit`, `OvrInitEMS`, `OvrSetBuf` and the rest succeed and leave `OvrResult` as `ovrOk`; `{$O+}` and `{$O unit}` are accepted.
+- **Turbo3:** `Kbd` reads keys as they are pressed, without echo, and `AssignKbd` opens another text file on the keyboard. `MemAvail` and `MaxAvail` count 16-byte paragraphs, `LongFileSize`, `LongFilePos` and `LongSeek` use reals, and `HighVideo`/`NormVideo` (yellow) and `LowVideo` (light gray) set Turbo Pascal 3's colors. `CBreak` is there, and Crt's `C40`/`C80` name the color modes.
+- **Graph3:** Turbo Pascal 3's CGA screens: `GraphColorMode` and `GraphMode` (320×200 in four colors, with the four palettes of the reference manual and its black-and-white palettes) and `HiRes` (640×200 in two). The screen keeps color numbers, so `Palette`, `GraphBackground` and `HiResColor` recolor what is drawn. `Plot`, `Draw`, `Circle`, `Arc`, `FillScreen`, `FillShape`, `FillPattern`/`Pattern`, `GetPic`/`PutPic` (in Turbo Pascal 3's buffer layout), `GetDotColor`, `ColorTable` (color -1) and `GraphWindow` clipping work, as do turtlegraphics: turtle coordinates from the middle of the window with Y upwards, headings clockwise from North, `Wrap`/`NoWrap`, `TurtleWindow`, `TurtleDelay` and a visible turtle. `TextMode` returns to text.
 
 `Byte`, `ShortInt`, `Word`, `Integer`, and `LongInt` retain their Pascal widths.
 Integer expression promotion and overflow follow those widths, including
@@ -308,9 +313,9 @@ step, `P` to step over, and `Q` to quit. Save files, Return to IDE, `EXIT`, or
 Ctrl+Alt+Esc reconcile DOS file changes with the browser drive. Export ZIP
 provides a downloadable copy. Concurrent edits retain both versions.
 
-Programs containing assembly automatically open native compilation when
-compiled or run from the IDE. Run Pascal in the DOS workspace can also compile
-an ordinary Pascal program. The bundled Free Pascal 3.2.2 compiler runs under
+Programs whose assembly goes beyond the [built-in assembler](#built-in-assembler)
+automatically open native compilation when compiled or run from the IDE. Run
+Pascal in the DOS workspace can also compile any Pascal program. The bundled Free Pascal 3.2.2 compiler runs under
 DOSBox-X with a Pentium profile and emits real **32-bit GO32v2/DPMI executables**
 in Turbo Pascal language mode. IDE I/O, range, overflow, Boolean, string, define,
 and search-path options are forwarded; source directives can override defaults.
@@ -324,6 +329,37 @@ Original Borland TASM, Turbo Debugger, Turbo Profiler, compiler, and Help binari
 are not bundled. The open-source assembler, debugger, and compiler have their
 own interfaces and licenses; see [DOS distribution notices](public/dos/licenses/README.txt).
 
+### Built-in assembler
+
+`asm ... end` statements, `assembler` routines, `inline(...)` machine code and
+`inline` routines run on an 8086 inside the P-machine. It has the 8086's
+registers and flags and runs its integer, logic, shift, stack, string (`REP
+MOVSB` and the rest), jump, `LOOP` and local `CALL`/`RET` instructions, with
+the 286's `PUSHA`, `POPA`, immediate `PUSH` and three-operand `IMUL`. Operands
+name Pascal variables, fields (`p.X`, `[bx].TPoint.X`), constants, `@Result` and
+`@` labels; the assembler checks operand sizes as Turbo Pascal does. Memory is
+the variables' own storage: an address in a register comes from `LEA`, `OFFSET`,
+`LES`/`LDS` of a `var` parameter or pointer, and moves along its variable byte by
+byte, so strings, arrays and records can be walked. An assembler function returns
+AL, AX or DX:AX, and an assembler routine gets its large value parameters by
+address, as in Turbo Pascal. `inline` decodes the same instructions from machine
+code, taking a variable's name as its address (`$8B/$46/<X` is `MOV AX, X`), and
+an `inline` routine's code pops its arguments.
+
+Interrupts reach the IDE's screen and keyboard: `INT 10h` (mode, cursor,
+characters, teletype), `INT 16h` (keys with BIOS scan codes, waiting as `ReadKey`
+does), `INT 21h` (character and `$`-string output, keyboard, date, time,
+version, exit with a code through the exit procedures), `INT 1Ah` (timer ticks),
+`INT 15h` function 86h (wait) and `INT 33h` (no mouse). Ports 42h, 43h and 61h
+drive the speaker, port 60h reads the last scan code and 3DAh toggles retrace.
+An `interrupt` procedure, of `Word` register parameters from `Flags` to `BP`
+(or only the last of them), installed with `SetIntVec`, handles `INT` from
+assembly, getting the registers and giving back what it changes; interrupts
+08h and 1Ch tick 18.2 times a second while the program runs, and 09h comes with
+each key. Addresses outside any variable (video memory, `[0]`), data
+directives, calls to Pascal routines from assembly, BCD and 386 instructions
+are beyond it: such a program opens the native compiler instead.
+
 ### Compatibility boundaries
 
 This is not binary-identical Turbo Pascal 7. P-machine addresses, object VMTs,
@@ -336,16 +372,15 @@ compilers ABI-compatible.
 
 The P-machine keeps one address space, so every segment is zero: `Seg`, `CSeg`,
 `DSeg` and `SSeg` return 0, `Ofs` returns an address and `Ptr(Seg(X), Ofs(X))`
-is `@X`. `Input` and `Output` are the console rather than files that can be
-reassigned or passed as file parameters. It does not implement `ExitProc` and
-`ErrorAddr`, the heap variables `HeapOrg`/`HeapPtr`/`HeapEnd`, the `Overlay`,
-`Turbo3` and `Graph3` units, `asm`, `inline` and `interrupt` inside the
-P-machine (assembly goes to the DOS workspace), arbitrary pointer reinterpret
-casts, original overlay/linker formats, `.BGI` loading, or all compiler
-switches. The cases of
-a variant record share storage cell by cell, so reading a field of one case
-after writing another gives that value rather than a reinterpretation of its
-bytes. In particular `$T`, alignment, overlay, and code
+is `@X`. It does not implement arbitrary pointer reinterpret casts, the Dos
+unit's `Intr`, `MsDos` and `Registers`, original overlay/linker formats, `.BGI`
+loading, or all compiler switches. The cases of a variant record share storage
+cell by cell, so reading a field of one case after writing another gives that
+value rather than a reinterpretation of its bytes. Timer interrupts tick only
+while the program runs instructions, not while it waits in `ReadKey` or
+`Delay`. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
+clockwise for a positive angle, since the reference manual does not place the
+circle's centre, and text written in its modes goes to the text screen. In particular `$T`, alignment, overlay, and code
 generation options are retained as IDE preferences without full VM semantics.
 The VM always enforces its memory/instruction limits. `Extended` is held as a
 double rather than in 80 bits, and `Comp` keeps whole numbers in one too, so
@@ -457,7 +492,9 @@ Contributions are welcome.
 
 ## License
 
-Application source: MIT License — see [LICENSE](LICENSE). Bundled DOS runtimes
+Application source: MIT License — see [LICENSE](LICENSE), which also carries
+the BSD-2-Clause notice of [lkesteloot/turbopascal](https://github.com/lkesteloot/turbopascal),
+where the compiler began. Bundled DOS runtimes
 and tools have separate GPL, modified LGPL, MIT, and other notices described in
 [the DOS distribution manifest](public/dos/licenses/README.txt).
 

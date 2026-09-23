@@ -49,6 +49,10 @@ export enum NodeType {
   GOTO_STATEMENT = 'gotoStatement',
   LABELED_STATEMENT = 'labeledStatement',
   EXIT = 'exit',
+  /** An asm statement: its text, assembled when names can be resolved. */
+  ASM_STATEMENT = 'asmStatement',
+  /** inline(...): machine code, as a statement or a routine's body. */
+  INLINE_STATEMENT = 'inlineStatement',
 
   // Expressions
   BINARY_OP = 'binaryOp',

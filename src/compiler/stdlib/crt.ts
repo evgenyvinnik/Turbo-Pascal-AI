@@ -341,6 +341,9 @@ export const CRT_CONSTANTS: Map<string, number> = new Map([
   ['CO40', TextModes.CO40],
   ['BW80', TextModes.BW80],
   ['CO80', TextModes.CO80],
+  // Turbo Pascal 3's names for the color modes.
+  ['C40', TextModes.CO40],
+  ['C80', TextModes.CO80],
   ['MONO', TextModes.Mono],
   ['FONT8X8', TextModes.Font8x8],
 ]);

@@ -103,20 +103,42 @@ describe('System unit additions', () => {
     ).toEqual(['TRUE 0000 TRUE TRUE']);
   });
 
-  it('uses Input and Output as the console, and rejects other uses of them', () => {
-    expect(
-      execute(`program T; begin WriteLn(Output, 'a'); Flush(Output); WriteLn(Eof(Input)) end.`)
-    ).toEqual(['a', 'TRUE']);
-    expect(() => compile("program T; begin WriteLn(Input, 'x') end.")).toThrow(/Input is read-only/);
-    expect(() => compile('program T; var s: string; begin ReadLn(Output, s) end.')).toThrow(
-      /Output is write-only/
+  it('treats Input and Output as text files on the console, which a program may redirect', () => {
+    const disk = new VirtualFileSystem();
+    const machine = new Machine(
+      compile(`program T; var s: string;
+      procedure Say(var f: Text; const t: string); begin WriteLn(f, '> ', t) end;
+      begin
+        Say(Output, 'screen'); ReadLn(Input, s); WriteLn(s, ' ', Eof(Input));
+        Assign(Output, 'LOG.TXT'); Rewrite(Output); WriteLn('logged'); Close(Output);
+        Assign(Output, ''); Rewrite(Output); WriteLn('back');
+        {$I-} WriteLn(Input, 'x'); WriteLn(IOResult)
+      end.`),
+      { fileSystem: disk }
     );
-    expect(() => compile("program T; begin Assign(Output, 'F.TXT') end.")).toThrow(
-      /Assign cannot be used on Output/
+    machine.setInput(['typed']);
+    machine.run();
+    expect(machine.getOutput()).toEqual(['> screen', 'typed TRUE', 'back', '105']);
+    expect(disk.snapshot()).toEqual({ 'LOG.TXT': 'logged\r\n' });
+  });
+
+  it('waits for console input read through a text file variable', () => {
+    const machine = new Machine(
+      compile('program T; var f: Text; n: Integer; begin Assign(f, \'\'); Reset(f); ReadLn(f, n); WriteLn(n + 1) end.')
     );
-    expect(() => compile('program T; procedure P(var f: Text); begin end; begin P(Output) end.')).toThrow(
-      /Output works only with Read, Write, Eof, Eoln and Flush/
-    );
+    machine.run();
+    expect(machine.getState()).toBe(MachineState.WAITING);
+    machine.provideInput('41');
+    machine.run();
+    expect(machine.getOutput()).toEqual(['42']);
+  });
+
+  it('starts the System variables again when the machine is reset', () => {
+    const machine = new Machine(compile('program T; begin WriteLn(FileMode, Test8087); FileMode := 0 end.'));
+    machine.run();
+    machine.reset();
+    machine.run();
+    expect(machine.getOutput()).toEqual(['23']);
   });
 
   it('holds text in a PChar only under extended syntax', () => {
@@ -148,6 +170,15 @@ describe('System unit additions', () => {
     expect(execute('program T; begin RandSeed := 1; WriteLn(Random(1000), RandSeed) end.')).toEqual([
       '31134775814',
     ]);
+  });
+
+  it('keeps HeapOrg, HeapPtr and HeapEnd on the heap, which grows down', () => {
+    expect(
+      execute(`program T; type PInt = ^Integer; var p, q: PInt; before: LongInt; top: Pointer;
+      begin before := MemAvail; Mark(top); Write(top = HeapPtr, ' ', HeapOrg = HeapPtr, ' ');
+        New(p); New(q); Write(HeapPtr <> HeapOrg, ' ');
+        Release(HeapOrg); WriteLn(MemAvail = before, ' ', HeapPtr = HeapOrg, ' ', HeapEnd <> nil) end.`)
+    ).toEqual(['TRUE TRUE TRUE TRUE TRUE TRUE']);
   });
 
   it('releases every heap block above a mark', () => {
@@ -210,5 +241,93 @@ describe('System unit additions', () => {
       execute(`program T; const N = 3; type Small = N - 1..N + 1; Bytes = array[Low(Byte)..High(Byte) div 64] of Byte;
       begin WriteLn(Low(Small), ' ', High(Small), ' ', SizeOf(Bytes)) end.`)
     ).toEqual(['2 4 4']);
+  });
+});
+
+describe('Standard units beyond System', () => {
+  it('keeps HeapPtr on the heap top when a routine allocates', () => {
+    expect(
+      execute(`program T; type PInt = ^Integer; var before, after: Pointer;
+      procedure Grab; var q: PInt; begin New(q); after := HeapPtr end;
+      begin before := HeapPtr; Grab; WriteLn(before <> after, ' ', HeapPtr = after) end.`)
+    ).toEqual(['TRUE TRUE']);
+  });
+
+  it('lets Overlay programs run, with every unit resident', () => {
+    expect(
+      execute(`{$O+,F+} program T; uses Overlay, Dos; {$O Dos}
+      begin OvrInit('T.OVR'); WriteLn(OvrResult = ovrOk, ' ', OvrGetBuf); OvrInitEMS;
+        OvrSetBuf(8192); OvrSetRetry(100); WriteLn(OvrGetBuf, ' ', OvrGetRetry, ' ', OvrTrapCount, OvrLoadCount, OvrFileMode);
+        OvrResult := ovrError; OvrClearBuf; WriteLn(OvrResult) end.`)
+    ).toEqual(['TRUE 0', '8192 100 000', '0']);
+    expect(() => compile('program T; begin OvrInit(\'T.OVR\') end.')).toThrow(/Undeclared procedure or function "OvrInit"/);
+    expect(() => compile('program T; begin OvrResult := 0 end.')).toThrow(/Undeclared identifier "OvrResult"/);
+  });
+
+  it('reads Turbo3 Kbd a key at a time, without echo', () => {
+    const machine = new Machine(
+      compile(`program T; uses Turbo3; var c, d: Char; f: Text;
+      begin Read(Kbd, c, d); WriteLn(Ord(c), d); AssignKbd(f); Reset(f); Read(f, c); WriteLn(c, CBreak) end.`)
+    );
+    machine.run();
+    expect(machine.getState()).toBe(MachineState.WAITING);
+    expect(machine.getInputMode()).toBe('key');
+    machine.provideKey('x');
+    machine.run();
+    // One key is not yet enough for two characters.
+    expect(machine.getState()).toBe(MachineState.WAITING);
+    machine.provideKey('y');
+    machine.provideKey('q');
+    machine.run();
+    expect(machine.getOutput()).toEqual(['120y', 'qTRUE']);
+    expect(() => compile('program T; uses Turbo3; var n: Integer; begin Read(Kbd, n) end.')).not.toThrow();
+    const numbers = new Machine(compile('program T; uses Turbo3; var n: Integer; begin Read(Kbd, n) end.'));
+    numbers.provideKey('1');
+    expect(() => {
+      numbers.run();
+    }).toThrow(/Only characters can be read from the keyboard/);
+  });
+
+  it('gives Turbo3 its paragraph heap sizes, real file sizes and video', () => {
+    const disk = new VirtualFileSystem();
+    const machine = new Machine(
+      compile(`program T; uses Crt, Turbo3; var f: file of Integer; i: Integer;
+      begin WriteLn(MemAvail > 0, ' ', MemAvail < System.MemAvail div 8, ' ', MaxAvail <= MemAvail);
+        Assign(f, 'X.DAT'); Rewrite(f); for i := 1 to 5 do Write(f, i);
+        WriteLn(LongFileSize(f):0:1, ' ', LongFilePos(f):0:0); LongSeek(f, 2.0); Read(f, i); WriteLn(i); Close(f);
+        LowVideo; Write(TextAttr, ' '); HighVideo; Write(TextAttr, ' '); NormVideo; WriteLn(TextAttr) end.`),
+      { fileSystem: disk }
+    );
+    machine.run();
+    expect(machine.getOutput()).toEqual(['TRUE TRUE TRUE', '5.0 5', '3', '7 14 14']);
+  });
+
+  it('keeps the Crt variables in step with the screen', () => {
+    const machine = new Machine(
+      compile(`program T; uses Crt;
+      begin WriteLn(TextAttr, ' ', WindMin, ' ', WindMax, ' ', LastMode, ' ', CheckBreak, CheckEOF, DirectVideo);
+        TextColor(Yellow); TextBackground(Blue); WriteLn(TextAttr);
+        TextAttr := $4F; Write('x'); WriteLn(TextAttr);
+        Window(2, 3, 40, 10); WriteLn(WindMin, ' ', WindMax);
+        WindMin := 0; WindMax := $184F; GotoXY(1, 20); Write('y');
+        TextMode(CO40); WriteLn(LastMode, ' ', WindMax) end.`)
+    );
+    machine.run();
+    expect(machine.getOutput()).toEqual(['7 0 6223 3 TRUEFALSETRUE', '30', 'x79', '513 2343', 'y1 6183']);
+    expect(() => compile('program T; begin TextAttr := 7 end.')).toThrow(/Undeclared identifier "TextAttr"/);
+  });
+
+  it('qualifies names with the standard unit that declares them', () => {
+    expect(
+      execute(`program T; uses Crt, Turbo3; var i: System.Integer;
+      begin i := System.MaxInt; Crt.TextColor(Crt.Red); System.WriteLn(i, ' ', Crt.TextAttr, System.Length('abc'):3, System.Pi:5:2);
+        WriteLn(MemAvail < System.MemAvail div 8, ' ', System.ExitCode, ' ', Turbo3.CBreak) end.`)
+    ).toEqual(['32767 4  3 3.14', 'TRUE 0 TRUE']);
+    // A unit not in use names nothing, and a variable may take a unit's name.
+    expect(() => compile('program T; begin WriteLn(Crt.Yellow) end.')).toThrow(/Undeclared identifier "Crt"/);
+    expect(() => compile('program T; begin WriteLn(System.Nothing) end.')).toThrow(/Undeclared identifier "System.Nothing"/);
+    expect(
+      execute('program T; type R = record MemAvail: Integer end; var System: R; begin System.MemAvail := 4; WriteLn(System.MemAvail) end.')
+    ).toEqual(['4']);
   });
 });

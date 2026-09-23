@@ -13,9 +13,7 @@ export interface ProjectOptions extends ParserOptions {
   unitDirectories?: readonly string[];
 }
 
-export class NativePascalRequired extends Error {
-  constructor(readonly filename: string) { super('Inline assembly requires the native DOS compiler'); }
-}
+export { NativePascalRequired } from './errors/NativePascalRequired';
 
 export function sourcePath(name: string): string {
   const parts: string[] = [];
@@ -48,10 +46,6 @@ export function parseProject(source: string, filename: string, options: ProjectO
       resolveInclude: (name, from) => resolve(name, from, options.includeDirectories),
     });
     try {
-      const scan = new Lexer(new Stream(prepared.source));
-      for (let token = scan.next(); !token.isEof(); token = scan.next()) {
-        if (token.isReservedWord('asm') || token.isReservedWord('inline')) throw new NativePascalRequired(file.filename);
-      }
       const parser = new Parser(new Lexer(new Stream(prepared.source)), options);
       const isUnit = unit ?? new Lexer(new Stream(prepared.source)).next().isReservedWord('unit');
       const ast = isUnit ? parser.parseUnit() : parser.parse();

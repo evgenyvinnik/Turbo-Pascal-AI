@@ -3,6 +3,7 @@ import { TypeCode } from '../types/inst';
 import type { StackValue } from './Machine';
 import { TextConsole } from './TextConsole';
 import { GraphicsRuntime } from './GraphicsRuntime';
+import { Graph3 } from './Graph3';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont } from './StrokeFont';
@@ -31,9 +32,17 @@ interface Result {
 export class RuntimeServices {
   readonly console = new TextConsole();
   readonly graphics = new GraphicsRuntime();
+  readonly graph3 = new Graph3(this.graphics);
   readonly files: FileRuntime;
   private clockOffset = 0;
   private fontPath = '';
+  /** The Overlay unit's buffer and probation sizes. Every unit is resident,
+   * so they only report back what the program set. */
+  private overlayBuffer = 0;
+  private overlayRetry = 0;
+  /** Interrupt vectors a program has set. The others hold the addresses of
+   * the BIOS and DOS handlers, which only compare and restore. */
+  readonly vectors = new Map<number, number>();
   constructor(
     private host: Host,
     private disk: VirtualFileSystem
@@ -146,8 +155,12 @@ export class RuntimeServices {
   reset(): void {
     this.console.reset();
     this.graphics.reset();
+    this.graph3.reset();
     this.files.reset();
     this.clockOffset = 0;
+    this.overlayBuffer = 0;
+    this.overlayRetry = 0;
+    this.vectors.clear();
     this.host.sound(0);
   }
   invoke(index: number, args: StackValue[], ioChecking = true): Result | undefined {
@@ -326,6 +339,8 @@ export class RuntimeServices {
         this.console.touch();
         return {};
       case 115:
+        // TextMode also ends Turbo Pascal 3's graphics.
+        this.graph3.leave();
         this.console.mode(a);
         return {};
       case 130:
@@ -336,6 +351,40 @@ export class RuntimeServices {
         return {};
       case 132:
         return { delay: Math.max(0, a) };
+      case 308:
+        if (b === 0xf000_0000 + (a & 255)) this.vectors.delete(a & 255);
+        else this.vectors.set(a & 255, b);
+        return {};
+      case 309:
+        this.host.write(b, this.vectors.get(a & 255) ?? 0xf000_0000 + (a & 255));
+        return {};
+      // The Overlay unit: nothing to load, so each call succeeds.
+      case 450:
+      case 451:
+      case 456:
+        return {};
+      case 452:
+        this.overlayBuffer = Math.max(0, a);
+        return {};
+      case 453:
+        return { result: this.overlayBuffer };
+      case 454:
+        this.overlayRetry = Math.max(0, a);
+        return {};
+      case 455:
+        return { result: this.overlayRetry };
+      // Turbo3: the heap in 16-byte paragraphs, and Turbo Pascal 3's video
+      // attributes, yellow and light gray on black.
+      case 461:
+        return { result: Math.floor(this.host.heapAvailable().total / 16) };
+      case 462:
+        return { result: Math.floor(this.host.heapAvailable().largest / 16) };
+      case 466:
+      case 467:
+      case 468:
+        this.console.attribute = index === 468 ? 0x07 : 0x0e;
+        this.console.touch();
+        return {};
       case 140:
         this.console.cursorVisible = false;
         this.console.touch();
@@ -398,7 +447,150 @@ export class RuntimeServices {
       }
     }
     if (index >= 350 && index <= 370) return this.strings(index, args);
+    if (index >= 500 && index < 550) return this.turbo3Graphics(index, args);
     return this.files.invoke(index, args, ioChecking);
+  }
+  /** The Graph3 unit. */
+  private turbo3Graphics(index: number, args: StackValue[]): Result {
+    const g = this.graph3,
+      [a = 0, b = 0, c = 0, d = 0, e = 0] = args.map(Number);
+    const bytes = (address: number, layout: StackValue | undefined) =>
+      encodeBinary(this.host, address, JSON.parse(String(layout)) as BinaryCell[]);
+    const turtle = (action: () => void): Result => {
+      action();
+      return g.delay > 0 ? { delay: g.delay } : {};
+    };
+    switch (index) {
+      case 500:
+        g.setMode('mono');
+        return {};
+      case 501:
+        g.setMode('color');
+        return {};
+      case 502:
+        g.setMode('hires');
+        return {};
+      case 503:
+        g.setHiResColor(a);
+        return {};
+      case 504:
+        g.palette(a);
+        return {};
+      case 505:
+        g.graphBackground(a);
+        return {};
+      case 506:
+        g.graphWindow(a, b, c, d);
+        return {};
+      case 507:
+        g.plot(a, b, c);
+        return {};
+      case 508:
+        g.draw(a, b, c, d, e);
+        return {};
+      case 509:
+        g.colorTable([a, b, c, d]);
+        return {};
+      case 510:
+        g.arc(a, b, c, d, e);
+        return {};
+      case 511:
+        g.circle(a, b, c, d);
+        return {};
+      case 512: {
+        // GetPic fills as much of the buffer variable as it holds.
+        const layout = JSON.parse(String(args[5])) as BinaryCell[];
+        const target = encodeBinary(this.host, a, layout);
+        const picture = g.getPic(b, c, d, e);
+        target.set(picture.subarray(0, target.length));
+        decodeBinary(this.host, a, layout, target);
+        return {};
+      }
+      case 513:
+        g.putPic(bytes(a, args[3]), b, c);
+        return {};
+      case 514:
+        return { result: g.getDotColor(a, b) };
+      case 515:
+        g.fillScreen(a);
+        return {};
+      case 516:
+        g.fillShape(a, b, c, d);
+        return {};
+      case 517:
+        g.fillPattern(a, b, c, d, e);
+        return {};
+      case 518:
+        g.pattern(bytes(a, args[1]));
+        return {};
+      case 520:
+        return turtle(() => {
+          g.forward(-a);
+        });
+      case 521:
+        g.clearScreen();
+        return {};
+      case 522:
+        return turtle(() => {
+          g.forward(a);
+        });
+      case 523:
+        return { result: g.heading };
+      case 524:
+        g.setVisible(false);
+        return {};
+      case 525:
+        return turtle(() => {
+          g.home();
+        });
+      case 526:
+        g.setWrap(false);
+        return {};
+      case 527:
+        g.setPen(true);
+        return {};
+      case 528:
+        g.setPen(false);
+        return {};
+      case 529:
+        return turtle(() => {
+          g.setHeading(a);
+        });
+      case 530:
+        g.setPenColor(a);
+        return {};
+      case 531:
+        return turtle(() => {
+          g.setPosition(a, b);
+        });
+      case 532:
+        g.setVisible(true);
+        return {};
+      case 533:
+        return turtle(() => {
+          g.turn(-a);
+        });
+      case 534:
+        return turtle(() => {
+          g.turn(a);
+        });
+      case 535:
+        g.delay = Math.max(0, a);
+        return {};
+      case 536:
+        return { result: g.turtleThere ? 1 : 0 };
+      case 537:
+        g.turtleWindow(a, b, c, d);
+        return {};
+      case 538:
+        g.setWrap(true);
+        return {};
+      case 539:
+        return { result: g.xcor };
+      case 540:
+        return { result: g.ycor };
+    }
+    throw new PascalError('Unknown Graph3 routine');
   }
   private graph(index: number, args: StackValue[]): Result | undefined {
     const g = this.graphics,
