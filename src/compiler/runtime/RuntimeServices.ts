@@ -14,6 +14,11 @@ interface Host extends MemoryAccess {
   free(address: number): void;
   /** Free heap space, in total and in the largest block, in cells. */
   heapAvailable(): { total: number; largest: number };
+  /** The current stack pointer, which SPtr reports. */
+  stackPointer(): number;
+  /** The heap top, which Mark records and Release returns to. */
+  heapTop(): number;
+  releaseHeap(address: number): void;
   sound(frequency: number): void;
 }
 interface Result {
@@ -34,6 +39,109 @@ export class RuntimeServices {
     private disk: VirtualFileSystem
   ) {
     this.files = new FileRuntime(host, disk);
+  }
+  /** The characters of a null-terminated string. A nil PChar reads as empty. */
+  private cString(address: number): string {
+    let text = '';
+    for (let at = address; address !== 0 && text.length < 65535; at++) {
+      const value = this.host.read(at);
+      const char = typeof value === 'string' ? value.charAt(0) : value ? String.fromCharCode(Number(value)) : '';
+      if (!char || char === '\0') break;
+      text += char;
+    }
+    return text;
+  }
+  private putCString(address: number, text: string): void {
+    if (!address) throw new PascalError('Nil pointer dereference');
+    for (let index = 0; index < text.length; index++) this.host.write(address + index, text[index]!);
+    this.host.write(address + text.length, '\0');
+  }
+  /** Turbo Pascal's Strings unit. Comparisons give the difference of the
+   * first characters that differ, as it does. */
+  private strings(index: number, args: StackValue[]): Result {
+    const a = Number(args[0]),
+      b = Number(args[1]),
+      c = Number(args[2]);
+    const compare = (x: string, y: string, limit = Infinity, fold = false) => {
+      for (let at = 0; at < limit; at++) {
+        let p = x.charCodeAt(at) || 0,
+          q = y.charCodeAt(at) || 0;
+        if (fold) [p, q] = [String.fromCharCode(p).toUpperCase().charCodeAt(0), String.fromCharCode(q).toUpperCase().charCodeAt(0)];
+        if (p !== q || !p) return p - q;
+      }
+      return 0;
+    };
+    const cased = (upper: boolean) => {
+      const text = this.cString(a);
+      this.putCString(a, text.replace(/[a-z]/gi, (char) => (upper ? char.toUpperCase() : char.toLowerCase())));
+      return { result: a };
+    };
+    switch (index) {
+      case 350:
+        return { result: this.cString(a).length };
+      case 351:
+        this.putCString(a, this.cString(b));
+        return { result: a };
+      case 352:
+        this.putCString(a, this.cString(a) + this.cString(b));
+        return { result: a };
+      case 353:
+        return { result: compare(this.cString(a), this.cString(b)) };
+      case 354: {
+        const at = this.cString(a).indexOf(this.cString(b));
+        return { result: at < 0 ? 0 : a + at };
+      }
+      case 355:
+        return cased(true);
+      case 356:
+        return cased(false);
+      case 357:
+        return { result: a + this.cString(a).length };
+      case 358: {
+        // A raw copy of Count characters, which may overlap.
+        const cells = Array.from({ length: Math.max(0, c) }, (_, at) => this.host.read(b + at));
+        for (const [at, cell] of cells.entries()) this.host.write(a + at, cell);
+        return { result: a };
+      }
+      case 359: {
+        const text = this.cString(b);
+        this.putCString(a, text);
+        return { result: a + text.length };
+      }
+      case 360:
+        this.putCString(a, this.cString(b).slice(0, Math.max(0, c)));
+        return { result: a };
+      case 361:
+        this.putCString(a, String(args[1] ?? ''));
+        return { result: a };
+      case 362:
+        this.putCString(a, (this.cString(a) + this.cString(b)).slice(0, Math.max(0, c)));
+        return { result: a };
+      case 363:
+        return { result: compare(this.cString(a), this.cString(b), Infinity, true) };
+      case 364:
+        return { result: compare(this.cString(a), this.cString(b), c) };
+      case 365:
+        return { result: compare(this.cString(a), this.cString(b), c, true) };
+      case 366:
+      case 367: {
+        // The terminating null can be found too, as in Turbo Pascal.
+        const text = this.cString(a) + '\0';
+        const char = String(args[1] ?? '').charAt(0) || '\0';
+        const at = index === 366 ? text.indexOf(char) : text.lastIndexOf(char);
+        return { result: at < 0 ? 0 : a + at };
+      }
+      case 368:
+        return { result: this.cString(a).slice(0, 255) };
+      case 369: {
+        const text = this.cString(a);
+        if (!text) return { result: 0 };
+        return { result: this.host.allocate(text.length + 1, [...text.split(''), '\0']) };
+      }
+      default:
+        if (a) this.host.free(a);
+        return {};
+    }
   }
   reset(): void {
     this.console.reset();
@@ -95,6 +203,36 @@ export class RuntimeServices {
         return { result: this.host.heapAvailable().largest };
       case 88:
         throw new PascalError(`Run-time error ${String(args.length ? a : 0)}`);
+      case 42:
+        // One address space: a pointer is its offset, and every segment is 0.
+        return { result: a * 16 + b };
+      case 91:
+        return { result: 0 };
+      case 92:
+        return { result: a };
+      case 93:
+        return { result: this.host.stackPointer() };
+      // Turbo Pascal's own generator: RandSeed carries the sequence, so a
+      // program that sets it gets the same numbers again.
+      case 51: {
+        const seedAddress = Number(args[args.length - 1]);
+        const seed = (Math.imul(Number(this.host.read(seedAddress)), 134775813) + 1) | 0;
+        this.host.write(seedAddress, seed);
+        const fraction = (seed >>> 0) / 2 ** 32;
+        if (args.length < 2) return { result: fraction };
+        const range = a;
+        if (!Number.isInteger(range) || range < 0) throw new PascalError('Invalid random range');
+        return { result: Math.floor(fraction * range) };
+      }
+      case 52:
+        this.host.write(Number(args[0]), (Date.now() & 0xffffffff) | 0);
+        return {};
+      case 95:
+        this.host.write(a, this.host.heapTop());
+        return {};
+      case 96:
+        this.host.releaseHeap(Number(this.host.read(a)));
+        return {};
       case 89:
         return { result: 0 };
       case 90:
@@ -259,46 +397,8 @@ export class RuntimeServices {
           return { result: this.disk.capacity };
       }
     }
-    if (index >= 350 && index <= 356) return this.strings(index, args);
+    if (index >= 350 && index <= 370) return this.strings(index, args);
     return this.files.invoke(index, args, ioChecking);
-  }
-  private strings(index: number, args: StackValue[]): Result {
-    const a = Number(args[0]),
-      b = Number(args[1]);
-    const read = (address: number): string => {
-      let text = '';
-      for (let i = 0; i < 65536; i++) {
-        const value = this.host.read(address + i);
-        if (value === 0 || value === '\0' || value === null || value === '') return text;
-        text += typeof value === 'string' ? (value[0] ?? '') : String.fromCharCode(Number(value));
-      }
-      throw new PascalError('Unterminated string');
-    };
-    const write = (address: number, text: string): void => {
-      for (let i = 0; i < text.length; i++) this.host.write(address + i, text[i]!);
-      this.host.write(address + text.length, '\0');
-    };
-    const text = read(a);
-    if (index === 350) return { result: text.length };
-    if (index === 351 || index === 352) {
-      write(a, (index === 352 ? text : '') + read(b));
-      return { result: a };
-    }
-    if (index === 353) {
-      const other = read(b);
-      return { result: text === other ? 0 : text < other ? -1 : 1 };
-    }
-    if (index === 354) {
-      const position = text.indexOf(read(b));
-      return { result: position < 0 ? 0 : a + position };
-    }
-    write(
-      a,
-      index === 355
-        ? text.replace(/[a-z]/g, (letter) => letter.toUpperCase())
-        : text.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
-    );
-    return { result: a };
   }
   private graph(index: number, args: StackValue[]): Result | undefined {
     const g = this.graphics,

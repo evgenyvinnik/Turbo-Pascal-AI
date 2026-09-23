@@ -65,6 +65,10 @@ export class Bytecode {
    */
   public typedConstants: number[] = [];
 
+  /** The System unit's own variables, by address, with the value each starts
+   * with: ExitCode, RandSeed, FileMode, Test8087 and Test8086. */
+  public standardVariables: { name: string; address: number; initial: number }[] = [];
+
   /**
    * Index into istore where program should start
    */

@@ -228,7 +228,8 @@ bounded output buffer to keep runaway programs recoverable.
 
 Supported constructs include scalar values, constants, typed constants
 (initialized variables that keep their values between calls, with array,
-record, set and global-address values), aliases, enums, subranges, fixed
+record, object, set, procedural and global-address values), aliases, enums,
+subranges, fixed
 arrays, records with variant parts, nested and recursive routines,
 `for`/`while`/`repeat`, `if`/`case`, `Break`/`Continue`/`Exit`, formatted
 output, and the registered math, ordinal, and string functions. Routines take
@@ -248,7 +249,8 @@ core language:
 - **CRT:** cursor positioning, windows, colors, clearing, line insertion/deletion, scrolling, text modes, keyboard input, sound, and nonblocking delays.
 - **Graph:** a palette-index VGA framebuffer with pixels, lines, rectangles, bars, arcs/ellipses, sectors, flood fills, viewports, line/fill styles, and bitmap/stroke text. The default font is the IBM 8×8 bitmap. Non-default fonts load `.CHR` files from the virtual drive using the path supplied to `InitGraph`; original Borland font files are not bundled. `SetUserCharSize` supports custom stroke scaling.
 - **DOS:** date/time getters and setters use a virtual clock; environment values and disk-capacity queries refer to the virtual DOS environment.
-- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `GetMem`/`FreeMem`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables that share another variable's storage.
+- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `TypeOf`, `GetMem`/`FreeMem`, `Mark`/`Release`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `SeekEof`/`SeekEoln`, `MkDir`/`ChDir`/`RmDir`/`GetDir`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables that share another variable's storage. The System variables `ExitCode` (the program's exit status), `RandSeed` (the seed of Borland's generator, so setting it repeats a sequence), `FileMode`, `Test8087` and `Test8086` exist. `Input` and `Output` name the console in `Read`, `Write`, `Eof`, `Eoln` and `Flush`. Each run starts in the drive's root directory.
+- **Strings and Printer:** under `{$X+}` a `PChar` holds a string constant in storage of its own that ends with `#0`, can be indexed and moved by a count, and a zero-based `array of Char` passes as one. The `Strings` unit's routines work on them. The `Printer` unit's `Lst` writes to the file `LPT1` on the virtual drive.
 
 `Byte`, `ShortInt`, `Word`, `Integer`, and `LongInt` retain their Pascal widths.
 Integer expression promotion and overflow follow those widths, including
@@ -332,14 +334,18 @@ programs may need porting or an imported original toolchain. The native DOS
 emulator can execute imported 16-bit programs, but does not make the two Pascal
 compilers ABI-compatible.
 
-The P-machine does not implement segment and offset routines (`Seg`, `Ofs`,
-`Ptr` outside constant expressions, `CSeg`, `DSeg`, `SSeg`, `SPtr`), the
-`Input` and `Output` file variables, null-terminated string handling beyond
-the `PChar` type itself, arbitrary pointer reinterpret casts, typed procedural
-constants, original overlay/linker formats, `.BGI` loading, or all compiler
-switches. The cases of a variant record share storage cell by cell, so reading
-a field of one case after writing another gives that value rather than a
-reinterpretation of its bytes. In particular `$T`, `$X`, alignment, overlay, and code
+The P-machine keeps one address space, so every segment is zero: `Seg`, `CSeg`,
+`DSeg` and `SSeg` return 0, `Ofs` returns an address and `Ptr(Seg(X), Ofs(X))`
+is `@X`. `Input` and `Output` are the console rather than files that can be
+reassigned or passed as file parameters. It does not implement `ExitProc` and
+`ErrorAddr`, the heap variables `HeapOrg`/`HeapPtr`/`HeapEnd`, the `Overlay`,
+`Turbo3` and `Graph3` units, `asm`, `inline` and `interrupt` inside the
+P-machine (assembly goes to the DOS workspace), arbitrary pointer reinterpret
+casts, original overlay/linker formats, `.BGI` loading, or all compiler
+switches. The cases of
+a variant record share storage cell by cell, so reading a field of one case
+after writing another gives that value rather than a reinterpretation of its
+bytes. In particular `$T`, alignment, overlay, and code
 generation options are retained as IDE preferences without full VM semantics.
 The VM always enforces its memory/instruction limits. `Extended` is held as a
 double rather than in 80 bits, and `Comp` keeps whole numbers in one too, so

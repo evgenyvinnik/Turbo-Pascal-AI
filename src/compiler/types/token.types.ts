@@ -75,7 +75,6 @@ export const RESERVED_WORDS: readonly string[] = [
   'interface',
   'implementation',
   'with',
-  'forward',
   'label',
   'goto',
   'packed',

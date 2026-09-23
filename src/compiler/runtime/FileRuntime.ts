@@ -25,8 +25,12 @@ export class FileRuntime {
   constructor(
     private memory: MemoryAccess,
     readonly disk: VirtualFileSystem
-  ) {}
+  ) {
+    // Every run starts in the root directory, whatever the last one left.
+    disk.changeDirectory('\\');
+  }
   reset(): void {
+    this.disk.changeDirectory('\\');
     this.handles.clear();
     this.nextHandle = 1;
     this.lastError = 0;
@@ -51,7 +55,7 @@ export class FileRuntime {
         ? 2
         : message.startsWith('File access denied')
           ? 5
-        : message === 'Invalid file name'
+        : message === 'Invalid file name' || message.startsWith('Path not found')
           ? 3
           : message === 'File is not assigned'
             ? 102
@@ -84,10 +88,11 @@ export class FileRuntime {
     if (
       ![
         25, 26, 46, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 82,
+        97, 98, 99, 108, 109, 116,
       ].includes(index)
     )
       return undefined;
-    const empty = [25, 26, 66, 67].includes(index) ? { result: 0 } : {};
+    const empty = [25, 26, 66, 67, 97, 98].includes(index) ? { result: 0 } : {};
     if (this.lastError) {
       if (checked) throw new PascalError(`I/O error ${String(this.lastError)}`);
       return { ...empty, ioError: this.lastError };
@@ -100,6 +105,18 @@ export class FileRuntime {
   }
   private execute(index: number, args: StackValue[]): { result?: StackValue } | undefined {
     const address = Number(args[0]);
+    // Directories on the virtual drive.
+    if (index === 99 || index === 108 || index === 109) {
+      const name = String(args[0] ?? '');
+      if (index === 99) this.disk.makeDirectory(name);
+      else if (index === 108) this.disk.changeDirectory(name);
+      else this.disk.removeDirectory(name);
+      return {};
+    }
+    if (index === 116) {
+      this.memory.write(Number(args[1]), this.disk.currentDirectory);
+      return {};
+    }
     // Writes reach the drive at once, so Flush only checks the file is open.
     if (index === 82) {
       this.handle(address, 'write');
@@ -109,7 +126,7 @@ export class FileRuntime {
       const id = this.nextHandle++;
       const layout = JSON.parse(String(args[3] ?? '[]')) as BinaryCell[];
       this.handles.set(id, {
-        name: this.disk.normalize(String(args[1])),
+        name: this.disk.resolveName(String(args[1])),
         words: Number(args[2] ?? 0),
         layout,
         recordSize: layout.length ? layout.reduce((size, cell) => size + cell.bytes, 0) : 128,
@@ -120,7 +137,7 @@ export class FileRuntime {
       return {};
     }
     if (
-      ![25, 26, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81].includes(
+      ![25, 26, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 97, 98].includes(
         index
       )
     )
@@ -164,6 +181,16 @@ export class FileRuntime {
           result: file.position >= text.length || /[\r\n]/.test(text[file.position] ?? '') ? 1 : 0,
         };
       }
+      // Skip blanks, and for SeekEof line ends too, then test as Eof or Eoln.
+      case 97:
+      case 98: {
+        this.handle(address, 'read');
+        const text = this.disk.read(file.name);
+        const blank = index === 97 ? /[ \t\r\n]/ : /[ \t]/;
+        while (file.position < text.length && blank.test(text[file.position]!)) file.position++;
+        const end = file.position >= text.length;
+        return { result: end || (index === 98 && /[\r\n]/.test(text[file.position]!)) ? 1 : 0 };
+      }
       case 66:
         return { result: file.position };
       case 67:
@@ -180,7 +207,7 @@ export class FileRuntime {
       case 74:
         if (file.mode !== 'closed') throw new PascalError('Close the file before renaming it');
         this.disk.rename(file.name, String(args[1]));
-        file.name = this.disk.normalize(String(args[1]));
+        file.name = this.disk.resolveName(String(args[1]));
         return {};
       case 76:
         this.handle(address, 'write');

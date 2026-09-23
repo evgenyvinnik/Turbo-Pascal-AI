@@ -78,6 +78,19 @@ begin G := 7; WriteLn(P^.A, ' ', Q^, ' ', R^, ' ', N = nil); P^.B := 9; WriteLn(
     output: ['3 2 7 TRUE', '9'],
   },
   {
+    name: 'typed-constant-procedures-and-objects',
+    source: `program T;
+type Op = function(a, b: Integer): Integer;
+  Shape = object Sides: Integer; Name: string[8] end;
+{$F+} function Add(a, b: Integer): Integer; begin Add := a + b end;
+function Mul(a, b: Integer): Integer; begin Mul := a * b end; {$F-}
+const Ops: array[1..2] of Op = (Add, Mul);
+  Square: Shape = (Sides: 4; Name: 'square');
+var i: Integer;
+begin for i := 1 to 2 do Write(Ops[i](3, 4), ' '); WriteLn(Square.Name, ' ', Square.Sides) end.`,
+    output: ['7 12 square 4'],
+  },
+  {
     name: 'typed-constant-in-a-unit-is-set-before-its-initialization',
     source: `program T; uses Counter;
 begin WriteLn(Start, ' ', Next, ' ', Next) end.`,

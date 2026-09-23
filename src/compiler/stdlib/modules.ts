@@ -251,82 +251,48 @@ export class ModuleLoader {
   /**
    * Create STRINGS unit procedure stubs (null-terminated string functions)
    */
+  /** Turbo Pascal's Strings unit: null-terminated strings through PChar. */
   private createStringsProcs(): BuiltinDef[] {
+    const pchar = (name: string) => ({ name, type: TypeKind.POINTER, mode: ParamMode.VALUE });
+    const word = (name: string) => ({ name, type: TypeKind.INTEGER, mode: ParamMode.VALUE });
+    const routine = (
+      name: string,
+      procedureIndex: number,
+      params: BuiltinDef['params'],
+      returnType: TypeKind | undefined,
+      description: string
+    ): BuiltinDef => ({
+      name,
+      isFunction: returnType !== undefined,
+      ...(returnType === undefined ? {} : { returnType }),
+      params,
+      description,
+      procedureIndex,
+    });
+    const P = TypeKind.POINTER,
+      I = TypeKind.INTEGER;
     return [
-      {
-        name: 'StrLen',
-        isFunction: true,
-        returnType: TypeKind.INTEGER,
-        params: [
-          { name: 'S', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Return the length of a null-terminated string',
-        procedureIndex: 350,
-      },
-      {
-        name: 'StrCopy',
-        isFunction: true,
-        returnType: TypeKind.POINTER,
-        params: [
-          { name: 'Dest', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-          { name: 'Source', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Copy a null-terminated string',
-        procedureIndex: 351,
-      },
-      {
-        name: 'StrCat',
-        isFunction: true,
-        returnType: TypeKind.POINTER,
-        params: [
-          { name: 'Dest', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-          { name: 'Source', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Concatenate null-terminated strings',
-        procedureIndex: 352,
-      },
-      {
-        name: 'StrComp',
-        isFunction: true,
-        returnType: TypeKind.INTEGER,
-        params: [
-          { name: 'S1', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-          { name: 'S2', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Compare null-terminated strings',
-        procedureIndex: 353,
-      },
-      {
-        name: 'StrPos',
-        isFunction: true,
-        returnType: TypeKind.POINTER,
-        params: [
-          { name: 'Str', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-          { name: 'SubStr', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Find substring in a null-terminated string',
-        procedureIndex: 354,
-      },
-      {
-        name: 'StrUpper',
-        isFunction: true,
-        returnType: TypeKind.POINTER,
-        params: [
-          { name: 'S', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Convert null-terminated string to uppercase',
-        procedureIndex: 355,
-      },
-      {
-        name: 'StrLower',
-        isFunction: true,
-        returnType: TypeKind.POINTER,
-        params: [
-          { name: 'S', type: TypeKind.POINTER, mode: ParamMode.VALUE },
-        ],
-        description: 'Convert null-terminated string to lowercase',
-        procedureIndex: 356,
-      },
+      routine('StrLen', 350, [pchar('Str')], I, 'The number of characters before the null'),
+      routine('StrCopy', 351, [pchar('Dest'), pchar('Source')], P, 'Copy Source to Dest'),
+      routine('StrCat', 352, [pchar('Dest'), pchar('Source')], P, 'Append Source to Dest'),
+      routine('StrComp', 353, [pchar('Str1'), pchar('Str2')], I, 'Compare two strings'),
+      routine('StrPos', 354, [pchar('Str1'), pchar('Str2')], P, 'The first occurrence of Str2 in Str1, or nil'),
+      routine('StrUpper', 355, [pchar('Str')], P, 'Convert to uppercase in place'),
+      routine('StrLower', 356, [pchar('Str')], P, 'Convert to lowercase in place'),
+      routine('StrEnd', 357, [pchar('Str')], P, 'A pointer to the terminating null'),
+      routine('StrMove', 358, [pchar('Dest'), pchar('Source'), word('Count')], P, 'Copy Count characters, nulls included'),
+      routine('StrECopy', 359, [pchar('Dest'), pchar('Source')], P, 'Copy Source to Dest and point at its end'),
+      routine('StrLCopy', 360, [pchar('Dest'), pchar('Source'), word('MaxLen')], P, 'Copy at most MaxLen characters'),
+      routine('StrPCopy', 361, [pchar('Dest'), { name: 'Source', type: TypeKind.STRING, mode: ParamMode.VALUE }], P, 'Copy a Pascal string to Dest'),
+      routine('StrLCat', 362, [pchar('Dest'), pchar('Source'), word('MaxLen')], P, 'Append, keeping Dest to MaxLen characters'),
+      routine('StrIComp', 363, [pchar('Str1'), pchar('Str2')], I, 'Compare, ignoring case'),
+      routine('StrLComp', 364, [pchar('Str1'), pchar('Str2'), word('MaxLen')], I, 'Compare at most MaxLen characters'),
+      routine('StrLIComp', 365, [pchar('Str1'), pchar('Str2'), word('MaxLen')], I, 'Compare at most MaxLen characters, ignoring case'),
+      routine('StrScan', 366, [pchar('Str'), { name: 'Chr', type: TypeKind.CHAR, mode: ParamMode.VALUE }], P, 'The first occurrence of Chr, or nil'),
+      routine('StrRScan', 367, [pchar('Str'), { name: 'Chr', type: TypeKind.CHAR, mode: ParamMode.VALUE }], P, 'The last occurrence of Chr, or nil'),
+      routine('StrPas', 368, [pchar('Str')], TypeKind.STRING, 'A null-terminated string as a Pascal string'),
+      routine('StrNew', 369, [pchar('Str')], P, 'A copy on the heap, or nil for an empty string'),
+      routine('StrDispose', 370, [pchar('Str')], undefined, 'Release a string StrNew made'),
     ];
   }
 

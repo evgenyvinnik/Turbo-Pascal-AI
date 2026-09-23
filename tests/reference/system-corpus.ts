@@ -56,6 +56,106 @@ end.`,
     output: ['9 4 0 []', 'kept'],
   },
   {
+    name: 'system-standard-input-and-output-files',
+    source: `program T; var s: string; n: Integer;
+begin
+  WriteLn(Output, 'to output'); Write(Output, 'same');
+  WriteLn(Output, ' line');
+  ReadLn(Input, s); Read(Input, n);
+  WriteLn(s, ' ', n, ' ', Eof(Input), ' ', Eoln(Input))
+end.`,
+    input: 'first line\n42\n',
+    output: ['to output', 'same line', 'first line 42 FALSE TRUE'],
+  },
+  {
+    name: 'system-pchar-holds-text-and-is-indexed',
+    source: `program T;
+const Names: array[0..1] of PChar = ('one', 'two'); Greeting: PChar = 'hi';
+var p: PChar; s: string; i: Integer;
+begin
+  p := 'abc'; WriteLn(p[0], p[1], p[2], ' ', Ord(p[3]));
+  s := 'test'; p := @s[2]; WriteLn(p^, p[1], ' ', Greeting[0], Greeting[1]);
+  for i := 0 to 1 do Write(Names[i][0], Names[i][2], ' '); WriteLn
+end.`,
+    output: ['abc 0', 'es hi', 'oe to '],
+  },
+  {
+    name: 'strings-unit-works-on-null-terminated-text',
+    source: `program T; uses Strings;
+var buf: array[0..40] of Char; p, q: PChar; s: string;
+function Shout(t: PChar): PChar; begin Shout := StrUpper(t) end;
+begin
+  StrPCopy(buf, 'hello'); StrCat(buf, ', world');
+  WriteLn(StrPas(buf), ' ', StrLen(buf), ' ', StrPas(StrEnd(buf) - 5));
+  p := StrPos(buf, 'wor'); WriteLn(StrPas(p), ' ', StrPas(StrScan(buf, 'l')), ' ', StrPas(StrRScan(buf, 'l')));
+  WriteLn(StrComp('abc', 'abd') < 0, ' ', StrIComp('ABC', 'abc') = 0, ' ', StrLComp('abcx', 'abcy', 3) = 0);
+  StrLCopy(buf, 'truncate me', 8); WriteLn(StrPas(Shout(buf)), ' ', StrPas(StrLower(buf)));
+  q := StrNew('copy'); WriteLn(StrPas(q), ' ', StrNew('') = nil); StrDispose(q);
+  s := StrPas(StrECopy(buf, 'ab') - 2); WriteLn(s)
+end.`,
+    output: ['hello, world 12 world', 'world llo, world ld', 'TRUE TRUE TRUE', 'TRUNCATE truncate', 'copy TRUE', 'ab'],
+  },
+  {
+    name: 'system-exitcode-is-the-program-status',
+    source: `program T; begin ExitCode := 7; WriteLn(ExitCode) end.`,
+    output: ['7'],
+    exitCode: 7,
+  },
+  {
+    name: 'system-randseed-repeats-a-sequence',
+    source: `program T; var a, b: Integer; x, y: Real;
+begin
+  RandSeed := 42; a := Random(1000); x := Random;
+  RandSeed := 42; b := Random(1000); y := Random;
+  WriteLn(a = b, ' ', x = y, ' ', (a >= 0) and (a < 1000))
+end.`,
+    output: ['TRUE TRUE TRUE'],
+  },
+  {
+    name: 'system-seekeof-and-seekeoln-skip-blanks',
+    source: `program T; var f: Text; n, sum: Integer;
+begin
+  Assign(f, 'numbers.txt'); Rewrite(f); WriteLn(f, ' 1 2 '); WriteLn(f, '3   '); WriteLn(f, '   '); Close(f);
+  Reset(f); sum := 0; while not SeekEof(f) do begin Read(f, n); sum := sum + n end; Close(f);
+  Reset(f); Read(f, n); Read(f, n); Write(sum, ' ', SeekEoln(f), ' '); Close(f);
+  sum := 0; while not SeekEof do begin Read(n); sum := sum + n end; WriteLn(sum)
+end.`,
+    input: '4 5\n  6  \n\n',
+    output: ['6 TRUE 15'],
+  },
+  {
+    name: 'system-directories-hold-files',
+    source: `program T; var f: Text; s: string;
+begin
+  MkDir('sub'); ChDir('sub');
+  Assign(f, 'in.txt'); Rewrite(f); WriteLn(f, 'inside'); Close(f);
+  ChDir('..'); Assign(f, 'sub/in.txt'); Reset(f); ReadLn(f, s); Close(f); WriteLn(s);
+  Erase(f); RmDir('sub'); {$I-} ChDir('sub'); {$I+} WriteLn(IOResult <> 0)
+end.`,
+    output: ['inside', 'TRUE'],
+  },
+  {
+    name: 'system-typeof-compares-object-types',
+    source: `program T;
+type Base = object constructor Init; procedure Show; virtual; end;
+  Derived = object(Base) procedure Show; virtual; end;
+constructor Base.Init; begin end;
+procedure Base.Show; begin end;
+procedure Derived.Show; begin end;
+var a: Base; b: Derived;
+begin a.Init; b.Init; WriteLn(TypeOf(a) = TypeOf(Base), ' ', TypeOf(a) = TypeOf(b), ' ', TypeOf(b) = TypeOf(Derived)) end.`,
+    output: ['TRUE FALSE TRUE'],
+  },
+  {
+    name: 'a-routine-may-be-named-forward',
+    source: `program T;
+procedure Forward; forward;
+procedure Twice(const n: Integer); begin Forward; WriteLn(n * 2) end;
+procedure Forward; begin Write('called ') end;
+begin Twice(21) end.`,
+    output: ['called 42'],
+  },
+  {
     name: 'system-runerror-stops-with-its-code',
     source: `program T; begin WriteLn('before'); RunError(204); WriteLn('after') end.`,
     output: ['before'],

@@ -86,6 +86,9 @@ interface PascalType {
   openCapacity?: Variable;
   /** Comp: an 8087 real that holds 64-bit integers. */
   comp?: boolean;
+  /** The standard Input or Output file, which is the console rather than a
+   * file on the drive. */
+  standardFile?: 'input' | 'output';
   /** `array of T` in a parameter list; indices run from 0 to the hidden High. */
   openArray?: boolean;
   openHigh?: Variable;
@@ -201,6 +204,17 @@ const LONGINT: PascalType = {
 };
 const REAL: PascalType = { kind: 'real', size: 1, byteSize: 6 };
 const UNTYPED: PascalType = { kind: 'untyped', size: 1, byteSize: 0 };
+/** The System unit's variables. They sit at fixed addresses just past the
+ * program's mark, so a unit and the program that uses it see the same cells. */
+const STANDARD_VARIABLES = [
+  { name: 'ExitCode', kind: 'word', initial: 0 },
+  { name: 'RandSeed', kind: 'longint', initial: 0 },
+  { name: 'FileMode', kind: 'word', initial: 2 },
+  { name: 'Test8087', kind: 'byte', initial: 3 },
+  { name: 'Test8086', kind: 'byte', initial: 3 },
+] as const;
+/** The Printer unit's Lst, a text file in the cell after the System unit's. */
+const PRINTER_ADDRESS = MARK_SIZE + STANDARD_VARIABLES.length;
 /** Builtins of the System unit, which extended syntax does not cover. */
 const SYSTEM_UNIT: string = StandardUnit.SYSTEM;
 /** What 8087 arithmetic produces; stores round it to the variable's type. */
@@ -227,6 +241,8 @@ export class Compiler {
   private initializationOrder: CompiledUnit[] = [];
   private compilerOptions: CompilerOptions = {};
   private globalOffset = MARK_SIZE;
+  /** Whether a module uses the Printer unit, whose Lst the program opens. */
+  private printerUsed = false;
   /** The program's name, which ParamStr(0) reports. */
   private programName = 'PROGRAM';
   /** Typed constants, set once when the program starts. */
@@ -251,7 +267,8 @@ export class Compiler {
     this.units = new Map();
     this.initializationOrder = [];
     this.compilerOptions = options;
-    this.globalOffset = MARK_SIZE;
+    this.globalOffset = PRINTER_ADDRESS + 1;
+    this.printerUsed = false;
     this.objectTypes = [];
     this.routineValues = [];
     this.typedConstants = [];
@@ -261,6 +278,12 @@ export class Compiler {
     const program = root as ProgramNode;
     this.programName = program.name;
     this.scope = this.newScope(null, program.name);
+    this.scope.nextOffset = this.globalOffset;
+    this.bytecode.standardVariables = STANDARD_VARIABLES.map((standard, index) => ({
+      name: standard.name,
+      address: MARK_SIZE + index,
+      initial: standard.initial,
+    }));
     this.scope.coprocessor = this.usesCoprocessor(root);
     this.addBuiltins();
     const programScope = this.scope;
@@ -289,6 +312,12 @@ export class Compiler {
 
   private importUnits(names: string[], node: Node): void {
     for (const name of names) {
+      if (name.toLowerCase() === 'printer') {
+        this.modules.useUnit(name);
+        this.printerUsed = true;
+        this.scope.symbols.set('lst', this.printerFile());
+        continue;
+      }
       if (this.modules.useUnit(name)) continue;
       const unit = this.loadUnit(name, node);
       this.scope.imports.set(name.toLowerCase(), unit.exports);
@@ -379,6 +408,26 @@ export class Compiler {
     };
     for (const [name, type] of Object.entries(types))
       this.scope.symbols.set(name, { kind: 'type', type });
+    STANDARD_VARIABLES.forEach((standard, index) => {
+      const types = { word: WORD, longint: LONGINT, byte: BYTE };
+      this.scope.symbols.set(standard.name.toLowerCase(), {
+        kind: 'variable',
+        name: standard.name,
+        type: types[standard.kind],
+        offset: MARK_SIZE + index,
+        scope: this.scope,
+        reference: false,
+      });
+    });
+    for (const direction of ['input', 'output'] as const)
+      this.scope.symbols.set(direction, {
+        kind: 'variable',
+        name: direction === 'input' ? 'Input' : 'Output',
+        type: { ...TEXTFILE, standardFile: direction },
+        offset: 0,
+        scope: this.scope,
+        reference: false,
+      });
     for (const [name, value] of Object.entries({ maxint: 32767, pi: Math.PI }))
       this.scope.symbols.set(name, {
         kind: 'constant',
@@ -1436,6 +1485,15 @@ export class Compiler {
     this.line = block.lineNumber ?? routine?.declaration.lineNumber ?? this.line;
     const entry = this.emit(Opcode.ENT);
     for (const local of this.scope.locals) this.initialize(local.type, local.offset);
+    // Lst is open for writing before any unit initialization runs.
+    if (!routine && this.printerUsed) {
+      const lst = { type: NodeType.IDENTIFIER, name: 'Lst', internalVariable: this.printerFile() } as Node;
+      const call = (name: string, args: Node[]) => {
+        this.statement({ type: NodeType.CALL, name, arguments: args, lineNumber: block.lineNumber } as Node);
+      };
+      call('Assign', [lst, { type: NodeType.STRING, value: 'LPT1' } as Node]);
+      call('Rewrite', [lst]);
+    }
     // Typed constants have their values before any unit initialization runs.
     if (!routine)
       for (const { variable, stores } of this.typedConstants) {
@@ -1624,8 +1682,7 @@ export class Compiler {
    * program, even when a routine declares it, and keeps its value between
    * calls. Its value is worked out here, in the declaring scope. */
   private typedConstant(name: string, type: PascalType, node: TypedConstDeclarationNode): void {
-    if (type.kind === 'file' || type.object || type.procedureSignature)
-      this.fail(node, 'Typed constants of this type are not supported');
+    if (type.kind === 'file') this.fail(node, 'Typed constants of this type are not supported');
     let root = this.scope;
     while (root.parent) root = root.parent;
     // Module-level constants sit among the globals; a routine's go after them.
@@ -1682,10 +1739,13 @@ export class Compiler {
     }
     if (type.kind === 'record' && type.fields) {
       if (node.type !== NodeType.RECORD_CONSTANT) this.fail(node, 'Record constant expected');
+      // An object constant's method table is set, so its virtual methods work
+      // without a constructor call, as in Turbo Pascal.
+      if (type.object) stores.push({ offset, type: INTEGER, value: type.object.id });
       // Fields are given in declaration order, from the first; any after the
       // last one given stay zero. Only the fields of other variant cases,
       // which share storage with the ones given, may be passed over.
-      const fields = [...type.fields.entries()];
+      const fields = [...type.fields.entries()].filter(([key]) => !key.startsWith('$'));
       let next = 0;
       for (const { name, value } of (node as RecordConstantNode).fields) {
         const key = name.toLowerCase();
@@ -1700,8 +1760,31 @@ export class Compiler {
       }
       return;
     }
-    if (type.kind === 'pointer' && !type.procedureSignature && node.type !== NodeType.NIL) {
-      stores.push({ offset, type, value: this.staticAddress(node) });
+    if (type.procedureSignature) {
+      // A procedural constant holds a routine, known when it is declared.
+      if (node.type === NodeType.NIL) {
+        stores.push({ offset, type, value: 0 });
+        return;
+      }
+      const routine = node.type === NodeType.IDENTIFIER ? this.lookup(String(node.name)) : undefined;
+      if (routine?.kind !== 'routine') this.fail(node, 'Procedure or function expected');
+      if (routine.parent.level !== 0 || routine.methodOwner)
+        this.fail(node, 'Procedural values require a non-nested procedure or function');
+      if (!routine.declaration.farCalls)
+        this.fail(node, 'Procedural values require a FAR procedure or function');
+      if (!this.proceduralCompatible(type, this.proceduralType(routine)))
+        this.fail(node, 'Type mismatch: the routine does not fit the procedural type');
+      stores.push({ offset, type, value: routine.proceduralId });
+      return;
+    }
+    if (type.kind === 'pointer' && node.type !== NodeType.NIL) {
+      const text = this.charPointer(type) ? this.textConstant(node) : undefined;
+      if (text === undefined) {
+        stores.push({ offset, type, value: this.staticAddress(node) });
+        return;
+      }
+      const block = this.staticText(text, node);
+      stores.push(...block.stores, { offset, type, value: block.offset });
       return;
     }
     const constant = this.constant(node);
@@ -1724,6 +1807,62 @@ export class Compiler {
     stores.push({ offset, type, value });
   }
 
+  /** The text of a string or character constant, when the node is one. */
+  private textConstant(node: Node): string | undefined {
+    if (node.extendedSyntax === false || !this.constantExpression(node)) return undefined;
+    const value = this.constant(node);
+    return this.text(value.type) ? String(value.value) : undefined;
+  }
+  /** Under {$X+} a zero-based array of Char stands for a PChar to its first
+   * character. Leaves that address on the stack when the node is one. */
+  private emitCharArrayPointer(node: Node): boolean {
+    if (node.extendedSyntax === false) return false;
+    const type = this.expressionType(node);
+    if (type.kind !== 'array' || type.openArray || type.element?.kind !== 'char' || type.low !== 0) return false;
+    this.address(node);
+    return true;
+  }
+  /** A string constant used as a PChar: its characters are written to their
+   * own storage where it is used, and its address is left on the stack. */
+  private emitStaticText(text: string, node: Node): void {
+    const { offset, stores } = this.staticText(text, node);
+    for (const store of stores) {
+      this.emit(Opcode.LDA, this.scope.level, store.offset);
+      this.literal(store.value, store.type);
+      this.emit(Opcode.STI, this.typeCode(store.type));
+    }
+    this.literal(offset, POINTER);
+  }
+  /** Whether a type is a pointer to Char, which {$X+} lets hold a string. */
+  private charPointer(type: PascalType): boolean {
+    return type.kind === 'pointer' && type.base?.kind === 'char';
+  }
+  /** A null-terminated copy of a string constant, in storage that lasts as
+   * long as the program: its address and the cells that fill it. */
+  private staticText(text: string, node: Node): { offset: number; stores: StaticStore[] } {
+    const element = CHAR;
+    const type: PascalType = {
+      kind: 'array',
+      size: text.length + 1,
+      byteSize: text.length + 1,
+      low: 0,
+      high: text.length,
+      element,
+      index: INTEGER,
+    };
+    let root = this.scope;
+    while (root.parent) root = root.parent;
+    // The program's frame grows to hold the text, whether it is filled when
+    // the program starts or where the constant is used.
+    const offset = Math.max(this.globalOffset, root.nextOffset);
+    this.globalOffset = root.nextOffset = offset + type.size;
+    if (offset + type.size > 32767)
+      this.fail(node, 'Variable storage exceeds the supported frame size');
+    const stores: StaticStore[] = [];
+    for (let index = 0; index <= text.length; index++)
+      stores.push({ offset: offset + index, type: element, value: text.charAt(index) || '\0' });
+    return { offset, stores };
+  }
   /** A pointer typed constant's value: the address of a global variable, a
    * typed constant, or a part of one, which is fixed when the program starts
    * since the program's frame begins at address 0. */
@@ -2065,6 +2204,13 @@ export class Compiler {
       return;
     }
     this.address(node.target);
+    // {$X+} lets a string constant become a PChar, in storage of its own.
+    const text = this.charPointer(targetType) ? this.textConstant(node.value) : undefined;
+    if (text !== undefined || (this.charPointer(targetType) && this.emitCharArrayPointer(node.value))) {
+      if (text !== undefined) this.emitStaticText(text, node.value);
+      this.emit(Opcode.STI, this.typeCode(targetType));
+      return;
+    }
     this.requireType(node.value, targetType, targetType.procedureSignature ? this.proceduralValue(node.value) : this.expression(node.value));
     this.checkRange(targetType, node);
     this.emit(Opcode.STI, this.typeCode(targetType));
@@ -2137,6 +2283,7 @@ export class Compiler {
       case NodeType.ARRAY_ACCESS: {
         const access = node as ArrayAccessNode;
         let type = this.expressionType(access.array);
+        if (this.charPointer(type) && access.indices.length === 1) return CHAR;
         for (const index of access.indices) {
           if (type.kind === 'string') type = CHAR;
           else if (type.kind === 'array') type = type.element!;
@@ -2170,6 +2317,7 @@ export class Compiler {
         const left = this.expressionType(binary.left),
           right = this.expressionType(binary.right);
         if (operator === '+' && this.text(left) && this.text(right)) return STRING;
+        if (operator === '-' && this.charPointer(left) && this.charPointer(right)) return WORD;
         if (operator === '/' || left.kind === 'real' || right.kind === 'real')
           return this.coprocessorArithmetic(left, right) ? EXTENDED : REAL;
         if (left.kind === 'integer' && right.kind === 'integer')
@@ -2331,6 +2479,17 @@ export class Compiler {
       right = this.expression(node.right),
       operator = node.operator.toLowerCase();
     this.line = node.lineNumber ?? this.line;
+    // {$X+} moves a PChar by a count, or measures the distance between two.
+    if (node.extendedSyntax !== false && (operator === '+' || operator === '-') && this.charPointer(left)) {
+      if (right.kind === 'integer' && !right.enumeration) {
+        this.emit(operator === '+' ? Opcode.ADI : Opcode.SBI);
+        return left;
+      }
+      if (operator === '-' && this.charPointer(right)) {
+        this.emit(Opcode.SBI);
+        return WORD;
+      }
+    }
     if (operator === 'in') {
       if (
         right.kind !== 'set' ||
@@ -2447,11 +2606,21 @@ export class Compiler {
             ? `Variable required: "${String(node.name)}"`
             : `Undeclared variable "${String(node.name)}"`
         );
+      if (symbol.type.standardFile)
+        this.fail(node, `${symbol.name} works only with Read, Write, Eof, Eoln and Flush`);
       this.addressVariable(symbol);
       return symbol.type;
     }
     if (node.type === NodeType.ARRAY_ACCESS) {
       const access = node as ArrayAccessNode;
+      // {$X+} indexes a PChar from the character it points at.
+      if (this.charPointer(this.expressionType(access.array)) && access.indices.length === 1) {
+        if (node.extendedSyntax === false) this.fail(node, 'Array or string expected');
+        this.expression(access.array);
+        this.requireType(access.indices[0]!, INTEGER, this.expression(access.indices[0]!));
+        this.emit(Opcode.ADI);
+        return CHAR;
+      }
       let type = this.address(access.array);
       if (type.kind === 'string') {
         if (access.indices.length !== 1) this.fail(node, 'A string requires one index');
@@ -2642,8 +2811,14 @@ export class Compiler {
             words++;
           }
         } else {
-          this.requireType(argument, parameter.type, parameter.type.procedureSignature ? this.proceduralValue(argument) : this.expression(argument));
-          this.checkRange(parameter.type, argument);
+          const text = this.charPointer(parameter.type) ? this.textConstant(argument) : undefined;
+          if (text !== undefined) this.emitStaticText(text, argument);
+          else if (this.charPointer(parameter.type) && this.emitCharArrayPointer(argument)) {
+            // passed as a pointer to its first character
+          } else {
+            this.requireType(argument, parameter.type, parameter.type.procedureSignature ? this.proceduralValue(argument) : this.expression(argument));
+            this.checkRange(parameter.type, argument);
+          }
           words++;
         }
         if (parameter.type.openString) {
@@ -2676,6 +2851,23 @@ export class Compiler {
     if (parameter.reference && !parameter.readOnly) this.requireWritable(argument);
     if (type.openHigh) this.loadVariable(type.openHigh);
     else this.literal((type.high ?? 0) - (type.low ?? 0), INTEGER);
+  }
+  /** Lst: output to the printer, which is the file LPT1 on the virtual drive. */
+  private printerFile(): Variable {
+    let root = this.scope;
+    while (root.parent) root = root.parent;
+    return { kind: 'variable', name: 'Lst', type: TEXTFILE, offset: PRINTER_ADDRESS, scope: root, reference: false };
+  }
+  /** The address of one of the System unit's own variables. */
+  private standardVariable(name: string): number {
+    return MARK_SIZE + STANDARD_VARIABLES.findIndex((standard) => standard.name === name);
+  }
+  /** Whether an argument is the standard Input or Output file. */
+  private standardFileOf(node: Node): 'input' | 'output' | undefined {
+    const resolved = this.qualified(node);
+    if (resolved.type !== NodeType.IDENTIFIER) return undefined;
+    const symbol = this.lookup(String(resolved.name));
+    return symbol?.kind === 'variable' ? symbol.type.standardFile : undefined;
   }
   /** A typecast T(x) of an untyped parameter x, which gives it a type. */
   private untypedCast(node: Node): { type: PascalType; operand: Node } | undefined {
@@ -2899,6 +3091,9 @@ export class Compiler {
     }
     if (name === 'random' && arguments_.length === 0) return this.realResult();
     if (name === 'memavail' || name === 'maxavail') return LONGINT;
+    // The Strings unit's pointers are PChars, which {$X+} can index and move.
+    if (builtin.procedureIndex >= 350 && builtin.procedureIndex <= 370 && builtin.returnType === TypeKind.POINTER)
+      return { ...POINTER, base: CHAR };
     if (name === 'hi' || name === 'lo') return BYTE;
     if (name === 'swap' && arguments_[0]) return this.promoteInteger(this.expressionType(arguments_[0]));
     if (['trunc', 'round', 'filepos', 'filesize'].includes(name)) return LONGINT;
@@ -2913,8 +3108,22 @@ export class Compiler {
     return builtin.isFunction ? (types[builtin.returnType!] ?? INTEGER) : VOID;
   }
   private builtin(node: CallNode, builtin: BuiltinDef, expression: boolean): PascalType {
-    const name = node.name.toLowerCase(),
-      args = node.arguments;
+    const name = node.name.toLowerCase();
+    let args = node.arguments;
+    const standard = args[0] && this.standardFileOf(args[0]);
+    if (standard) {
+      // Input and Output are the console, which these routines reach without
+      // a file argument at all.
+      const reading = ['read', 'readln', 'eof', 'eoln', 'seekeof', 'seekeoln'].includes(name);
+      const writing = ['write', 'writeln', 'flush'].includes(name);
+      if (!reading && !writing && name !== 'settextbuf')
+        this.fail(args[0]!, `${builtin.name} cannot be used on ${standard === 'input' ? 'Input' : 'Output'}`);
+      if (standard !== (reading ? 'input' : 'output'))
+        this.fail(args[0]!, `${standard === 'input' ? 'Input' : 'Output'} is ${standard === 'input' ? 'read' : 'write'}-only`);
+      if (name === 'flush' || name === 'settextbuf') return VOID;
+      args = args.slice(1);
+      node = { ...node, arguments: args } as CallNode;
+    }
     if (expression && !builtin.isFunction && builtin.name.toLowerCase() !== 'new')
       this.fail(node, 'Procedure cannot be used as an expression');
     if (!expression && builtin.isFunction)
@@ -3050,6 +3259,32 @@ export class Compiler {
       this.emit(Opcode.CSP, name === 'getmem' ? 3 : 2, builtin.procedureIndex);
       return VOID;
     }
+    if (name === 'typeof') {
+      // Turbo Pascal gives a pointer to the object's method table; the
+      // P-machine identifies the type instead, which compares the same way.
+      const argument = args[0]!;
+      const symbol = argument.type === NodeType.IDENTIFIER ? this.lookup(String(argument.name)) : undefined;
+      const type = symbol?.kind === 'type' ? symbol.type : this.expressionType(argument);
+      if (!type.object) this.fail(argument, 'Object type or variable required');
+      // Only an object with virtual methods has a method table to point at.
+      if (!type.object.hasVirtual) this.fail(argument, 'TypeOf needs an object type with virtual methods');
+      this.literal(type.object.id, POINTER);
+      return POINTER;
+    }
+    if (name === 'mark' || name === 'release') {
+      this.requireWritable(args[0]!);
+      const pointer = this.address(args[0]!);
+      if (pointer.kind !== 'pointer') this.fail(args[0]!, 'Pointer variable required');
+      this.emit(Opcode.CSP, 1, builtin.procedureIndex);
+      return VOID;
+    }
+    if (name === 'random' || name === 'randomize') {
+      // Turbo Pascal's own sequence, which RandSeed carries.
+      for (const argument of args) this.requireType(argument, INTEGER, this.expression(argument));
+      this.literal(this.standardVariable('RandSeed'), INTEGER);
+      this.emit(Opcode.CSP, args.length + 1, builtin.procedureIndex);
+      return name === 'random' ? (args.length ? LONGINT : this.realResult()) : VOID;
+    }
     if (name === 'paramstr') {
       this.requireType(args[0]!, INTEGER, this.expression(args[0]!));
       this.literal(`C:\\${this.programName.toUpperCase()}.EXE`, STRING);
@@ -3077,6 +3312,8 @@ export class Compiler {
         'close',
         'eof',
         'eoln',
+        'seekeof',
+        'seekeoln',
         'filepos',
         'filesize',
         'seek',
@@ -3196,6 +3433,12 @@ export class Compiler {
         if (parameter.type !== TypeKind.POINTER && parameter.type !== (type.kind as TypeKind))
           this.fail(arg, `Type mismatch in VAR argument for ${node.name}`);
       } else {
+        const text = parameter?.type === TypeKind.POINTER ? this.textConstant(arg) : undefined;
+        if (text !== undefined) {
+          this.emitStaticText(text, arg);
+          return;
+        }
+        if (parameter?.type === TypeKind.POINTER && this.emitCharArrayPointer(arg)) return;
         const type = this.expression(arg);
         if (['ord', 'succ', 'pred'].includes(name)) {
           if (!this.ordinal(type)) this.fail(arg, `${node.name} requires an ordinal argument`);

@@ -779,7 +779,8 @@ export class Parser {
         if (methods.length)
           throw new PascalError('Object fields must precede its methods', fieldLine);
         this.expectSymbol(':');
-        const varType = this.parseType(); this.expectSymbol(';');
+        const varType = this.parseType();
+        if (!this.isReservedWord('end')) this.expectSymbol(';');
         fields.push(this.node(NodeType.VAR_DECLARATION, { names, varType, privateMember }, fieldLine));
       }
     }
@@ -807,7 +808,9 @@ export class Parser {
     }
     const props = { name, parameters, returnType, routineKind, farCalls };
     if (this.interfaceDeclarations) return this.node(type, { ...props, isForward: true }, line);
-    if (this.isReservedWord('forward')) {
+    // `forward` is a directive, so a routine may also be named Forward; no
+    // block starts with an identifier.
+    if (this.currentToken.isIdentifier() && this.currentToken.value.toLowerCase() === 'forward') {
       this.advance(); this.expectSymbol(';');
       return this.node(type, { ...props, isForward: true }, line);
     }

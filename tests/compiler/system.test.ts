@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
+import { VirtualFileSystem } from '../../src/compiler/runtime/VirtualFileSystem';
 import { compValue } from '../../src/compiler/codegen/numeric';
 import { errorWith } from './matchers';
 
@@ -92,6 +93,116 @@ describe('System unit additions', () => {
     expect(() =>
       compile('program T; type Thing = object F: LongInt; procedure P; G: LongInt end; begin end.')
     ).toThrow(/Object fields must precede its methods/);
+  });
+
+  it('keeps one address space, where every segment is zero', () => {
+    expect(
+      execute(`program T; var i: Integer; p: Pointer;
+      begin p := Ptr(Seg(i), Ofs(i));
+        WriteLn(p = @i, ' ', Seg(i), CSeg, DSeg, SSeg, ' ', Ofs(i) = Ofs(i), ' ', SPtr > 0) end.`)
+    ).toEqual(['TRUE 0000 TRUE TRUE']);
+  });
+
+  it('uses Input and Output as the console, and rejects other uses of them', () => {
+    expect(
+      execute(`program T; begin WriteLn(Output, 'a'); Flush(Output); WriteLn(Eof(Input)) end.`)
+    ).toEqual(['a', 'TRUE']);
+    expect(() => compile("program T; begin WriteLn(Input, 'x') end.")).toThrow(/Input is read-only/);
+    expect(() => compile('program T; var s: string; begin ReadLn(Output, s) end.')).toThrow(
+      /Output is write-only/
+    );
+    expect(() => compile("program T; begin Assign(Output, 'F.TXT') end.")).toThrow(
+      /Assign cannot be used on Output/
+    );
+    expect(() => compile('program T; procedure P(var f: Text); begin end; begin P(Output) end.')).toThrow(
+      /Output works only with Read, Write, Eof, Eoln and Flush/
+    );
+  });
+
+  it('holds text in a PChar only under extended syntax', () => {
+    expect(
+      execute(`program T; var p: PChar; q: PChar;
+      begin p := 'ab'; q := p; WriteLn(q[0], q[1], Ord(q[2]), ' ', p = q) end.`)
+    ).toEqual(['ab0 TRUE']);
+    // Each text ends with a #0 character, even where another follows it.
+    expect(
+      execute(`program T; var p, q: PChar;
+      begin p := 'ab'; q := 'cd'; WriteLn(p[2] = #0, q[2] = #0, ' ', p[0], q[0]) end.`)
+    ).toEqual(['TRUETRUE ac']);
+    expect(() => compile("program T; {$X-} var p: PChar; begin p := 'ab' end.")).toThrow(
+      /Type mismatch/
+    );
+    expect(() => compile('program T; {$X-} var p: PChar; c: Char; begin c := p[0] end.')).toThrow(
+      /Array or string expected/
+    );
+  });
+
+  it('starts the System unit variables with their values and ends on ExitCode', () => {
+    expect(
+      execute('program T; begin WriteLn(ExitCode, RandSeed, FileMode, Test8087, Test8086) end.')
+    ).toEqual(['00233']);
+    const machine = new Machine(compile('program T; begin ExitCode := 3; Halt(9) end.'));
+    machine.run();
+    expect(machine.getExitCode()).toBe(9);
+    // Borland's generator: RandSeed := RandSeed * 134775813 + 1.
+    expect(execute('program T; begin RandSeed := 1; WriteLn(Random(1000), RandSeed) end.')).toEqual([
+      '31134775814',
+    ]);
+  });
+
+  it('releases every heap block above a mark', () => {
+    expect(
+      execute(`program T; type PInt = ^Integer; var top: Pointer; p, q: PInt; before: LongInt;
+      begin before := MemAvail; Mark(top); New(p); New(q); Release(top); WriteLn(MemAvail = before) end.`)
+    ).toEqual(['TRUE']);
+  });
+
+  it('gives directories the DOS I/O errors and names the current one', () => {
+    const disk = new VirtualFileSystem();
+    const machine = new Machine(
+      compile(`program T; var s: string; f: Text;
+      begin MkDir('SUB'); ChDir('SUB'); GetDir(0, s); WriteLn(s);
+        Assign(f, 'A.TXT'); Rewrite(f); Close(f); ChDir('\\');
+        {$I-} RmDir('SUB'); WriteLn(IOResult); ChDir('NONE'); WriteLn(IOResult);
+        MkDir('X\\Y'); WriteLn(IOResult) end.`),
+      { fileSystem: disk }
+    );
+    machine.run();
+    expect(machine.getOutput()).toEqual(['C:\\SUB', '5', '3', '3']);
+    expect(Object.keys(disk.snapshot())).toEqual(['SUB/A.TXT']);
+  });
+
+  it('writes Lst to LPT1 on the drive, and only with the Printer unit', () => {
+    const disk = new VirtualFileSystem();
+    const machine = new Machine(compile(`program T; uses Printer; begin WriteLn(Lst, 'page'); Write(Lst, 'end') end.`), {
+      fileSystem: disk,
+    });
+    machine.run();
+    expect(disk.snapshot()).toEqual({ LPT1: 'page\r\nend' });
+    expect(() => compile("program T; begin WriteLn(Lst, 'x') end.")).toThrow(/Undeclared identifier "Lst"/);
+  });
+
+  it('moves a PChar and passes a zero-based Char array as one', () => {
+    expect(
+      execute(`program T; var buf: array[0..9] of Char; p, q: PChar;
+      begin buf[0] := 'a'; buf[1] := 'b'; buf[2] := #0; p := buf; q := p + 1;
+        Write(q^, ' ', q - p, ' '); q := p + 2; WriteLn(q^ = #0) end.`)
+    ).toEqual(['b 1 TRUE']);
+  });
+
+  it('sets an object constant method table, so its virtual methods work', () => {
+    expect(
+      execute(`program T; type Shape = object Sides: Integer; function Name: string; virtual; constructor Init; end;
+      constructor Shape.Init; begin end; function Shape.Name: string; begin Name := 'shape' end;
+      const Square: Shape = (Sides: 4);
+      begin WriteLn(Square.Name, Square.Sides) end.`)
+    ).toEqual(['shape4']);
+    expect(() =>
+      compile('program T; type P = procedure; procedure Q; begin end; const R: P = Q; begin end.')
+    ).toThrow(/FAR procedure or function/);
+    expect(() =>
+      compile('program T; type Plain = object end; var p: Pointer; begin p := TypeOf(Plain) end.')
+    ).toThrow(/TypeOf needs an object type with virtual methods/);
   });
 
   it('parses subrange bounds that start with a name', () => {

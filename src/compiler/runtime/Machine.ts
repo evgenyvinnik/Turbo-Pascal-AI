@@ -156,12 +156,16 @@ export class Machine {
     this.pc = bytecode.startAddress;
     this.mp = bytecode.typedConstants.length;
     this.sp = this.mp - 1;
+    for (const standard of bytecode.standardVariables) this.dstore[this.mp + standard.address] = standard.initial;
     this.services = new RuntimeServices({
       read: (address) => this.peek(address),
       write: (address, value) => { this.poke(address, value); },
       allocate: (words, defaults) => this.allocate(words, defaults),
       free: (address) => { this.free(address); },
       heapAvailable: () => this.heapAvailable(),
+      stackPointer: () => this.sp,
+      heapTop: () => this.np,
+      releaseHeap: (address) => { this.releaseHeap(address); },
       sound: this.config.onSound,
     }, this.config.fileSystem);
   }
@@ -172,6 +176,8 @@ export class Machine {
   reset(): void {
     this.mp = this.bytecode.typedConstants.length;
     this.sp = this.mp - 1;
+    for (const standard of this.bytecode.standardVariables)
+      this.dstore[this.mp + standard.address] = standard.initial;
     this.pc = this.bytecode.startAddress;
     this.ep = 0;
     this.np = this.config.stackSize + this.config.heapSize;
@@ -706,7 +712,8 @@ export class Machine {
       // ==================== Termination ====================
 
       case Opcode.STP:
-        // Stop execution
+        // A program ends with the status ExitCode holds, as Turbo Pascal does.
+        this.exitCode = this.standardValue('ExitCode') ?? this.exitCode;
         this.state = MachineState.STOPPED;
         break;
 
@@ -826,7 +833,7 @@ export class Machine {
   }
 
   private checkAddress(address: number): void {
-    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacters.has(address))) {
+    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacter(address))) {
       throw new PascalError('Invalid memory address');
     }
   }
@@ -935,6 +942,7 @@ export class Machine {
         // A bare Halt is Halt(0), even after the program assigned ExitCode.
         const code = args[0];
         this.exitCode = typeof code === 'number' ? Math.trunc(code) : 0;
+        this.setStandardValue('ExitCode', this.exitCode & 0xffff);
         // Stop as the program's end does. DOS leaves any sound playing, so
         // unlike halt() this does not silence the speaker.
         this.state = MachineState.STOPPED;
@@ -944,6 +952,23 @@ export class Machine {
         if (args.length) break;
         this.push(this.inputPos >= this.input.length ? 1 : 0);
         return;
+      case BuiltinProcedure.SEEKEOF:
+      case BuiltinProcedure.SEEKEOLN: {
+        if (args.length) break;
+        // Skip blanks, and for SeekEof whole line ends, in the console input.
+        const seekEof = procIndex === BuiltinProcedure.SEEKEOF;
+        for (;;) {
+          const line = this.input[this.inputPos];
+          if (line === undefined) break;
+          while (this.inputColumn < line.length && /[ \t]/.test(line[this.inputColumn]!)) this.inputColumn++;
+          if (!seekEof || this.inputColumn < line.length) break;
+          this.inputPos++;
+          this.inputColumn = 0;
+        }
+        const line = this.input[this.inputPos];
+        this.push(line === undefined || (!seekEof && this.inputColumn >= line.length) ? 1 : 0);
+        return;
+      }
       case BuiltinProcedure.EOLN:
         if (args.length) break;
         this.push(this.inputPos >= this.input.length || this.inputColumn >= (this.input[this.inputPos]?.length ?? 0) ? 1 : 0);
@@ -1143,6 +1168,21 @@ export class Machine {
     return instruction !== undefined && inst.getOpcode(instruction) === (Opcode.CSP as number) && inst.getOperand2(instruction) === (CrtProcedure.READKEY as number) ? 'key' : 'line';
   }
   /** Stable character references preserve aliasing across VAR calls and input. */
+  /** A character within a string, from an address @S[I] produced. The
+   * reference is linear in the index, so a PChar walking the string stays
+   * within it; the capacity of one taken earlier bounds a write. */
+  private stringCharacter(reference: number): { address: number; index: number; capacity: number } | undefined {
+    const known = this.stringCharacters.get(reference);
+    if (known) return known;
+    if (!Number.isInteger(reference) || reference < this.dstore.length) return undefined;
+    const offset = reference - this.dstore.length;
+    const address = Math.floor(offset / 256),
+      index = offset % 256;
+    if (address >= this.dstore.length || typeof this.dstore[address] !== 'string') return undefined;
+    const capacity = this.stringCharacters.get(reference - index)?.capacity ?? 255;
+    return index > capacity ? undefined : { address, index, capacity };
+  }
+
   stringCharacterAddress(address: number, index: number, capacity: number): number {
     this.checkAddress(address);
     if (address >= this.dstore.length || !Number.isInteger(capacity) || capacity < 0 || capacity > 255 ||
@@ -1162,7 +1202,7 @@ export class Machine {
 
   poke(address: number, value: StackValue): void {
     this.checkAddress(address);
-    const character = this.stringCharacters.get(address);
+    const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
       let bytes = this.stringBytes(character.address).padEnd(character.capacity, '\0');
@@ -1199,6 +1239,23 @@ export class Machine {
     this.allocations.set(address, words);
     for (let i = 0; i < words; i++) this.dstore[address + i] = defaults[i] ?? 0;
     return address;
+  }
+  /** One of the System unit's variables, by name. */
+  private standardValue(name: string): number | undefined {
+    const standard = this.bytecode.standardVariables.find((entry) => entry.name === name);
+    return standard ? Number(this.dstore[this.mp + standard.address] ?? 0) : undefined;
+  }
+  private setStandardValue(name: string, value: number): void {
+    const standard = this.bytecode.standardVariables.find((entry) => entry.name === name);
+    if (standard) this.dstore[this.mp + standard.address] = value;
+  }
+  /** Release, which drops every block above a mark at once. */
+  private releaseHeap(address: number): void {
+    if (!Number.isInteger(address) || address < this.config.stackSize || address > this.config.stackSize + this.config.heapSize)
+      throw new PascalError('Invalid or disposed pointer');
+    for (const block of [...this.allocations.keys()]) if (block >= this.np && block < address) this.allocations.delete(block);
+    this.freeBlocks = this.freeBlocks.filter((block) => block.address >= address);
+    this.np = address;
   }
   /** The heap lies between the stack's reserve and np, plus disposed blocks. */
   private heapAvailable(): { total: number; largest: number } {
@@ -1254,7 +1311,7 @@ export class Machine {
    * @param address - The stack address
    */
   peek(address: number): StackValue {
-    const character = this.stringCharacters.get(address);
+    const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
       return character.index === 0 ? String.fromCharCode(text.length)
