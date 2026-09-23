@@ -105,6 +105,67 @@ describe('Pointers into variant cases', () => {
   });
 });
 
+describe('Variable typecasts', () => {
+  it("see a variable's bytes as another type of its size", () => {
+    expect(
+      output(`program T; type WordRec = record Lo, Hi: Byte end; LongRec = record Lo, Hi: Word end; Bytes4 = array[0..3] of Byte;
+        V = record case Integer of 0: (w: Word); 1: (x, y: Byte) end;
+      var w: Word; l: LongInt; s: Single; c: Char; i: Integer; r: V; p: Pointer;
+      begin w := $1234; Write(WordRec(w).Lo, ' ', WordRec(w).Hi, ' '); WordRec(w).Hi := 1; WriteLn(w);
+        l := $00050006; Write(LongRec(l).Lo, ' ', LongRec(l).Hi, ' '); LongRec(l).Hi := 7; Inc(LongRec(l).Lo); WriteLn(l);
+        s := 1.0; Write(LongInt(s), ' '); l := $40490FDB; WriteLn(Single(l):0:5);
+        Write(Bytes4(l)[3], ' '); Bytes4(l)[0] := 0; WriteLn(l);
+        c := 'A'; Byte(c) := 66; i := -1; Write(c, ' ', Word(i), ' '); Word(i) := 5; WriteLn(i);
+        r.w := $0102; WordRec(r.w).Lo := 9; Write(r.x, ' ', r.w, ' '); p := @w; WriteLn(LongInt(p) > 0) end.`)
+    ).toEqual([
+      '52 18 308',
+      '6 5 458759',
+      '1065353216 3.14159',
+      '64 1078529792',
+      'B 65535 5',
+      '9 265 TRUE',
+    ]);
+  });
+
+  it('read an address typecast to another pointer type as the variable seen as that type', () => {
+    expect(
+      output(`program T; type PWord = ^Word; PByte = ^Byte; PSingle = ^Single; var l: LongInt;
+      begin l := $00050006; Write(PWord(@l)^, ' '); PWord(@l)^ := 9; Write(l, ' '); PByte(@l)^ := 1; WriteLn(l);
+        l := $3F800000; Write(PSingle(@l)^:0:1, ' '); Inc(PByte(@l)^); WriteLn(l) end.`)
+    ).toEqual(['6 327689 327681', '1.0 1065353217']);
+  });
+
+  it('keep the size, and ordinal values convert as before', () => {
+    expect(() =>
+      compile(
+        'program T; type WR = record Lo, Hi: Byte end; var l: LongInt; begin WR(l).Lo := 1 end.'
+      )
+    ).toThrow(/Invalid typecast/);
+    expect(
+      output(
+        'program T; var w: Word; b: Byte; begin w := $1234; b := Byte(w); WriteLn(b, Char(65)) end.'
+      )
+    ).toEqual(['52A']);
+  });
+});
+
+describe('The @ operator', () => {
+  it('gives an untyped pointer unless {$T+} types it', () => {
+    expect(
+      output(`program T; type TA = array[0..3] of Byte; PA = ^TA; R = record id: Byte; bytes: array[0..3] of Byte end;
+      var x: R; pt: PA; pw: ^Word; w: Word;
+      begin pt := @x.bytes; pt^[1] := 7; w := 5; pw := @w; WriteLn(x.bytes[1], pw^) end.`)
+    ).toEqual(['75']);
+    expect(() =>
+      compile(`program T; {$T+} type TA = array[0..3] of Byte; PA = ^TA; R = record id: Byte; bytes: array[0..3] of Byte end;
+      var x: R; pt: PA; begin pt := @x.bytes end.`)
+    ).toThrow(/Type mismatch/);
+    expect(
+      output('program T; {$T+} var w: Word; p: ^Word; begin w := 3; p := @w; WriteLn(p^) end.')
+    ).toEqual(['3']);
+  });
+});
+
 describe('FileRec and TextRec', () => {
   it("show a file's handle, mode, record size and name", () => {
     expect(

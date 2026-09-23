@@ -287,10 +287,11 @@ settings are retained as UI preferences. Graph emulates VGA modes 640×200,
 
 ### Compiler switches and includes
 
-The P-machine implements `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$N` and
-`$X`, with Turbo Pascal defaults (`B- R- V+ P- I+ Q- F- N- X+`). Under `$X+` a
+The P-machine implements `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$N`, `$T` and
+`$X`, with Turbo Pascal defaults (`B- R- V+ P- I+ Q- F- N- T- X+`). Under `$X+` a
 function may be called as a statement, though not a System function, as in
-Turbo Pascal. A module that uses `Single`,
+Turbo Pascal. Under `$T-` `@X` is an untyped pointer, which any pointer takes;
+`$T+` (the Typed @ operator option) makes it a pointer to X's type. A module that uses `Single`,
 `Double` or `Extended` is compiled as if with `$N+`, since Turbo Pascal
 requires it for those types. The Compiler Options dialog
 sets their initial values; source directives override them at the relevant
@@ -375,15 +376,18 @@ compilers ABI-compatible.
 
 The P-machine keeps one address space, so every segment is zero: `Seg`, `CSeg`,
 `DSeg` and `SSeg` return 0, `Ofs` returns an address and `Ptr(Seg(X), Ofs(X))`
-is `@X`, typed as under `{$T+}`. It does not implement typecasts of typed
-variables to other types or pointer reinterpret casts, original overlay/linker
+is `@X`. A variable typecast such as `WordRec(W).Lo`, `LongInt(S)` of a `Single`
+or `Bytes(L)[0]` sees the variable's bytes as the type, which must be the
+variable's size, and so does `PWord(@L)^`. A pointer of one type that holds a
+variable of another, and is dereferenced elsewhere, still reads that variable's
+cells rather than its bytes. It does not implement original overlay/linker
 formats, `.BGI` loading, or all compiler switches. A structure may be up to
 65520 bytes, as in Turbo Pascal, but a variable must fit its frame, so a type
 that large serves typecasts, views and the heap. Timer interrupts tick only
 while the program runs instructions, not while it waits in `ReadKey` or
 `Delay`. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
-circle's centre, and text written in its modes goes to the text screen. In particular `$T`, alignment, overlay, and code
+circle's centre, and text written in its modes goes to the text screen. In particular alignment, overlay, and code
 generation options are retained as IDE preferences without full VM semantics.
 The VM always enforces its memory/instruction limits. `Extended` is held as a
 double rather than in 80 bits, and `Comp` keeps whole numbers in one too, so

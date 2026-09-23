@@ -5,6 +5,75 @@ import type { ReferenceCase } from './corpus';
  * Pascal lays their bytes out as Turbo Pascal does. */
 export const overlayCases: ReferenceCase[] = [
   {
+    name: 'overlay-variable-typecasts-see-bytes',
+    source: `program T;
+type WordRec = packed record Lo, Hi: Byte end;
+  LongRec = packed record Lo, Hi: Word end;
+  Bytes4 = array[0..3] of Byte;
+  V = packed record case Integer of 0: (w: Word); 1: (x, y: Byte) end;
+var w: Word; l: LongInt; s: Single; c: Char; r: V;
+begin
+  w := $1234; WriteLn(WordRec(w).Lo, ' ', WordRec(w).Hi); WordRec(w).Hi := 1; WriteLn(w);
+  l := $00050006; WriteLn(LongRec(l).Lo, ' ', LongRec(l).Hi); LongRec(l).Hi := 7; Inc(LongRec(l).Lo); WriteLn(l);
+  s := 1.0; WriteLn(LongInt(s)); l := $40490FDB; WriteLn(Single(l):0:5);
+  WriteLn(Bytes4(l)[3]); Bytes4(l)[0] := 0; WriteLn(l);
+  c := 'A'; Byte(c) := 66; WriteLn(c);
+  r.w := $0102; WordRec(r.w).Lo := 9; WriteLn(r.x, ' ', r.w)
+end.`,
+    output: [
+      '52 18',
+      '308',
+      '6 5',
+      '458759',
+      '1065353216',
+      '3.14159',
+      '64',
+      '1078529792',
+      'B',
+      '9 265',
+    ],
+  },
+  {
+    name: 'overlay-address-typecast-to-another-pointer',
+    source: `program T;
+type PWord = ^Word; PByte = ^Byte; PSingle = ^Single;
+var l: LongInt;
+begin
+  l := $00050006; WriteLn(PWord(@l)^); PWord(@l)^ := 9; WriteLn(l); PByte(@l)^ := 1; WriteLn(l);
+  l := $3F800000; WriteLn(PSingle(@l)^:0:1); Inc(PByte(@l)^); WriteLn(l)
+end.`,
+    output: ['6', '327689', '327681', '1.0', '1065353217'],
+  },
+  {
+    name: 'overlay-address-is-untyped-by-default',
+    source: `program T;
+type TA = array[0..3] of Byte; PA = ^TA;
+  R = packed record id: Byte; bytes: array[0..3] of Byte end;
+var x: R; pt: PA; pw: ^Word; w: Word;
+begin
+  pt := @x.bytes; pt^[1] := 7; WriteLn(x.bytes[1]);
+  w := 5; pw := @w; WriteLn(pw^)
+end.`,
+    output: ['7', '5'],
+  },
+  {
+    name: 'overlay-typed-address-under-t-plus-must-match',
+    source: `program T; {$T+}
+type TA = array[0..3] of Byte; PA = ^TA;
+  R = packed record id: Byte; bytes: array[0..3] of Byte end;
+var x: R; pt: PA;
+begin pt := @x.bytes end.`,
+    reject: true,
+  },
+  {
+    name: 'overlay-variable-typecast-must-keep-the-size',
+    source: `program T;
+type WordRec = packed record Lo, Hi: Byte end;
+var l: LongInt;
+begin WordRec(l).Lo := 1 end.`,
+    reject: true,
+  },
+  {
     name: 'overlay-absolute-variables-share-bytes',
     source: `program T;
 type Parts = packed record Lo, Hi: Word end;
