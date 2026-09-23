@@ -11,7 +11,7 @@
  */
 
 import { Opcode, TypeCode, Register, MARK_SIZE, inst } from '../types/inst';
-import { Bytecode, shapeCell, type ViewShape } from '../codegen/Bytecode';
+import { Bytecode, sameShape, shapeCell, type ViewShape } from '../codegen/Bytecode';
 import { PascalError } from '../errors/PascalError';
 import { describePascalDiagnostic } from '../errors/diagnostics';
 import { InternalProcedure, NativeRegistry } from './Native';
@@ -35,6 +35,9 @@ interface View {
   start: number;
   refresh: number;
   syncs: { base: number; part: number; case: number }[];
+  /** A view of a variable as its own type, as @ gives: its cells are the
+   * variable's. */
+  identity: boolean;
 }
 /** How many cells one view can show. */
 const VIEW_SPAN = 1 << 20;
@@ -141,6 +144,8 @@ export class Machine {
    * show, so one view has one address. */
   private views: View[] = [];
   private viewKeys = new Map<string, number>();
+  /** Whether a view's cells from an offset already have a type's shape. */
+  private shapeMatches = new Map<string, boolean>();
   /** The frames of interrupt procedures running now, innermost last. */
   private interruptFrames: number[] = [];
   /** When the timer next ticks, 18.2 times a second. */
@@ -242,6 +247,7 @@ export class Machine {
     this.keyQueue = '';
     this.views = [];
     this.viewKeys.clear();
+    this.shapeMatches.clear();
     this.assemblyResume = undefined;
     this.interruptFrames = [];
     this.nextTick = 0;
@@ -920,27 +926,75 @@ export class Machine {
 
   /** VIEW: the address of a cell of a view, made once for what it shows. */
   private view(args: number[]): number {
-    const [target = 0, layout = 0, map = 0, start = 0, refresh = -1, count = 0] = args;
+    const [target = 0, layout = 0, map = 0, start = 0, refresh = -1, identity = 0, count = 0] = args;
     const syncs = Array.from({ length: count }, (_, index) => ({
-      base: args[6 + index * 3] ?? 0,
-      part: args[7 + index * 3] ?? 0,
-      case: args[8 + index * 3] ?? 0,
+      base: args[7 + index * 3] ?? 0,
+      part: args[8 + index * 3] ?? 0,
+      case: args[9 + index * 3] ?? 0,
     }));
-    const cell = args[6 + count * 3] ?? target;
-    const key = JSON.stringify(args.slice(0, 6 + count * 3));
+    const cell = args[7 + count * 3] ?? target;
+    const id = this.viewId(JSON.stringify(args.slice(0, 7 + count * 3)), () => ({
+      target,
+      layout: this.bytecode.layouts[layout] ?? [],
+      shape: this.bytecode.viewMaps[map] ?? { kind: 'record', fields: [] },
+      start,
+      refresh,
+      syncs,
+      identity: identity !== 0,
+    }));
+    return this.dstore.length * 1024 + id * VIEW_SPAN + (cell - target);
+  }
+  private viewId(key: string, make: () => View): number {
     let id = this.viewKeys.get(key);
     if (id === undefined) {
-      id = this.views.push({
-        target,
-        layout: this.bytecode.layouts[layout] ?? [],
-        shape: this.bytecode.viewMaps[map] ?? { kind: 'record', fields: [] },
-        start,
-        refresh,
-        syncs,
-      }) - 1;
+      id = this.views.push(make()) - 1;
       this.viewKeys.set(key, id);
     }
-    return this.dstore.length * 1024 + id * VIEW_SPAN + (cell - target);
+    return id;
+  }
+  /** Which view an address lies in, and its cell offset there. */
+  private viewAt(address: number): { id: number; view: View; offset: number } | undefined {
+    const offset = address - this.dstore.length * 1024;
+    if (offset < 0 || !Number.isInteger(offset)) return undefined;
+    const id = Math.floor(offset / VIEW_SPAN);
+    const view = this.views[id];
+    return view ? { id, view, offset: offset % VIEW_SPAN } : undefined;
+  }
+  /** RETYPE: a pointer dereferenced as the type of `map`. An address that
+   * already has the type's shape stays, or becomes the variable's own cell;
+   * one of another shape becomes a view of those bytes as the type. */
+  private retype(pointer: number, map: number): number {
+    const at = this.viewAt(pointer);
+    if (!at) return pointer;
+    const entry = shapeCell(at.view.shape, at.offset);
+    const shape = this.bytecode.viewMaps[map];
+    if (!entry || !shape) return pointer;
+    const key = `${String(at.id)}:${String(at.offset)}:${String(map)}`;
+    let matches = this.shapeMatches.get(key);
+    if (matches === undefined) {
+      matches = sameShape(at.view.shape, at.offset, shape);
+      this.shapeMatches.set(key, matches);
+    }
+    // The variable's own cell, unless it has variant parts, whose cases
+    // follow only stores that go through the view.
+    if (matches) return at.view.identity && at.view.refresh < 0 ? at.view.target + at.offset : pointer;
+    const { view } = at;
+    const id = this.viewId(`retype:${key}`, () => ({
+      target: view.target,
+      layout: view.layout,
+      shape,
+      start: view.start + entry.byte,
+      refresh: view.refresh,
+      syncs: view.syncs,
+      identity: false,
+    }));
+    return this.dstore.length * 1024 + id * VIEW_SPAN;
+  }
+  /** An address @ took, as the variable's own cell, so pointers to one cell
+   * compare equal however they were made. */
+  private normalizePointer(value: StackValue): StackValue {
+    const at = typeof value === 'number' ? this.viewAt(value) : undefined;
+    return at?.view.identity ? at.view.target + at.offset : value;
   }
   /** The view and cell an address shows, if it is a view's. */
   private viewCell(address: number): { view: View; byte: number; cell: BinaryCell } | undefined {
@@ -1087,6 +1141,15 @@ export class Machine {
     }
     if (procedureIndex === (InternalProcedure.VIEW as number)) {
       this.push(this.view(args.map(Number)));
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.RETYPE as number)) {
+      this.push(this.retype(Number(args[0]), Number(args[1])));
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.NORMALIZE_POINTERS as number)) {
+      this.push(this.normalizePointer(args[0] ?? 0));
+      this.push(this.normalizePointer(args[1] ?? 0));
       return;
     }
     if (procedureIndex === (InternalProcedure.VARIANT_SYNC as number)) {

@@ -591,7 +591,8 @@ export class Compiler {
           scope: this.scope,
           reference: false,
           container: record.pointer,
-          ...(field.variants ? { variants: field.variants, containerType: record.type } : {}),
+          containerType: record.type,
+          ...(field.variants ? { variants: field.variants } : {}),
         };
     }
     const [qualifier, member] = name.toLowerCase().split('.');
@@ -2670,16 +2671,16 @@ export class Compiler {
           this.literal(routine.proceduralId, POINTER);
           return POINTER;
         }
-        // A pointer into a variant case views its record's bytes, so what is
-        // stored through it reaches the other cases.
+        // @X views the whole variable X lies in as its own type, so a pointer
+        // of another type dereferenced later sees its bytes, and what is
+        // stored through one into a variant case reaches the other cases.
         const operand = node.operand as Node;
-        const chain = this.variantChain(operand);
-        if (chain.length) {
-          const inner = chain[0]!;
-          const record = this.expressionType(inner.base);
+        const root = this.designatorRoot(operand);
+        if (root) {
+          const type = this.expressionType(root);
           const base = this.expressionType(operand);
-          this.emitView(() => { this.address(inner.base); }, () => { this.literal(this.layoutId(record), INTEGER); }, record, 0,
-            this.refreshListId(record), chain.slice(1), () => { this.address(operand); });
+          this.emitView(() => { this.address(root); }, () => { this.literal(this.layoutId(type), INTEGER); }, type, 0,
+            this.refreshListId(type), [], () => { this.address(operand); }, true);
           return node.typedPointer === true ? { ...POINTER, base } : POINTER;
         }
         const base = this.address(operand);
@@ -2854,6 +2855,8 @@ export class Compiler {
       )
         this.fail(node, 'Incompatible comparison operands');
       if (this.aggregate(left)) this.fail(node, 'Array and record comparisons are not supported');
+      // Pointers compare by the cells they address, however they were taken.
+      if (left.kind === 'pointer' && right.kind === 'pointer') this.emit(Opcode.CSP, 2, InternalProcedure.NORMALIZE_POINTERS);
       this.emit(comparisons[operator], this.typeCode(left));
       return BOOLEAN;
     }
@@ -2932,6 +2935,12 @@ export class Compiler {
           throw new PascalError('Nil pointer dereference', line);
         return value;
       });
+      // An address @ took of a variable of another type shows its bytes as
+      // this pointer's type.
+      if (!['untyped', 'file'].includes(pointer.base.kind) && !pointer.base.object) {
+        this.literal(this.viewMapId(pointer.base), INTEGER);
+        this.emit(Opcode.CSP, 2, InternalProcedure.RETYPE);
+      }
       return pointer.base;
     }
     if (node.type === NodeType.IDENTIFIER) {
@@ -3541,6 +3550,36 @@ export class Compiler {
     }
     this.emitView(() => { this.address(cast.operand); }, () => { this.literal(this.layoutId(cast.source), INTEGER); }, cast.type, 0,
       this.refreshListId(cast.source), this.variantChain(cast.operand));
+  }
+  /** The whole variable a designator lies in, whose address @ views: a
+   * variable, what a pointer points at, or a typecast. None for a string's
+   * character, whose address a PChar walks, or for what a view cannot show. */
+  private designatorRoot(node: Node): Node | undefined {
+    node = this.qualified(node);
+    const shown = (type: PascalType) =>
+      !['untyped', 'file', 'string'].includes(type.kind) && !type.object && !type.openArray && !type.procedureSignature;
+    if (node.type === NodeType.FIELD_ACCESS) {
+      const record = this.expressionType(node.record as Node);
+      return record.object ? undefined : this.designatorRoot(node.record as Node);
+    }
+    if (node.type === NodeType.ARRAY_ACCESS) {
+      const array = this.expressionType(node.array as Node);
+      return array.kind === 'array' && !array.openArray ? this.designatorRoot(node.array as Node) : undefined;
+    }
+    const type = this.expressionType(node);
+    if (!shown(type)) return undefined;
+    if (node.type === NodeType.POINTER_DEREF || node.type === NodeType.CALL) return node;
+    if (node.type !== NodeType.IDENTIFIER || node.internalVariable) return undefined;
+    const symbol = this.lookup(String(node.name));
+    if (symbol?.kind !== 'variable' || symbol.view || symbol.result) return undefined;
+    if (symbol.container) {
+      // A field of a WITH record: the record itself.
+      const record = symbol.containerType;
+      return record && !record.object
+        ? ({ type: NodeType.POINTER_DEREF, pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...symbol.container, type: { ...POINTER, base: record } } } } as Node)
+        : undefined;
+    }
+    return node;
   }
   /** P(@V) for a pointer type P = ^T and a variable V of another layout:
    * what P(@V)^ reads is V's bytes as a T. */
@@ -4311,13 +4350,15 @@ export class Compiler {
     start: number,
     refresh: number,
     syncs: { base: Node; part: number; case: number }[],
-    cell?: () => void
+    cell?: () => void,
+    identity = false
   ): void {
     target();
     layout();
     this.literal(this.viewMapId(type), INTEGER);
     this.literal(start, INTEGER);
     this.literal(refresh, INTEGER);
+    this.literal(identity ? 1 : 0, INTEGER);
     this.literal(syncs.length, INTEGER);
     for (const sync of syncs) {
       this.address(sync.base);
@@ -4325,7 +4366,7 @@ export class Compiler {
       this.literal(sync.case, INTEGER);
     }
     cell?.();
-    this.emit(Opcode.CSP, 6 + syncs.length * 3 + (cell ? 1 : 0), InternalProcedure.VIEW);
+    this.emit(Opcode.CSP, 7 + syncs.length * 3 + (cell ? 1 : 0), InternalProcedure.VIEW);
   }
   /** The variant parts inside a type, at an offset, to bring up to date
    * after its bytes change as a whole. */

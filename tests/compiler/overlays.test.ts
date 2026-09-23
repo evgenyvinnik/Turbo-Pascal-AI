@@ -166,6 +166,46 @@ describe('The @ operator', () => {
   });
 });
 
+describe('Pointers of another type', () => {
+  it('read and write the bytes of the variable whose address they hold', () => {
+    expect(
+      output(`program T; type TBytes = array[0..3] of Byte; PBytes = ^TBytes; TR = record a: Byte; w: Word end;
+      var l: LongInt; pw: ^Word; pb: ^Byte; ps: ^Single; pt: PBytes; p: Pointer; r: TR; w: Word; q: ^Word; arr: array[1..3] of Word;
+      procedure Take(var x: LongInt); var pv: ^Word; begin pv := @x; pv^ := 1 end;
+      begin l := $00050006; pw := @l; Write(pw^, ' '); pw^ := 9; Write(l, ' '); p := @l; pb := p; pb^ := 1; WriteLn(l);
+        l := $3F800000; ps := @l; Write(ps^:0:1, ' '); pt := @l; Write(pt^[3], ' '); pt^[0] := 7; WriteLn(l);
+        w := 5; q := @w; WriteLn(q^, ' ', q = @w, ' ', @l = @l, ' ', pw = @l);
+        r.w := $0102; pb := @r.w; Write(pb^, ' '); Inc(pb^); Write(r.w, ' ');
+        arr[2] := $0304; pb := @arr[2]; pw := @arr[2]; WriteLn(pb^, ' ', pw^);
+        l := $00050006; Take(l); WriteLn(l) end.`)
+    ).toEqual([
+      '6 327689 327681',
+      '1.0 63 1065353223',
+      '5 TRUE TRUE TRUE',
+      '2 259 4 772',
+      '327681',
+    ]);
+  });
+
+  it('compare equal however the address was taken', () => {
+    expect(
+      output(`program T; type PW = ^Word; var p, q: PW; w: Word;
+      begin New(p); q := @p^; w := 1; WriteLn(p = q, ' ', q = @p^, ' ', p <> @w) end.`)
+    ).toEqual(['TRUE TRUE TRUE']);
+  });
+
+  it('keep lists, PChars and pointers of the same type working as before', () => {
+    expect(
+      output(`program T; uses Strings; type PNode = ^TNode; TNode = record v: Integer; next: PNode end;
+      var head, n: PNode; pp: ^PNode; i: Integer; buf: array[0..15] of Char; p, q: PChar;
+      begin head := nil;
+        for i := 1 to 3 do begin pp := @head; while pp^ <> nil do pp := @pp^^.next; New(pp^); pp^^.v := i; pp^^.next := nil end;
+        n := head; while n <> nil do begin Write(n^.v); n := n^.next end; WriteLn;
+        StrCopy(@buf, 'hello'); p := @buf[0]; q := StrEnd(p); WriteLn(StrLen(p), ' ', q - p, ' ', p[1], p[4], ' ', StrPas(@buf[1])) end.`)
+    ).toEqual(['123', '5 5 eo ello']);
+  });
+});
+
 describe('FileRec and TextRec', () => {
   it("show a file's handle, mode, record size and name", () => {
     expect(

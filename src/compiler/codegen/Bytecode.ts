@@ -34,6 +34,32 @@ export function shapeCell(shape: ViewShape, offset: number): { byte: number; cel
   return undefined;
 }
 
+/** How many cells a shape spans. */
+export function shapeSize(shape: ViewShape): number {
+  if (shape.kind === 'cell') return 1;
+  if (shape.kind === 'array') return shape.count * shape.cells;
+  return shape.fields.reduce((size, field) => Math.max(size, field.offset + field.cells), 0);
+}
+
+/** Whether the cells of `shape`, from `offset` on, lie in their bytes as
+ * those of `target` do: the same cells, the same distances apart. */
+export function sameShape(shape: ViewShape, offset: number, target: ViewShape): boolean {
+  const first = shapeCell(shape, offset);
+  if (!first) return false;
+  const size = shapeSize(target);
+  for (let cell = 0; cell < size; cell++) {
+    const wanted = shapeCell(target, cell);
+    if (!wanted) continue;
+    const found = shapeCell(shape, offset + cell);
+    if (!found || found.byte - first.byte !== wanted.byte) return false;
+    const a = found.cell,
+      b = wanted.cell;
+    if (a.kind !== b.kind || a.bytes !== b.bytes || Boolean(a.signed) !== Boolean(b.signed) || (a.setByteOffset ?? 0) !== (b.setByteOffset ?? 0))
+      return false;
+  }
+  return true;
+}
+
 /** A variant part of a record: its cases, each in cells of its own, and its
  * shadow, the part's bytes as Turbo Pascal stores them. Offsets are cells
  * from the start of the record. */

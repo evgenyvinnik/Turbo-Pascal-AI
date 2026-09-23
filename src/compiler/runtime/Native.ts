@@ -35,11 +35,17 @@ export enum InternalProcedure {
    * of variant parts in its type, whose cases follow their bytes. */
   VARIANT_REFRESH = 907,
   /** An address that shows a variable's bytes as another type: an absolute
-   * variable, a typecast of an untyped parameter, or a pointer into a
-   * variant case. Its arguments are the variable's address, its layout,
-   * the view's map, the byte the view starts at, the variable's variant
-   * parts, the variant cases the variable lies in, and the cell wanted. */
+   * variable, a typecast, or the address @ takes. Its arguments are the
+   * variable's address, its layout, the view's map, the byte the view starts
+   * at, the variable's variant parts, whether the view shows the variable as
+   * its own type, the variant cases it lies in, and the cell wanted. */
   VIEW = 908,
+  /** A pointer about to be dereferenced as a type, by that type's map: an
+   * address @ took of a variable of another layout becomes a view of its
+   * bytes as the type. */
+  RETYPE = 909,
+  /** Two pointers about to be compared, as the cells they address. */
+  NORMALIZE_POINTERS = 910,
 }
 
 /**

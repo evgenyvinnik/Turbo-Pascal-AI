@@ -378,10 +378,13 @@ The P-machine keeps one address space, so every segment is zero: `Seg`, `CSeg`,
 `DSeg` and `SSeg` return 0, `Ofs` returns an address and `Ptr(Seg(X), Ofs(X))`
 is `@X`. A variable typecast such as `WordRec(W).Lo`, `LongInt(S)` of a `Single`
 or `Bytes(L)[0]` sees the variable's bytes as the type, which must be the
-variable's size, and so does `PWord(@L)^`. A pointer of one type that holds a
-variable of another, and is dereferenced elsewhere, still reads that variable's
-cells rather than its bytes. It does not implement original overlay/linker
-formats, `.BGI` loading, or all compiler switches. A structure may be up to
+variable's size. `@X` gives an address that knows the variable X lies in, so a
+pointer of any type that holds it, as `PW := @L` does, reads and writes that
+variable's bytes as its own type wherever it is dereferenced. Reading past the
+variable is a run-time error rather than whatever memory follows it, and an
+address made by `Ptr` or from a string's character is a plain one. It does not
+implement original overlay/linker formats, `.BGI` loading, or all compiler
+switches. A structure may be up to
 65520 bytes, as in Turbo Pascal, but a variable must fit its frame, so a type
 that large serves typecasts, views and the heap. Timer interrupts tick only
 while the program runs instructions, not while it waits in `ReadKey` or
