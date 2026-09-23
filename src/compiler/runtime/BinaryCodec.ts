@@ -8,6 +8,9 @@ export interface BinaryCell {
   signed?: boolean;
   /** Ordinal byte containing the set's lower bound; omitted layouts start at zero. */
   setByteOffset?: number;
+  /** The cell's place from the variable's start, where cells are not all
+   * consecutive, as a variant record's shadow is not. */
+  offset?: number;
 }
 
 /** Serialize Pascal data independently of the VM's one-JavaScript-value-per-word layout. */
@@ -20,7 +23,7 @@ export function encodeBinary(
   const view = new DataView(bytes.buffer);
   let offset = 0;
   layout.forEach((cell, index) => {
-    const value = memory.read(address + index);
+    const value = memory.read(address + (cell.offset ?? index));
     if (cell.kind === 'string') {
       const text = String(value).slice(0, cell.bytes - 1);
       bytes[offset] = text.length;
@@ -111,7 +114,7 @@ export function decodeBinary(
         bits = BigInt.asIntN(cell.bytes * 8, bits);
       value = Number(bits);
     }
-    memory.write(address + index, value);
+    memory.write(address + (cell.offset ?? index), value);
     offset += cell.bytes;
   });
 }

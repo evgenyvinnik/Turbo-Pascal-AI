@@ -357,10 +357,10 @@ export class Asm86 {
     if (cell.kind === 'pointer' && first === last) {
       const within = pointer.offset - start;
       if (within >= 2) return 0;
-      const target = Number(this.host.read(pointer.base + first) ?? 0);
+      const target = Number(this.host.read(pointer.base + (cell.offset ?? first)) ?? 0);
       return target ? { base: target, layout: pointer.target, offset: 0 } : 0;
     }
-    const bytes = encodeBinary(this.host, pointer.base + first, layout.slice(first, last + 1));
+    const bytes = encodeBinary(this.host, this.cellsBase(pointer, first), layout.slice(first, last + 1));
     let value = 0;
     for (let i = size - 1; i >= 0; i--)
       value = value * 256 + (bytes[pointer.offset - start + i] ?? 0);
@@ -372,17 +372,22 @@ export class Asm86 {
     if (cell.kind === 'pointer' && first === last) {
       const within = pointer.offset - start;
       if (within >= 2) return;
-      this.host.write(pointer.base + first, isPointer(value) ? this.cellAddress(value) : value);
+      this.host.write(pointer.base + (cell.offset ?? first), isPointer(value) ? this.cellAddress(value) : value);
       return;
     }
     const cells = layout.slice(first, last + 1);
-    const bytes = encodeBinary(this.host, pointer.base + first, cells);
+    const bytes = encodeBinary(this.host, this.cellsBase(pointer, first), cells);
     let number = this.number(value);
     for (let i = 0; i < size; i++) {
       bytes[pointer.offset - start + i] = number & 0xff;
       number = Math.floor(number / 256);
     }
-    decodeBinary(this.host, pointer.base + first, cells, bytes);
+    decodeBinary(this.host, this.cellsBase(pointer, first), cells, bytes);
+  }
+  /** Where a slice of a layout starting at `first` is encoded from: cells
+   * with offsets of their own count from the variable's start. */
+  private cellsBase(pointer: AsmPointer, first: number): number {
+    return pointer.layout?.[first]?.offset === undefined ? pointer.base + first : pointer.base;
   }
   /** A pointer as the P-machine stores it: the address of a cell. */
   private cellAddress(pointer: AsmPointer): number {
@@ -391,7 +396,7 @@ export class Asm86 {
     const index = sums.indexOf(pointer.offset);
     if (index < 0)
       throw new PascalError('An address inside a variable cannot be stored in a pointer');
-    return pointer.base + index;
+    return pointer.base + (pointer.layout[index]?.offset ?? index);
   }
   private size(instruction: Instruction, at = 0): 1 | 2 | 4 {
     for (const operand of instruction.operands.slice(at)) {

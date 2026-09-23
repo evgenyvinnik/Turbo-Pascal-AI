@@ -32,6 +32,9 @@ export interface BuiltinParam {
   mode: ParamMode;
   /** Whether this parameter is optional */
   optional?: boolean;
+  /** A type its unit declares, such as the Dos unit's SearchRec, which the
+   * argument must have. Its byte layout is passed after its address. */
+  typeName?: string;
 }
 
 /**

@@ -93,6 +93,28 @@ end.`,
     output: ['32767  3  3.14 3 65', 'Q'],
   },
   {
+    name: 'system-names-can-be-declared-again',
+    source: `program T;
+var Double: string[5];
+procedure MaxInt; begin Write('proc ') end;
+begin
+  Double := 'abcdefg'; MaxInt;
+  WriteLn(Double, ' ', System.MaxInt, ' ', SizeOf(System.Double))
+end.`,
+    output: ['proc abcde 32767 8'],
+  },
+  {
+    name: 'dos-packtime-and-unpacktime',
+    source: `program T; uses Dos;
+var DT: DateTime; P: LongInt;
+begin
+  DT.Year := 1992; DT.Month := 10; DT.Day := 27; DT.Hour := 13; DT.Min := 45; DT.Sec := 31;
+  PackTime(DT, P); WriteLn(P);
+  UnpackTime(P + 1, DT); WriteLn(DT.Year, ' ', DT.Month, ' ', DT.Day, ' ', DT.Hour, ' ', DT.Min, ' ', DT.Sec)
+end.`,
+    output: ['425422255', '1992 10 27 13 45 32'],
+  },
+  {
     name: 'system-pchar-holds-text-and-is-indexed',
     source: `program T;
 const Names: array[0..1] of PChar = ('one', 'two'); Greeting: PChar = 'hi';

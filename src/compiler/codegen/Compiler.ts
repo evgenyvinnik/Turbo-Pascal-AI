@@ -40,13 +40,13 @@ import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/File
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { RawInstruction } from '../asm/parse';
 import { assemble, type AsmName } from '../asm/resolve';
-import type { AsmBlock, AsmVariable } from '../asm/types';
+import type { AsmBlock, AsmVariable, Operand } from '../asm/types';
 import { NativePascalRequired } from '../errors/NativePascalRequired';
 import { decodeInline, type InlineByte } from '../asm/inline';
 import { ModuleLoader, StandardUnit } from '../stdlib/modules';
 import { ParamMode, type BuiltinDef } from '../stdlib/builtin';
 import { TypeKind } from '../symbols/Symbol';
-import { Bytecode, type DebugType } from './Bytecode';
+import { Bytecode, type DebugType, type VariantPartInfo } from './Bytecode';
 import {
   roundReal48,
   integerOperation,
@@ -100,14 +100,15 @@ interface PascalType {
   index?: PascalType;
   low?: number;
   high?: number;
-  fields?: Map<string, { offset: number; type: PascalType; privateOwner?: Scope }>;
-  /** A variant record's storage, cell by cell: the fixed part, the tag, and
-   * the largest case of each variant part, as files store it. Other cases
-   * share these cells. */
+  fields?: Map<string, RecordField>;
+  /** A variant record's storage as files store it: the fixed part, the tag,
+   * and each variant part's bytes, its shadow. */
   layout?: { offset: number; type: PascalType }[];
-  /** The cells a variant record starts with: each variant part's first case,
-   * then whatever larger cases add, all zero. */
+  /** Every cell of a variant record: those of each case and the shadows. */
   initialLayout?: { offset: number; type: PascalType }[];
+  /** The variant parts in a record, its fields' records included, to bring
+   * up to date when its bytes change as a whole. */
+  variantRefresh?: { part: number; offset: number }[];
   /** Nominal identity shared by aliases and subranges of one enumeration. */
   enumeration?: object;
   procedureSignature?: { parameters: Parameter[]; result: PascalType };
@@ -123,6 +124,10 @@ interface Variable {
   result?: boolean;
   parameter?: boolean;
   container?: Variable;
+  /** A field reached through WITH that lies in variant cases: those cases,
+   * and the record type it is a field of. */
+  variants?: { part: number; case: number }[];
+  containerType?: PascalType;
   /** A typed constant: program-lifetime storage, whatever scope names it. */
   static?: boolean;
   /** A `const` parameter. */
@@ -133,6 +138,19 @@ interface StaticStore {
   offset: number;
   type: PascalType;
   value: Value;
+  /** After the stores: a variant part of the record at `offset` follows the
+   * case given. */
+  sync?: { part: number; case: number };
+}
+/** A record's field. One in a variant case lists the cases it is in, the
+ * innermost first; a store into it brings those parts up to date. */
+interface RecordField {
+  offset: number;
+  type: PascalType;
+  privateOwner?: Scope;
+  /** Where the field lies in Turbo Pascal's layout of the record. */
+  byteOffset?: number;
+  variants?: { part: number; case: number }[];
 }
 interface Constant {
   kind: 'constant';
@@ -244,6 +262,8 @@ const STANDARD_VARIABLES: readonly StandardVariable[] = [
   { name: 'DirectVideo', kind: 'boolean', initial: 1, unit: 'crt' },
   // The Printer unit's Lst, opened on LPT1 when the program starts.
   { name: 'Lst', kind: 'text', initial: 0, unit: 'printer' },
+  // The Dos unit's result of its last call.
+  { name: 'DosError', kind: 'integer', initial: 0, unit: 'dos' },
   { name: 'OvrResult', kind: 'integer', initial: 0, unit: 'overlay' },
   { name: 'OvrTrapCount', kind: 'word', initial: 0, unit: 'overlay' },
   { name: 'OvrLoadCount', kind: 'word', initial: 0, unit: 'overlay' },
@@ -285,6 +305,8 @@ export class Compiler {
   /** The standard units' types, variables and constants, for qualified names
    * such as System.Integer and Crt.TextAttr. */
   private standardSymbols = new Map<string, Map<string, Symbol>>();
+  /** The types standard units declare in Pascal, by unit. */
+  private unitDeclarations = new Map<string, Map<string, Symbol>>();
   /** Halt statements, which jump to the program's exit procedures. */
   private haltJumps: number[] = [];
   /** The program's name, which ParamStr(0) reports. */
@@ -314,6 +336,7 @@ export class Compiler {
     this.globalOffset = MARK_SIZE + STANDARD_VARIABLES.length;
     this.printerUsed = false;
     this.standardUnits = new Set();
+    this.unitDeclarations = new Map();
     this.haltJumps = [];
     this.objectTypes = [];
     this.routineValues = [];
@@ -366,11 +389,37 @@ export class Compiler {
         for (const standard of STANDARD_VARIABLES)
           if (standard.unit === name.toLowerCase()) this.declareStandard(standard);
         if (name.toLowerCase() === 'printer') this.printerUsed = true;
+        this.importUnitDeclarations(name.toLowerCase());
         continue;
       }
       const unit = this.loadUnit(name, node);
       this.scope.imports.set(name.toLowerCase(), unit.exports);
     }
+  }
+  /** A standard unit's own types, declared once from its Pascal source and
+   * imported as a source unit's are, so a program's names come first. */
+  private importUnitDeclarations(unit: string): void {
+    const source = this.modules.getUnit(unit)?.declarations;
+    if (!source) return;
+    let exports = this.unitDeclarations.get(unit);
+    if (!exports) {
+      const program = new Parser(new Lexer(new Stream(`program ${unit}; ${source} begin end.`))).parse();
+      const before = new Set(this.scope.symbols.keys());
+      this.declarations(program.block.declarations);
+      exports = new Map();
+      for (const [key, symbol] of [...this.scope.symbols]) {
+        if (before.has(key)) continue;
+        exports.set(key, symbol);
+        this.scope.symbols.delete(key);
+      }
+      this.unitDeclarations.set(unit, exports);
+    }
+    this.scope.imports.set(unit, exports);
+  }
+  /** A type a standard unit declares, as its routines take it. */
+  private unitType(unit: string, name: string): PascalType | undefined {
+    const symbol = this.unitDeclarations.get(unit)?.get(name.toLowerCase());
+    return symbol?.kind === 'type' ? symbol.type : undefined;
   }
   private loadUnit(name: string, node: Node): CompiledUnit {
     const key = name.toLowerCase(), existing = this.units.get(key);
@@ -527,6 +576,7 @@ export class Compiler {
           scope: this.scope,
           reference: false,
           container: record.pointer,
+          ...(field.variants ? { variants: field.variants, containerType: record.type } : {}),
         };
     }
     const [qualifier, member] = name.toLowerCase().split('.');
@@ -535,7 +585,7 @@ export class Compiler {
       const symbol = standard.get(member!);
       if (symbol) return symbol;
       const constant = this.modules.lookupConstant(name);
-      return constant ? { kind: 'constant', type: INTEGER, value: constant.value } : undefined;
+      if (constant) return { kind: 'constant', type: INTEGER, value: constant.value };
     }
     for (let scope: Scope | null = this.scope; scope; scope = scope.parent) {
       const symbol = scope.symbols.get(name.toLowerCase());
@@ -562,7 +612,10 @@ export class Compiler {
   private declare(name: string, symbol: Symbol, node: Node): void {
     if (this.scope.methodOwner?.fields?.has(name.toLowerCase()) || this.scope.methodOwner?.object?.methods.has(name.toLowerCase()))
       this.fail(node, `Duplicate object member "${name}"`);
-    if (this.scope.symbols.has(name.toLowerCase()))
+    // A program may declare a System or standard-unit name again, as Turbo
+    // Pascal lets it; the unit's stays reachable qualified, as System.Double.
+    const existing = this.scope.symbols.get(name.toLowerCase());
+    if (existing && ![...this.standardSymbols.values()].some((unit) => [...unit.values()].includes(existing)))
       this.fail(node, `Duplicate identifier "${name}"`);
     this.scope.symbols.set(name.toLowerCase(), symbol);
   }
@@ -885,6 +938,14 @@ export class Compiler {
         }
         case NodeType.VAR_DECLARATION: {
           const declaration = node as VarDeclarationNode;
+          // The names are declared as their type is read, so a type cannot
+          // name a variable it declares, even one a System type shares.
+          const names = new Set(declaration.names.map((name) => name.toLowerCase()));
+          const mentions = (type: unknown): boolean =>
+            typeof type === 'object' && type !== null &&
+            (((type as Node).type === NodeType.IDENTIFIER && names.has(String((type as Node).name).toLowerCase())) ||
+              Object.values(type).some((value) => (Array.isArray(value) ? value.some(mentions) : mentions(value))));
+          if (mentions(declaration.varType)) this.fail(node, 'Error in type definition');
           const type = this.resolveType(declaration.varType);
           if (declaration.absolute) {
             // The new names are views of the other variable's storage.
@@ -1189,72 +1250,74 @@ export class Compiler {
       }
       case NodeType.RECORD_TYPE: {
         const record = node as RecordTypeNode;
-        const fields = new Map<string, { offset: number; type: PascalType }>();
-        const add = (name: string, type: PascalType, offset: number, at: Node) => {
-          if (fields.has(name.toLowerCase())) this.fail(at, `Duplicate field "${name}"`);
-          fields.set(name.toLowerCase(), { offset, type });
-        };
-        // Every case of a variant part starts where the part does; the part
-        // is as large as its largest case.
+        const fields = new Map<string, RecordField>();
+        type Cell = { offset: number; type: PascalType };
+        // Each case of a variant part has cells of its own, after the cases
+        // before it; the part's shadow, as large as its largest case, holds
+        // the bytes they share. `byteStart` is where the fields start in
+        // Turbo Pascal's layout.
         const place = (
           declarations: VarDeclarationNode[],
           variant: VariantPart | undefined,
-          size: number,
-          byteSize: number
-        ): {
-          size: number;
-          byteSize: number;
-          layout: { offset: number; type: PascalType }[];
-          initial: { offset: number; type: PascalType }[];
-        } => {
-          const layout: { offset: number; type: PascalType }[] = [];
+          cell: number,
+          byteStart: number,
+          variants: { part: number; case: number }[]
+        ): { cell: number; bytes: number; storage: Cell[]; all: Cell[]; nested: { part: number; offset: number }[] } => {
+          const storage: Cell[] = [];
+          const nested: { part: number; offset: number }[] = [];
+          let bytes = 0;
+          const add = (name: string, type: PascalType, at: Node) => {
+            if (fields.has(name.toLowerCase())) this.fail(at, `Duplicate field "${name}"`);
+            fields.set(name.toLowerCase(), { offset: cell, type, byteOffset: byteStart + bytes, ...(variants.length ? { variants } : {}) });
+            storage.push({ offset: cell, type });
+            nested.push(...this.variantRefreshes(type, cell));
+            cell += type.size;
+            bytes += type.byteSize;
+          };
           for (const field of declarations) {
             const type = this.resolveType(field.varType);
-            for (const name of field.names) {
-              add(name, type, size, field);
-              layout.push({ offset: size, type });
-              size += type.size;
-              byteSize += type.byteSize;
-            }
+            for (const name of field.names) add(name, type, field);
           }
-          if (!variant) return { size, byteSize, layout, initial: layout };
+          if (!variant) return { cell, bytes, storage, all: [...storage], nested };
           const at = { type: NodeType.RECORD_TYPE, lineNumber: variant.lineNumber } as Node;
           const tagType = this.resolveType(variant.tagType);
           if (!this.ordinal(tagType)) this.fail(at, 'Variant tag must have an ordinal type');
-          if (variant.tagName) {
-            add(variant.tagName, tagType, size, at);
-            layout.push({ offset: size, type: tagType });
-            size += tagType.size;
-            byteSize += tagType.byteSize;
-          }
-          let largest = { size, byteSize, layout: [] as { offset: number; type: PascalType }[] };
-          const initial: { offset: number; type: PascalType }[] = [];
-          let end = size;
-          for (const variantCase of variant.cases) {
+          if (variant.tagName) add(variant.tagName, tagType, at);
+          const all = [...storage];
+          const part = this.bytecode.variantParts.length;
+          this.bytecode.variantParts.push({ shadow: 0, bytes: 0, cases: [] });
+          const cases: VariantPartInfo['cases'] = [];
+          let largest = 0;
+          for (const [index, variantCase] of variant.cases.entries()) {
             for (const label of variantCase.labels) {
               const values = label.type === NodeType.RANGE ? [label.low as Node, label.high as Node] : [label];
               for (const value of values) this.requireType(value, tagType, this.constant(value).type);
             }
-            const placed = place(variantCase.fields, variantCase.variant, size, byteSize);
-            const claimed = initial.reduce((top, cell) => Math.max(top, cell.offset + cell.type.size), size);
-            initial.push(...placed.initial.filter((cell) => cell.offset >= claimed));
-            end = Math.max(end, placed.size);
-            if (placed.byteSize > largest.byteSize) largest = placed;
+            const placed = place(variantCase.fields, variantCase.variant, cell, byteStart + bytes, [{ part, case: index }, ...variants]);
+            cell = placed.cell;
+            largest = Math.max(largest, placed.bytes);
+            all.push(...placed.all);
+            cases.push({
+              cells: placed.storage.flatMap((entry) => this.cells(entry.type, entry.offset)).map((entry) => ({ offset: entry.offset, cell: this.binaryCell(entry.type) })),
+              nested: placed.nested,
+            });
           }
-          return {
-            size: end,
-            byteSize: largest.byteSize,
-            layout: [...layout, ...largest.layout],
-            initial: [...layout, ...initial],
-          };
+          this.bytecode.variantParts[part] = { shadow: cell, bytes: largest, cases };
+          for (let index = 0; index < largest; index++) {
+            storage.push({ offset: cell, type: BYTE });
+            all.push({ offset: cell++, type: BYTE });
+          }
+          nested.push({ part, offset: 0 });
+          return { cell, bytes: bytes + largest, storage, all, nested };
         };
-        const placed = place(record.fields, record.variant, 0, 0);
+        const placed = place(record.fields, record.variant, 0, 0, []);
         return {
           kind: 'record',
-          size: placed.size,
-          byteSize: placed.byteSize,
+          size: placed.cell,
+          byteSize: placed.bytes,
           fields,
-          ...(record.variant ? { layout: placed.layout, initialLayout: placed.initial } : {}),
+          ...(record.variant ? { layout: placed.storage, initialLayout: placed.all } : {}),
+          ...(placed.nested.length ? { variantRefresh: placed.nested } : {}),
         };
       }
       default:
@@ -1557,6 +1620,12 @@ export class Compiler {
         this.initialize(variable.type, variable.offset);
         for (const store of stores) {
           this.emit(Opcode.LDA, 0, store.offset);
+          if (store.sync) {
+            this.literal(store.sync.part, INTEGER);
+            this.literal(store.sync.case, INTEGER);
+            this.emit(Opcode.CSP, 3, InternalProcedure.VARIANT_SYNC);
+            continue;
+          }
           this.literal(store.value, store.type);
           this.emit(Opcode.STI, this.typeCode(store.type));
         }
@@ -1811,9 +1880,13 @@ export class Compiler {
         const index = fields.findIndex(([field], position) => position >= next && field === key);
         const given = fields[index]?.[1];
         const skipped = fields.slice(next, index < 0 ? undefined : index);
-        if (!given || skipped.some(([, field]) => field.offset < given.offset))
+        // Only the fields of the other cases of a variant part may be passed over.
+        const otherCase = (field: RecordField) =>
+          field.variants?.some((variant) => given?.variants?.some((chosen) => chosen.part === variant.part && chosen.case !== variant.case));
+        if (!given || skipped.some(([, field]) => !otherCase(field)))
           this.fail(value, `Record field "${String(fields[next]?.[0])}" expected`);
         this.typedConstantValue(given.type, value, offset + given.offset, stores);
+        for (const variant of given.variants ?? []) stores.push({ offset, type: INTEGER, value: 0, sync: variant });
         next = index + 1;
       }
       return;
@@ -2019,6 +2092,9 @@ export class Compiler {
         }
         if (node.body) this.statement(node.body as Node);
         this.scope.withRecords.length = count;
+        // A record in a variant case, changed through WITH, brings the case's
+        // record up to date.
+        for (const record of node.records as Node[]) this.emitVariantSyncs(this.variantChain(record));
         return;
       }
       case NodeType.GOTO_STATEMENT: {
@@ -2109,6 +2185,7 @@ export class Compiler {
         const variables: Variable[] = [];
         const block = this.inlineBlock(node, variables);
         this.emitAssembly(block, variables);
+        for (const variable of variables) this.emitVariantRefresh({ variable }, variable.type);
         return;
       }
       default:
@@ -2244,6 +2321,16 @@ export class Compiler {
     return offsets;
   }
   private assignment(node: AssignmentNode): void {
+    // A store into a variant case brings its record's other cases up to date.
+    if (this.variantChain(node.target).length) {
+      this.withVariantSyncs([node.target], [false], ([target]) => {
+        this.assign({ ...node, target: target! });
+      });
+      return;
+    }
+    this.assign(node);
+  }
+  private assign(node: AssignmentNode): void {
     const targetType = this.expressionType(node.target, true);
     this.requireWritable(node.target);
     this.checkConstantRange(node.value, targetType);
@@ -2284,6 +2371,118 @@ export class Compiler {
     this.requireType(node.value, targetType, targetType.procedureSignature ? this.proceduralValue(node.value) : this.expression(node.value));
     this.checkRange(targetType, node);
     this.emit(Opcode.STI, this.typeCode(targetType));
+  }
+
+  /** The variant cases a designator lies in, the innermost first, each
+   * with the record it is a case of. */
+  private variantChain(node: Node): { base: Node; part: number; case: number }[] {
+    node = this.qualified(node);
+    if (node.internalVariable) return [];
+    if (node.type === NodeType.FIELD_ACCESS) {
+      const record = node.record as Node;
+      const field = this.expressionType(record).fields?.get(String(node.field).toLowerCase());
+      return [...(field?.variants ?? []).map((variant) => ({ base: record, ...variant })), ...this.variantChain(record)];
+    }
+    if (node.type === NodeType.ARRAY_ACCESS) return this.variantChain(node.array as Node);
+    if (node.type === NodeType.IDENTIFIER) {
+      const symbol = this.lookup(String(node.name));
+      if (symbol?.kind !== 'variable' || !symbol.variants || !symbol.container) return [];
+      const base = {
+        type: NodeType.POINTER_DEREF,
+        pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...symbol.container, type: { ...POINTER, base: symbol.containerType } } },
+      } as Node;
+      return symbol.variants.map((variant) => ({ base, ...variant }));
+    }
+    return [];
+  }
+  /** Whether evaluating an expression again could do something else. */
+  private hasSideEffects(node: Node): boolean {
+    if (node.type === NodeType.CALL) return true;
+    if (node.type === NodeType.IDENTIFIER && !node.internalVariable) return this.lookup(String(node.name))?.kind === 'routine';
+    return Object.values(node).some((value) =>
+      Array.isArray(value)
+        ? value.some((item) => typeof item === 'object' && item !== null && 'type' in item && this.hasSideEffects(item as Node))
+        : typeof value === 'object' && value !== null && 'type' in value && this.hasSideEffects(value as Node)
+    );
+  }
+  private replaceNode(node: Node, target: Node, replacement: Node): Node {
+    if (node === target) return replacement;
+    const copy: Node = { ...node };
+    for (const [key, value] of Object.entries(node))
+      if (typeof value === 'object' && value !== null && 'type' in value) copy[key] = this.replaceNode(value as Node, target, replacement);
+    return copy;
+  }
+  /** Compile what stores into `targets`, then bring the variant records
+   * they lie in, or that they are, up to date. A record whose address could
+   * change is found once, before. */
+  private withVariantSyncs<T>(targets: Node[], refresh: boolean[], compile: (targets: Node[]) => T): T {
+    const settled = targets.map((target) => {
+      const outer = this.variantChain(target).at(-1);
+      if (!outer || !this.hasSideEffects(outer.base)) return target;
+      const pointer = this.temp({ ...POINTER, base: this.expressionType(outer.base) });
+      this.addressVariable(pointer);
+      this.address(outer.base);
+      this.emit(Opcode.STI, TypeCode.A);
+      const replacement = { type: NodeType.POINTER_DEREF, pointer: { type: NodeType.IDENTIFIER, internalVariable: pointer }, lineNumber: target.lineNumber } as Node;
+      return this.replaceNode(target, outer.base, replacement);
+    });
+    const result = compile(settled);
+    settled.forEach((target, index) => {
+      if (refresh[index]) this.emitVariantRefresh({ node: target }, this.expressionType(target));
+      this.emitVariantSyncs(this.variantChain(target));
+    });
+    return result;
+  }
+  private emitVariantSyncs(chain: { base: Node; part: number; case: number }[]): void {
+    for (const { base, part, case: index } of chain) {
+      this.address(base);
+      this.literal(part, INTEGER);
+      this.literal(index, INTEGER);
+      this.emit(Opcode.CSP, 3, InternalProcedure.VARIANT_SYNC);
+    }
+  }
+  /** After a variable's bytes changed as a whole: its variant parts follow. */
+  private emitVariantRefresh(target: { node: Node } | { variable: Variable }, type: PascalType): void {
+    const parts = this.variantRefreshes(type, 0);
+    if (!parts.length) return;
+    if ('variable' in target) this.addressVariable(target.variable);
+    else this.address(target.node);
+    this.literal(this.bytecode.variantRefreshes.push(parts) - 1, INTEGER);
+    this.emit(Opcode.CSP, 2, InternalProcedure.VARIANT_REFRESH);
+  }
+  /** The arguments a call may store into: those passed to var parameters. */
+  private writtenArguments(node: CallNode): number[] {
+    const candidates = (indexes: number[]) =>
+      indexes.filter((index) => {
+        const argument = node.arguments[index];
+        if (!argument || ![NodeType.IDENTIFIER, NodeType.FIELD_ACCESS, NodeType.ARRAY_ACCESS, NodeType.POINTER_DEREF].includes(argument.type)) return false;
+        try {
+          return this.variantChain(argument).length > 0 || this.variantRefreshes(this.expressionType(argument), 0).length > 0;
+        } catch {
+          return false;
+        }
+      });
+    const all = node.arguments.map((_, index) => index);
+    if (node.receiver) return [];
+    const routine = this.lookupRoutine(node.name);
+    if (routine)
+      return candidates(all.filter((index) => {
+        const parameter = routine.parameters[index];
+        return parameter !== undefined && parameter.reference && !parameter.readOnly;
+      }));
+    const name = node.name.toLowerCase().replace(/^.*\./, '');
+    const builtin = this.modules.lookupProcedure(node.name)?.proc;
+    if (!builtin) {
+      const symbol = this.lookup(node.name);
+      const parameters = symbol?.kind === 'variable' ? symbol.type.procedureSignature?.parameters : undefined;
+      return parameters ? candidates(all.filter((index) => parameters[index]?.reference)) : [];
+    }
+    const known: Record<string, number[]> = {
+      inc: [0], dec: [0], str: [1], val: [1, 2], insert: [1], delete: [0], fillchar: [0], move: [1],
+      blockread: [1, 3], blockwrite: [3], getdir: [1], getmem: [0], mark: [0], new: [0],
+    };
+    if (name === 'read' || name === 'readln') return candidates(all);
+    return candidates(known[name] ?? all.filter((index) => builtin.params[index]?.mode === ParamMode.VAR));
   }
 
   /** Determine expression types without emitting code, for address/aggregate dispatch. */
@@ -2811,7 +3010,8 @@ export class Compiler {
       high = type.high,
       line = node.lineNumber ?? this.line;
     const checked = Boolean(node.rangeChecking), bits = type.byteSize * 8, signed = low < 0;
-    this.helper(`range-${String(low)}-${String(high)}-${String(line)}-${String(checked)}-${String(bits)}`, 1, (value) => {
+    // Char and Byte share their range, but not what the check returns.
+    this.helper(`range-${type.kind}-${String(low)}-${String(high)}-${String(line)}-${String(checked)}-${String(bits)}`, 1, (value) => {
       const number = typeof value === 'string' ? value.charCodeAt(0) : Number(value);
       if (checked && (number < low || number > high))
         throw new PascalError(`Range check error (${String(low)}..${String(high)})`, line);
@@ -2840,7 +3040,20 @@ export class Compiler {
     const previous = this.ioChecking;
     this.ioChecking = node.ioChecking === undefined ? true : Boolean(node.ioChecking);
     try {
-      return this.compileCall(node, expression);
+      // Arguments a call may change, which lie in variant cases or hold
+      // variant records, bring those records up to date afterwards.
+      const written = this.writtenArguments(node);
+      if (!written.length) return this.compileCall(node, expression);
+      const builtin = !this.lookupRoutine(node.name) && !node.receiver && this.modules.lookupProcedure(node.name) !== undefined;
+      return this.withVariantSyncs(
+        written.map((index) => node.arguments[index]!),
+        written.map(() => builtin),
+        (targets) => {
+          const args = [...node.arguments];
+          written.forEach((index, at) => (args[index] = targets[at]!));
+          return this.compileCall({ ...node, arguments: args }, expression);
+        }
+      );
     } finally {
       this.ioChecking = previous;
     }
@@ -2978,7 +3191,7 @@ export class Compiler {
       for (const name of names) {
         const field = type.kind === 'record' ? type.fields?.get(name.toLowerCase()) : undefined;
         if (!field) this.fail(at, `Unknown record field "${name}"`);
-        offset += this.byteOffset(type, field.offset);
+        offset += field.byteOffset ?? this.byteOffset(type, field.offset);
         type = field.type;
       }
       return { type, offset };
@@ -3055,6 +3268,8 @@ export class Compiler {
     }
     this.emitAssembly(block, keys as Variable[]);
     if (result) this.emit(Opcode.STI, this.typeCode(result.type));
+    // The block may have changed a variant record's bytes.
+    for (const variable of keys as Variable[]) this.emitVariantRefresh({ variable }, variable.type);
   }
   /** inline(...): its elements' bytes, decoded into the 8086's
    * instructions. A variable's name stands for its address. */
@@ -3125,11 +3340,52 @@ export class Compiler {
     this.emit(Opcode.CSP, sizes.length + 1, InternalProcedure.ASSEMBLY);
     return type;
   }
-  private emitAssembly(block: AsmBlock, variables: Variable[]): void {
+  private emitAssembly(block: AsmBlock, variables: (Variable | { node: Node })[]): void {
     const index = this.bytecode.assembly.push(block) - 1;
-    for (const variable of variables) this.emit(Opcode.LDA, this.scope.level - variable.scope.level, variable.offset);
+    for (const variable of variables) {
+      if ('node' in variable) this.address(variable.node);
+      else this.emit(Opcode.LDA, this.scope.level - variable.scope.level, variable.offset);
+    }
     this.literal(index, INTEGER);
     this.emit(Opcode.CSP, variables.length + 1, InternalProcedure.ASSEMBLY);
+  }
+  /** Intr and MsDos: the registers come from Regs, the interrupt runs on
+   * the machine's 8086, and Regs gets the registers and flags back. */
+  private interruptCall(node: CallNode, builtin: BuiltinDef): PascalType {
+    const args = node.arguments;
+    if (args.length !== builtin.params.length) this.fail(node, `Wrong number of arguments for "${builtin.name}"`);
+    const regs = args.at(-1)!;
+    this.requireWritable(regs);
+    const type = this.expressionType(regs);
+    if (type !== this.unitType('dos', 'Registers')) this.fail(regs, 'Type mismatch: Registers expected');
+    const line = node.lineNumber ?? this.line;
+    const keys: (Variable | { node: Node })[] = [{ node: regs }];
+    const variables: AsmVariable[] = [{ name: 'Regs', layout: this.binaryLayout(type) }];
+    let number: Operand = { kind: 'immediate', value: 0x21 };
+    if (args.length === 2) {
+      const intNo = args[0]!;
+      if (this.numericConstant(intNo)) number = { kind: 'immediate', value: Number(this.constant(intNo).value) & 0xff };
+      else {
+        const temp = this.temp(BYTE);
+        this.addressVariable(temp);
+        this.requireType(intNo, INTEGER, this.expression(intNo));
+        this.emit(Opcode.STI, TypeCode.I);
+        keys.push(temp);
+        variables.push({ name: 'IntNo', layout: [this.binaryCell(BYTE)] });
+        number = { kind: 'memory', size: 1, variable: 1, registers: [], displacement: 0 };
+      }
+    }
+    const words = ['ax', 'bx', 'cx', 'dx', 'bp', 'si', 'di', 'ds', 'es'] as const;
+    const field = (index: number): Operand => ({ kind: 'memory', size: 2, variable: 0, registers: [], displacement: index * 2 });
+    const instructions: AsmBlock['instructions'] = [
+      ...words.map((register, index) => ({ mnemonic: 'mov', operands: [{ kind: 'register', register } as Operand, field(index)], line })),
+      { mnemonic: 'int', operands: [number], line },
+      { mnemonic: 'pushf', operands: [], line },
+      { mnemonic: 'pop', operands: [field(9)], line },
+      ...words.map((register, index) => ({ mnemonic: 'mov', operands: [field(index), { kind: 'register', register } as Operand], line })),
+    ];
+    this.emitAssembly({ instructions, variables, line }, keys);
+    return VOID;
   }
   /** A System or standard-unit variable, in its fixed cell. */
   private declareStandard(standard: StandardVariable): void {
@@ -3714,7 +3970,9 @@ export class Compiler {
       this.scope.exits.push(this.emit(Opcode.UJP));
       return VOID;
     }
-    if (name === 'halt') {
+    if (builtin.procedureIndex === 331 || builtin.procedureIndex === 332) return this.interruptCall(node, builtin);
+    // Keep ends the program as Halt does; nothing stays resident.
+    if (name === 'halt' || (name === 'keep' && builtin.procedureIndex === 323)) {
       // Halt sets ExitCode, then ends the program through its exit
       // procedures, as the end of the main block does.
       this.emit(Opcode.LDA, this.scope.level, this.standardVariable('ExitCode'));
@@ -3730,6 +3988,7 @@ export class Compiler {
       (name === 'break' ? loop.breaks : loop.continues).push(this.emit(Opcode.UJP));
       return VOID;
     }
+    let layouts = 0;
     args.forEach((arg, index) => {
       const parameter = builtin.params[index];
       if (parameter?.mode === ParamMode.VAR) {
@@ -3737,6 +3996,13 @@ export class Compiler {
         const type = this.address(arg);
         if (parameter.type !== TypeKind.POINTER && parameter.type !== (type.kind as TypeKind))
           this.fail(arg, `Type mismatch in VAR argument for ${node.name}`);
+        // A unit's record, such as SearchRec, goes with its byte layout.
+        if (parameter.typeName) {
+          const expected = this.unitType(this.modules.lookupProcedure(node.name)?.unit.toLowerCase() ?? '', parameter.typeName);
+          if (type !== expected) this.fail(arg, `Type mismatch: ${parameter.typeName} expected`);
+          this.literal(JSON.stringify(this.binaryLayout(type)), STRING);
+          layouts++;
+        }
       } else {
         const text = parameter?.type === TypeKind.POINTER ? this.textConstant(arg) : undefined;
         if (text !== undefined) {
@@ -3776,21 +4042,37 @@ export class Compiler {
         operation('*', Number(value), Number(value), line)
       );
     } else {
-      this.emit(Opcode.CSP, args.length, builtin.procedureIndex);
+      this.emit(Opcode.CSP, args.length + layouts, builtin.procedureIndex);
       if (returnType.kind === 'real') this.checkRange(returnType, node);
       else if (['trunc', 'round'].includes(name)) this.checkRange(LONGINT, node);
     }
     return returnType;
   }
   private binaryLayout(type: PascalType): BinaryCell[] {
-    return this.cells(type).map((cell) => ({
-      kind: cell.type.kind,
-      bytes: cell.type.byteSize,
-      signed: (cell.type.low ?? 0) < 0,
-      ...(cell.type.kind === 'set'
-        ? { setByteOffset: Math.floor((cell.type.low ?? 0) / 8) }
-        : {}),
-    }));
+    const cells = this.cells(type);
+    // A variant record's cells, besides the bytes it stores, leave gaps.
+    const gaps = cells.some((cell, index) => cell.offset !== index);
+    return cells.map((cell) => ({ ...this.binaryCell(cell.type), ...(gaps ? { offset: cell.offset } : {}) }));
+  }
+  private binaryCell(type: PascalType): BinaryCell {
+    return {
+      kind: type.kind,
+      bytes: type.byteSize,
+      signed: (type.low ?? 0) < 0,
+      ...(type.kind === 'set' ? { setByteOffset: Math.floor((type.low ?? 0) / 8) } : {}),
+    };
+  }
+  /** The variant parts inside a type, at an offset, to bring up to date
+   * after its bytes change as a whole. */
+  private variantRefreshes(type: PascalType, offset: number): { part: number; offset: number }[] {
+    if (type.kind === 'array' && type.element) {
+      const inner = this.variantRefreshes(type.element, 0);
+      if (!inner.length) return [];
+      return Array.from({ length: type.size / type.element.size }, (_, index) =>
+        inner.map((entry) => ({ part: entry.part, offset: entry.offset + offset + index * type.element!.size }))
+      ).flat();
+    }
+    return (type.variantRefresh ?? []).map((entry) => ({ part: entry.part, offset: entry.offset + offset }));
   }
 
   private cells(type: PascalType, offset = 0): { offset: number; type: PascalType }[] {

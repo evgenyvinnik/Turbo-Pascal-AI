@@ -22,6 +22,7 @@ import { VirtualFileSystem } from './VirtualFileSystem';
 import { roundReal48 } from '../codegen/numeric';
 import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
+import { VariantRuntime } from './Variants';
 
 /** How many 8086 instructions an asm block runs before the machine lets
  * the rest of the program, and the page, have a turn. */
@@ -119,6 +120,8 @@ export class Machine {
   private assemblyResume:
     | { pc: number; sp: number; state: AsmState; key: boolean; handler?: { mp: number; parameters: number; registers: number[] } }
     | undefined;
+  /** Keeps variant records' cases in step with their bytes. */
+  private variants: VariantRuntime;
   /** The frames of interrupt procedures running now, innermost last. */
   private interruptFrames: number[] = [];
   /** When the timer next ticks, 18.2 times a second. */
@@ -155,6 +158,10 @@ export class Machine {
   constructor(bytecode: Bytecode, config: MachineConfig = {}) {
     this.bytecode = bytecode;
     this.standardCells = new Map(bytecode.standardVariables.map((standard) => [standard.name, standard.address]));
+    this.variants = new VariantRuntime(
+      { read: (address) => this.peek(address), write: (address, value) => { this.poke(address, value); } },
+      bytecode.variantParts
+    );
     this.config = {
       stackSize: config.stackSize ?? 65536,
       heapSize: config.heapSize ?? 65536,
@@ -1021,6 +1028,14 @@ export class Machine {
       this.push(copy);
       return;
     }
+    if (procedureIndex === (InternalProcedure.VARIANT_SYNC as number)) {
+      this.variants.sync(Number(args[0]), Number(args[1]), Number(args[2]));
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.VARIANT_REFRESH as number)) {
+      for (const { part, offset } of this.bytecode.variantRefreshes[Number(args[1])] ?? []) this.variants.refresh(Number(args[0]) + offset, part);
+      return;
+    }
     if (procedureIndex === (InternalProcedure.FREE_HEAP_COPY as number)) {
       this.free(Number(args[0]));
       return;
@@ -1097,6 +1112,7 @@ export class Machine {
     const service = this.services.invoke(procedureIndex, args, this.bytecode.ioChecks[this.pc - 1] ?? true);
     if (service) {
       if (service.ioError) this.pc = this.bytecode.ioErrorTargets[this.pc - 1] ?? this.pc;
+      if (service.dosError !== undefined) this.setStandardValue('DosError', service.dosError);
       if (service.result !== undefined) this.push(service.result);
       if (service.delay !== undefined && service.delay > 0) {
         this.wakeTime = Date.now() + service.delay;
