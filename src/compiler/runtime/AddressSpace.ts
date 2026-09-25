@@ -1,5 +1,5 @@
 import { PascalError } from '../errors/PascalError';
-import { EMPTY_SEGMENT, sameShape, shapeCell, shapeSize, type Bytecode, type SegmentLayout, type ViewShape } from '../codegen/Bytecode';
+import { EMPTY_SEGMENT, sameShape, shapeBytes, shapeCell, shapeSize, type Bytecode, type SegmentLayout, type ViewShape } from '../codegen/Bytecode';
 import { cellAtByte, decodeBinary, encodeBinary, layoutSize, readBytes, writeBytes, type BinaryCell } from './BinaryCodec';
 import type { MemoryAccess } from './FileRuntime';
 import type { Heap, HeapBlock } from './Heap';
@@ -46,8 +46,13 @@ export interface Region {
   refresh: { part: number; offset: number }[];
   /** The cells of variables with variant parts. */
   variantCells: [number, number][];
-  /** The view of it as its own variables, once made. */
+  /** The view of it as its own variables, once made, and that view as @
+   * gives it, bounded by each variable. */
   identity?: number;
+  boundedIdentity?: number;
+  /** Whether it holds variables one after another, as the data segment and
+   * a frame do, rather than one variable. */
+  variables?: boolean;
   /** A frame's routine, which a later call at the same place may differ in. */
   routine?: number;
 }
@@ -67,6 +72,12 @@ interface View {
   identity: boolean;
   /** Memory outside the program's variables, by address alone. */
   raw?: boolean;
+  /** The bytes of the variable @ took the address of, in the region: the
+   * view reaches only these. */
+  bound?: [number, number];
+  /** A view of a region as its own variables, from @: what is retyped from
+   * it reaches only the variable the address lies in. */
+  bounded?: boolean;
 }
 
 /** Where an address points: a byte of a region, or of memory with no
@@ -149,7 +160,7 @@ export class AddressSpace {
     let region = this.regions.get(key);
     if (!region) {
       region = {
-        key, target, layout: segment.layout, shape: segment.shape, refresh: this.refreshList(segment.refresh), variantCells: segment.variantCells,
+        key, target, layout: segment.layout, shape: segment.shape, refresh: this.refreshList(segment.refresh), variantCells: segment.variantCells, variables: true,
         ...(linear !== undefined ? { linear } : {}),
       };
       this.regions.set(key, region);
@@ -182,7 +193,7 @@ export class AddressSpace {
     const region: Region = {
       key: `frame:${String(frame.base)}:${String(frame.routine)}:${String(frame.linear)}`, target: frame.base,
       layout: frame.segment.layout, shape: frame.segment.shape, linear: frame.linear, refresh: this.refreshList(frame.segment.refresh),
-      variantCells: frame.segment.variantCells, routine: frame.routine,
+      variantCells: frame.segment.variantCells, routine: frame.routine, variables: true,
     };
     this.frameRegions.set(frame.base, region);
     return region;
@@ -438,6 +449,20 @@ export class AddressSpace {
     region.identity ??= this.viewId(`identity:${region.key}`, () => ({ region, shape: region.shape, start: 0, syncs: [], identity: true }));
     return this.viewAddress(region.identity);
   }
+  /** A region shown as its own variables, as @ gives addresses in it: a
+   * pointer of another type that holds one reaches only its variable. */
+  private boundedIdentity(region: Region): number {
+    region.boundedIdentity ??= this.viewId(`bounded:${region.key}`, () => ({ region, shape: region.shape, start: 0, syncs: [], identity: true, bounded: true }));
+    return this.viewAddress(region.boundedIdentity);
+  }
+  /** The bytes, in its region, of the variable holding a cell: one of a
+   * segment's variables, or the whole of any other region. */
+  private variableBytes(region: Region, cell: number): [number, number] {
+    const whole: [number, number] = [0, layoutSize(region.layout)];
+    if (!region.variables || region.shape.kind !== 'record') return whole;
+    const field = region.shape.fields.find((candidate) => cell >= candidate.offset && cell < candidate.offset + candidate.cells);
+    return field ? [field.byte, field.byte + (field.bytes ?? shapeBytes(field.shape))] : whole;
+  }
   /** Memory shown as a type from a linear address. */
   private rawView(linear: number, shape: ViewShape, map: number): number {
     const region: Region = { key: `raw:${String(linear)}`, target: 0, layout: [], shape, linear, refresh: [], variantCells: [] };
@@ -475,7 +500,7 @@ export class AddressSpace {
     const shape = this.host.bytecode.viewMaps[map] ?? { kind: 'record', fields: [] };
     if (identity !== 0 && cell < this.host.cells) {
       const place = this.placeOfCell(cell);
-      if (place) return this.identity(place.region) + (cell - place.region.target);
+      if (place) return this.boundedIdentity(place.region) + (cell - place.region.target);
     }
     const place = identity !== 0 ? undefined : this.placeOf(target);
     if (place && 'linear' in place) return this.rawView(place.linear + start, shape, map) + (cell - target);
@@ -547,13 +572,17 @@ export class AddressSpace {
     const entry = shapeCell(at.view.shape, at.offset);
     if (!entry) return pointer;
     let byOffset = this.shapeMatches.get(at.id * 65536 + map);
-    if (!byOffset) this.shapeMatches.set(at.id * 65536 + map, (byOffset = new Map()));
+    if (!byOffset) this.shapeMatches.set(at.id * 65536 + map, (byOffset = new Map<number, boolean>()));
     let matches = byOffset.get(at.offset);
     if (matches === undefined) {
       matches = sameShape(at.view.shape, at.offset, shape);
       byOffset.set(at.offset, matches);
     }
     const { view } = at;
+    // Past the variable @ took the address of, the type is a view of bytes
+    // that stops where the variable does.
+    const bound = view.bound ?? (view.bounded ? this.variableBytes(view.region, at.offset) : undefined);
+    if (matches && view.bounded && bound && view.start + entry.byte + shapeBytes(shape) > bound[1]) matches = false;
     if (matches) {
       // The variable's own cell, unless it lies in a record with variant
       // parts that the type covers only part of: stores into such a record's
@@ -566,6 +595,7 @@ export class AddressSpace {
     }
     const id = this.viewId(`retype:${String(at.id)}:${String(at.offset)}:${String(map)}`, () => ({
       region: view.region, shape, start: view.start + entry.byte, syncs: view.syncs, identity: false, ...(view.raw ? { raw: true } : {}),
+      ...(bound ? { bound } : {}),
     }));
     return this.viewAddress(id);
   }
@@ -601,8 +631,13 @@ export class AddressSpace {
     for (const sync of view.syncs) this.host.variants.sync(sync.base, sync.part, sync.case);
     return true;
   }
+  /** Whether bytes from `start` lie outside the variable a view is bound to. */
+  private beyond(view: View, start: number, length: number): void {
+    if (view.bound && (start < view.bound[0] || start + length > view.bound[1])) throw new PascalError('Access beyond the variable');
+  }
   private viewBytes(view: View, byte: number, length: number): Uint8Array {
     const start = view.start + byte, region = view.region;
+    this.beyond(view, start, length);
     if (view.raw) return this.readLinear((region.linear ?? 0) + start, length);
     if (start >= 0 && start + length <= layoutSize(region.layout))
       return readBytes(this.host.memory, region.target, region.layout, start, length);
@@ -611,6 +646,7 @@ export class AddressSpace {
   }
   private putViewBytes(view: View, byte: number, bytes: Uint8Array): void {
     const start = view.start + byte, region = view.region;
+    this.beyond(view, start, bytes.length);
     if (view.raw) {
       this.writeLinear((region.linear ?? 0) + start, bytes);
       return;

@@ -44,12 +44,21 @@ describe('The data segment', () => {
     expect(Array.from(disk.read('A.DAT'), (char) => char.charCodeAt(0))).toEqual([1, 1, 2, 3]);
   });
 
-  it('reads past a variable through a pointer, into what follows it', () => {
+  it('reads past a variable through a pointer Ptr made, into what follows it', () => {
     expect(
       output(`program T; type PLong = ^LongInt; TWords = array[0..1] of Word;
       var a: array[0..1] of Byte; b: Word; p: ^TWords;
-      begin a[0] := 1; a[1] := 2; b := $0403; WriteLn(PLong(@a)^); p := @a; WriteLn(p^[1]); p^[1] := 9; WriteLn(b) end.`)
+      begin a[0] := 1; a[1] := 2; b := $0403; WriteLn(PLong(Ptr(Seg(a), Ofs(a)))^); p := Ptr(Seg(a), Ofs(a)); WriteLn(p^[1]);
+        p^[1] := 9; WriteLn(b) end.`)
     ).toEqual(['67305985', '1027', '9']);
+  });
+
+  it('stops a pointer @ made at the end of its variable, with a run-time error', () => {
+    const machine = new Machine(compile(`program T; type PLong = ^LongInt; TWords = array[0..1] of Word;
+      var a: array[0..1] of Byte; b: Word; p: ^TWords;
+      begin a[0] := 1; a[1] := 2; b := $0403; p := @a; WriteLn(p^[0]); WriteLn(p^[1]) end.`));
+    expect(() => { machine.run(); }).toThrow(/Access beyond the variable/);
+    expect(machine.getOutput()).toEqual(['513']);
   });
 
   it('gives Ptr(Seg(X), Ofs(X)) the bytes of X, as any pointer type sees them', () => {

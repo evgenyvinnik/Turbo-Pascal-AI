@@ -4442,7 +4442,7 @@ export class Compiler {
         byte += cell.bytes;
       }
       pad(start + type.byteSize - byte);
-      fields.push({ offset, cells: type.size, byte: start, shape: this.viewShape(type) });
+      fields.push({ offset, cells: type.size, byte: start, bytes: type.byteSize, shape: this.viewShape(type) });
       refreshes.push(...this.variantRefreshes(type, offset));
       variantCells.push(...this.variantRanges(type, offset));
       if (even) pad(byte % 2);

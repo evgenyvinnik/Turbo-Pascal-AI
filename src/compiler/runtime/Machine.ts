@@ -23,7 +23,6 @@ import { roundReal48 } from '../codegen/numeric';
 import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
 import { VariantRuntime } from './Variants';
-import type { BinaryCell } from './BinaryCodec';
 import type { MemoryAccess } from './FileRuntime';
 import { AddressSpace, HEAP_BYTES, LINEAR_BASE, PORT_BASE, STACK_SEGMENT, STACK_TOP } from './AddressSpace';
 import { Heap, type BlockType } from './Heap';
