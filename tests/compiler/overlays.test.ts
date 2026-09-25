@@ -206,6 +206,45 @@ describe('Pointers of another type', () => {
   });
 });
 
+describe('Reading past the variable through a pointer', () => {
+  const failure = (source: string) => {
+    const machine = new Machine(compile(source), { maxInstructions: 2_000_000 });
+    expect(() => { machine.run(); }).toThrow(/Access beyond the variable/);
+    expect(machine.getState()).toBe(MachineState.ERROR);
+    return machine.getOutput();
+  };
+
+  it('is a run-time error rather than the memory that follows', () => {
+    expect(failure(`program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; WriteLn(pl^) end.`)).toEqual([]);
+    expect(failure(`program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; pl^ := 7 end.`)).toEqual([]);
+    expect(
+      failure(`program T; type T8 = array[0..7] of Byte; var l, x: LongInt; p: ^T8;
+      begin l := 1; x := 5; p := @l; WriteLn(p^[3]); WriteLn(p^[4]) end.`)
+    ).toEqual(['0']);
+    expect(
+      failure(`program T; type TR = record a, b: Word end; var r: TR; pl: ^LongInt; pw: ^Word;
+      begin r.a := 1; r.b := 2; pw := @r.a; pl := Pointer(pw); WriteLn(pl^); pw := @r.b; pl := Pointer(pw); WriteLn(pl^) end.`)
+    ).toEqual(['131073']);
+    expect(
+      failure(`program T; var a: array[1..2] of Byte; pw: ^Word;
+      begin a[1] := 1; a[2] := 2; pw := @a[1]; WriteLn(pw^); pw := @a[2]; WriteLn(pw^) end.`)
+    ).toEqual(['513']);
+    expect(
+      failure(`program T; procedure P(var x: Word); var pl: ^LongInt; begin pl := @x; WriteLn(pl^) end;
+      var w: Word; begin w := 1; P(w) end.`)
+    ).toEqual([]);
+  });
+
+  it('leaves addresses made by Ptr or from a string character plain, reading on past the variable', () => {
+    expect(
+      output(`program T; var l: LongInt; w, x: Word; s: string[3]; b: Byte; pw: ^Word; pl: ^LongInt;
+      begin l := $00050006; pw := Ptr(Seg(l), Ofs(l)); WriteLn(pw^);
+        w := 1; x := 2; pl := Ptr(Seg(w), Ofs(w)); WriteLn(pl^);
+        s := 'ABC'; b := 1; pw := @s[1]; WriteLn(pw^); pw := @s[3]; WriteLn(pw^) end.`)
+    ).toEqual(['6', '131073', '16961', '323']);
+  });
+});
+
 describe('FileRec and TextRec', () => {
   it("show a file's handle, mode, record size and name", () => {
     expect(

@@ -15,7 +15,7 @@ import type { BinaryCell } from '../runtime/BinaryCodec';
 export type ViewShape =
   | { kind: 'cell'; cell: BinaryCell }
   | { kind: 'array'; count: number; cells: number; bytes: number; element: ViewShape }
-  | { kind: 'record'; fields: { offset: number; cells: number; byte: number; shape: ViewShape }[] };
+  | { kind: 'record'; fields: { offset: number; cells: number; byte: number; bytes?: number; shape: ViewShape }[] };
 
 /** The cell at a cell offset in a shape, and the byte it starts at. */
 export function shapeCell(shape: ViewShape, offset: number): { byte: number; cell: BinaryCell } | undefined {
@@ -52,6 +52,13 @@ function fieldAt(shape: RecordShape, offset: number): RecordShape['fields'][numb
   }
   const field = fields[low];
   return field && offset >= field.offset && offset < field.offset + field.cells ? field : undefined;
+}
+
+/** How many bytes a shape spans. */
+export function shapeBytes(shape: ViewShape): number {
+  if (shape.kind === 'cell') return shape.cell.bytes;
+  if (shape.kind === 'array') return shape.count * shape.bytes;
+  return shape.fields.reduce((size, field) => Math.max(size, field.byte + (field.bytes ?? shapeBytes(field.shape))), 0);
 }
 
 /** How many cells a shape spans. */

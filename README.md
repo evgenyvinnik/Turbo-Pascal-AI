@@ -374,15 +374,21 @@ programs may need porting or an imported original toolchain. The native DOS
 emulator can execute imported 16-bit programs, but does not make the two Pascal
 compilers ABI-compatible.
 
-The P-machine keeps one address space, so every segment is zero: `Seg`, `CSeg`,
-`DSeg` and `SSeg` return 0, `Ofs` returns an address and `Ptr(Seg(X), Ofs(X))`
-is `@X`. A variable typecast such as `WordRec(W).Lo`, `LongInt(S)` of a `Single`
-or `Bytes(L)[0]` sees the variable's bytes as the type, which must be the
+The P-machine lays the program out as Turbo Pascal does: the globals and typed
+constants at `DSeg` ($2000), word aligned under `{$A+}`, each routine's frame
+at `SSeg` ($3000), and the heap from `HeapOrg` ($4000) in 8-byte steps, with
+`CSeg` at $1000. `Seg`, `Ofs`, `Ptr`, `Mem`, `MemW`, `MemL`, `Port`, `FillChar`,
+`Move`, `BlockRead` and `BlockWrite` work on those bytes, so `Ptr(Seg(X),
+Ofs(X))` is `@X` and `FillChar` or `Move` run on past a variable into the next.
+A variable typecast such as `WordRec(W).Lo`, `LongInt(S)` of a `Single` or
+`Bytes(L)[0]` sees the variable's bytes as the type, which must be the
 variable's size. `@X` gives an address that knows the variable X lies in, so a
 pointer of any type that holds it, as `PW := @L` does, reads and writes that
-variable's bytes as its own type wherever it is dereferenced. Reading past the
-variable is a run-time error rather than whatever memory follows it, and an
-address made by `Ptr` or from a string's character is a plain one. It does not
+variable's bytes as its own type wherever it is dereferenced. Reading or
+writing past the variable through such a pointer is a run-time error rather
+than whatever memory follows it. An address made by `Ptr` or from a string's
+character is a plain one, which reads memory byte by byte, past the variable
+too. It does not
 implement original overlay/linker formats, `.BGI` loading, or all compiler
 switches. A structure may be up to
 65520 bytes, as in Turbo Pascal, but a variable must fit its frame, so a type
