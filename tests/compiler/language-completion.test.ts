@@ -168,11 +168,11 @@ it('round trips untyped binary buffers with signed, unsigned and Real6 cells', (
   ).toEqual(['-12,60000,2.5,abcd,14']);
 });
 
-it('rejects unsafe binary-buffer sizes and invalid forward type cycles', () => {
-  expect(() =>
-    execute(`program T;var f:file;b:Byte;
-    begin Assign(f,'too-big');Rewrite(f,1);BlockWrite(f,b,100)end.`)
-  ).toThrow(/buffer|Buffer/);
+it('writes the memory past a small buffer, and rejects invalid forward type cycles', () => {
+  expect(
+    execute(`program T;var f:file;b:Byte;c:Byte;
+    begin b:=1;c:=2;Assign(f,'big');Rewrite(f,1);BlockWrite(f,b,100);WriteLn(FileSize(f));Seek(f,1);BlockRead(f,b,1);WriteLn(b)end.`).getOutput()
+  ).toEqual(['100', '2']);
   expect(() => compile('program T;type R=record value:R end;var r1:R;begin end.')).toThrow(
     /Forward type/
   );

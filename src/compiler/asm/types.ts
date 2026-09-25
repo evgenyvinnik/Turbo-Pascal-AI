@@ -26,6 +26,8 @@ export type Operand =
       variable?: number;
       registers: WordRegister[];
       displacement: number;
+      /** A segment override, as ES:[DI]. */
+      segment?: SegmentRegister;
     }
   | { kind: 'label'; target: number };
 

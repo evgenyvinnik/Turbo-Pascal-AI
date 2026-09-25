@@ -152,6 +152,9 @@ export enum BuiltinProcedure {
   PARAMSTR = 90,
   SEG = 91,
   OFS = 92,
+  CSEG = 600,
+  DSEG = 601,
+  SSEG = 602,
   SPTR = 93,
   TYPEOF = 94,
   MARK = 95,
@@ -704,18 +707,18 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
   },
   ...(
     [
-      ['Seg', 'the segment of a variable, always 0 in the P-machine'],
-      ['CSeg', 'the code segment, always 0 in the P-machine'],
-      ['DSeg', 'the data segment, always 0 in the P-machine'],
-      ['SSeg', 'the stack segment, always 0 in the P-machine'],
+      ['Seg', 'The segment a variable lies in', BuiltinProcedure.SEG],
+      ['CSeg', 'The code segment', BuiltinProcedure.CSEG],
+      ['DSeg', 'The data segment, which holds the globals and typed constants', BuiltinProcedure.DSEG],
+      ['SSeg', 'The stack segment, which holds the locals', BuiltinProcedure.SSEG],
     ] as const
-  ).map(([name, description]) => ({
+  ).map(([name, description, procedureIndex]) => ({
     name,
     isFunction: true,
     returnType: TypeKind.INTEGER,
     params: name === 'Seg' ? [{ name: 'X', type: TypeKind.POINTER, mode: ParamMode.VAR }] : [],
     description,
-    procedureIndex: BuiltinProcedure.SEG,
+    procedureIndex,
   })),
   ...(['SeekEof', 'SeekEoln'] as const).map((name) => ({
     name,
@@ -788,7 +791,7 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
       { name: 'Seg', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
       { name: 'Ofs', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
     ],
-    description: 'A pointer to a segment and offset; the P-machine keeps one address space',
+    description: 'A pointer to a segment and offset',
     procedureIndex: BuiltinProcedure.PTR,
   },
   {

@@ -165,6 +165,8 @@ export interface VarDeclarationNode extends Node {
   varType: Node;
   /** `absolute V`: the variables share V's storage. */
   absolute?: string;
+  /** `absolute Seg:Ofs`: the variables lie at that address. */
+  address?: Node[];
 }
 
 /**
@@ -442,6 +444,8 @@ export interface ArrayAccessNode extends Node {
   type: NodeType.ARRAY_ACCESS;
   array: Node;
   indices: Node[];
+  /** `[Seg:Ofs]`, as Mem takes: the indices are a segment and offset. */
+  segmented?: boolean;
 }
 
 /**

@@ -6,6 +6,7 @@ import { typedConstantCases } from './typed-constant-corpus';
 import { parameterCases } from './parameter-corpus';
 import { variantRecordCases } from './variant-record-corpus';
 import { overlayCases } from './overlay-corpus';
+import { memoryCases } from './memory-corpus';
 import { systemCases } from './system-corpus';
 import { diagnosticCases } from './diagnostic-corpus';
 /** Portable TP-mode programs, checked against an independent Free Pascal run. */
@@ -175,4 +176,4 @@ WriteLn(u,',',v,',',w);i:=${String(dividend)};j:=${String(divisor)};WriteLn(i di
   });
 }
 
-export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases, ...coprocessorCases, ...typedConstantCases, ...parameterCases, ...variantRecordCases, ...overlayCases, ...systemCases, ...diagnosticCases];
+export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases, ...coprocessorCases, ...typedConstantCases, ...parameterCases, ...variantRecordCases, ...overlayCases, ...memoryCases, ...systemCases, ...diagnosticCases];

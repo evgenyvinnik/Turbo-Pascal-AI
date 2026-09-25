@@ -4,6 +4,7 @@ import { registerSize } from '../asm/types';
 import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { MemoryAccess } from './FileRuntime';
 import type { TextConsole } from './TextConsole';
+import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
 
 /** An address the P-machine can follow: a variable's cells, a byte offset
  * into them, and the layout that turns those cells into bytes. */
@@ -11,6 +12,9 @@ export interface AsmPointer {
   base: number;
   layout: BinaryCell[] | undefined;
   offset: number;
+  /** Memory by address, from a segment register: its segment's first byte,
+   * which `offset` counts from. */
+  linear?: number;
   /** What a pointer cell at the start of this memory points at. */
   target?: BinaryCell[] | undefined;
 }
@@ -30,6 +34,11 @@ export interface AsmHost extends MemoryAccess {
   handles(number: number): boolean;
   /** The scan code of the last key, which port 60h reads. */
   scanCode(): number;
+  /** Memory by linear address, as a segment and offset reach it. */
+  readLinear?(linear: number, length: number): Uint8Array;
+  writeLinear?(linear: number, bytes: Uint8Array): void;
+  /** The address a pointer register holding memory by address stores. */
+  linearPointer?(linear: number): number;
 }
 
 /** An interrupt procedure's parameters, in order: the registers the
@@ -200,7 +209,7 @@ export class Asm86 {
     this.state = state ?? {
       index: 0,
       registers: { ax: 0, cx: 0, dx: 0, bx: 0, sp: 0xfffe, bp: 0, si: 0, di: 0 },
-      segments: { es: 0, cs: 0, ss: 0, ds: 0 },
+      segments: { es: DATA_SEGMENT, cs: CODE_SEGMENT, ss: STACK_SEGMENT, ds: DATA_SEGMENT },
       flags: FLAG.if,
       stack: [],
       calls: [],
@@ -330,8 +339,27 @@ export class Asm86 {
           pointer = value;
         } else offset += value;
       }
-    if (!pointer) throw new PascalError('Absolute memory addresses are not supported');
+    if (!pointer) return this.absolute(operand.kind === 'memory' ? operand.segment ?? (operand.registers.includes('bp') ? 'ss' : 'ds') : 'ds', offset);
     return { ...pointer, offset: pointer.offset + offset };
+  }
+  /** Memory at a segment register and an offset, as the 8086 addresses it. */
+  private absolute(segment: 'es' | 'cs' | 'ss' | 'ds', offset: number): AsmPointer {
+    return { base: 0, layout: undefined, offset: offset & 0xffff, linear: this.state.segments[segment] * 16 };
+  }
+  /** Where a register points: at a variable, or at memory by address. */
+  private pointerIn(register: WordRegister, segment: 'es' | 'ds'): AsmPointer {
+    const value = this.register(register);
+    return isPointer(value) ? value : this.absolute(segment, value);
+  }
+  private readAbsolute(pointer: AsmPointer, size: number): number {
+    const bytes = this.linearHost().readLinear!(((pointer.linear ?? 0) + pointer.offset) % 0x100000, size);
+    let value = 0;
+    for (let i = size - 1; i >= 0; i--) value = value * 256 + (bytes[i] ?? 0);
+    return value;
+  }
+  private linearHost(): AsmHost {
+    if (!this.host.readLinear || !this.host.writeLinear) throw new PascalError('Absolute memory addresses are not supported');
+    return this.host;
   }
   /** The cells covering `size` bytes at a pointer. */
   private span(
@@ -350,6 +378,7 @@ export class Asm86 {
     return { first, last, start: sums[first]!, sums, layout };
   }
   private read(pointer: AsmPointer, size: number): AsmValue {
+    if (pointer.linear !== undefined) return this.readAbsolute(pointer, size);
     const { first, last, start, layout } = this.span(pointer, size);
     const cell = layout[first]!;
     // A pointer cell reads as an address the assembler can follow, with
@@ -367,6 +396,16 @@ export class Asm86 {
     return value;
   }
   private write(pointer: AsmPointer, size: number, value: AsmValue): void {
+    if (pointer.linear !== undefined) {
+      const bytes = new Uint8Array(size);
+      let number = isPointer(value) ? this.cellAddress(value) : value;
+      for (let i = 0; i < size; i++) {
+        bytes[i] = number & 0xff;
+        number = Math.floor(number / 256);
+      }
+      this.linearHost().writeLinear!(((pointer.linear ?? 0) + pointer.offset) % 0x100000, bytes);
+      return;
+    }
     const { first, last, start, layout } = this.span(pointer, size);
     const cell = layout[first]!;
     if (cell.kind === 'pointer' && first === last) {
@@ -391,6 +430,8 @@ export class Asm86 {
   }
   /** A pointer as the P-machine stores it: the address of a cell. */
   private cellAddress(pointer: AsmPointer): number {
+    if (pointer.linear !== undefined)
+      return this.host.linearPointer?.(((pointer.linear) + pointer.offset) % 0x100000) ?? 0;
     if (!pointer.layout) return pointer.base;
     const sums = prefixes(pointer.layout);
     const index = sums.indexOf(pointer.offset);
@@ -862,8 +903,7 @@ export class Asm86 {
         return undefined;
       case 'xlat':
       case 'xlatb': {
-        const table = this.register('bx');
-        if (!isPointer(table)) throw new PascalError('Absolute memory addresses are not supported');
+        const table = this.pointerIn('bx', 'ds');
         this.setRegister(
           'al',
           this.read({ ...table, offset: table.offset + this.number(this.register('al')) }, 1)
@@ -912,11 +952,9 @@ export class Asm86 {
         ? { ...value, offset: value.offset + step }
         : (value + step) & 0xffff;
     };
-    const at = (register: 'si' | 'di'): AsmPointer => {
-      const value = r[register];
-      if (!isPointer(value)) throw new PascalError('Absolute memory addresses are not supported');
-      return value;
-    };
+    // SI in DS, or the segment the instruction names; DI always in ES.
+    const at = (register: 'si' | 'di'): AsmPointer =>
+      this.pointerIn(register, register === 'di' ? 'es' : 'ds');
     const once = (): boolean => {
       switch (kind) {
         case 'movs':
@@ -1009,8 +1047,7 @@ export class Asm86 {
   }
   /** A text string at DS:DX ending in '$'. */
   private dollarString(): string {
-    const start = this.register('dx');
-    if (!isPointer(start)) throw new PascalError('Absolute memory addresses are not supported');
+    const start = this.pointerIn('dx', 'ds');
     let text = '';
     for (let offset = start.offset; ; offset++) {
       const byte = this.number(this.read({ ...start, offset }, 1));

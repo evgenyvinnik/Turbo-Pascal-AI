@@ -8,6 +8,19 @@ import { roundReal48 } from '../codegen/numeric';
 export interface MemoryAccess {
   read(address: number): StackValue;
   write(address: number, value: StackValue): void;
+  /** A string's characters, those past its length included, which a
+   * shorter string stored over it leaves in place. */
+  characters?(address: number): string | undefined;
+  setCharacters?(address: number, characters: string): void;
+  /** A pointer as its bytes hold it, segment and offset, and back. */
+  pointerBits?(value: StackValue): number;
+  pointerValue?(bits: number): StackValue;
+  /** Bytes at an address, running on past its variable into whatever
+   * follows it, as FillChar, Move, BlockRead and BlockWrite reach them; and
+   * how far they can reach. */
+  bytesAt?(address: number, layout: BinaryCell[], length: number): Uint8Array;
+  putBytes?(address: number, layout: BinaryCell[], bytes: Uint8Array): void;
+  reach?(address: number, layout: BinaryCell[]): number;
 }
 interface FileHandle {
   name: string;
@@ -361,7 +374,8 @@ export class FileRuntime {
         if (!typed || values.length !== file.words)
           throw new PascalError('Typed file record size mismatch');
         const data = encodeBinary(
-          { read: (offset) => values[offset] ?? 0, write: () => undefined },
+          { read: (offset) => values[offset] ?? 0, write: () => undefined,
+            ...(this.memory.pointerBits ? { pointerBits: this.memory.pointerBits.bind(this.memory) } : {}) },
           0,
           file.layout
         );
@@ -401,7 +415,7 @@ export class FileRuntime {
         const count = Number(args[2]),
           resultAddress = Number(args[3]),
           layout = this.layoutOf(args[4]);
-        const bufferSize = layout.reduce((total, cell) => total + cell.bytes, 0);
+        const bufferSize = this.memory.reach?.(Number(args[1]), layout) ?? layout.reduce((total, cell) => total + cell.bytes, 0);
         const size = count * file.recordSize;
         if (!Number.isInteger(count) || count < 0 || size > bufferSize)
           throw new PascalError('Block I/O exceeds buffer size');
@@ -417,10 +431,11 @@ export class FileRuntime {
             content.slice(position, position + actual * file.recordSize),
             (char) => char.charCodeAt(0)
           );
-          decodeBinary(this.memory, Number(args[1]), layout, data);
+          if (this.memory.putBytes) this.memory.putBytes(Number(args[1]), layout, data);
+          else decodeBinary(this.memory, Number(args[1]), layout, data);
         } else {
           if (position > content.length) throw new PascalError('Invalid file position');
-          const data = encodeBinary(this.memory, Number(args[1]), layout).subarray(0, size);
+          const data = this.memory.bytesAt?.(Number(args[1]), layout, size) ?? encodeBinary(this.memory, Number(args[1]), layout).subarray(0, size);
           let text = '';
           for (let i = 0; i < data.length; i++) text += String.fromCharCode(data[i]!);
           this.disk.write(

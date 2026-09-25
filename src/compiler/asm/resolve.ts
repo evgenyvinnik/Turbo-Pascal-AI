@@ -2,10 +2,12 @@ import { PascalError } from '../errors/PascalError';
 import type { AsmExpression, RawInstruction, RawOperand } from './parse';
 import {
   registerSize,
+  SEGMENT_REGISTERS,
   type AsmBlock,
   type AsmVariable,
   type Instruction,
   type Operand,
+  type SegmentRegister,
   type WordRegister,
 } from './types';
 
@@ -350,6 +352,7 @@ export function assemble(
             : {}),
           registers: registers as WordRegister[],
           displacement: value.constant,
+          ...(raw.segment && (SEGMENT_REGISTERS as readonly string[]).includes(raw.segment) ? { segment: raw.segment as SegmentRegister } : {}),
         };
       }
       const value = evaluate(raw.expression);
@@ -377,6 +380,7 @@ export function assemble(
           variable: slot(value.variable.key, value.variable.variable),
           registers: [],
           displacement: value.constant,
+          ...(raw.segment && (SEGMENT_REGISTERS as readonly string[]).includes(raw.segment) ? { segment: raw.segment as SegmentRegister } : {}),
         };
       }
       return { kind: 'immediate', value: value.constant };

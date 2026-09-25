@@ -163,10 +163,6 @@ describe('The built-in assembler in the P-machine', () => {
     expect(() => compile('program T; begin asm movl ax, 1 end end.')).toThrow(
       /Invalid assembler instruction/
     );
-    const absolute = new Machine(compile('program T; begin asm mov ax, [0] end end.'));
-    expect(() => {
-      absolute.run();
-    }).toThrow(/Absolute memory addresses are not supported/);
     const loop = new Machine(compile('program T; begin asm @l: jmp @l end end.'), {
       maxInstructions: 50_000,
     });

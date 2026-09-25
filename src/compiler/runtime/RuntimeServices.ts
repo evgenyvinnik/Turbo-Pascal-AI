@@ -10,11 +10,18 @@ import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont } from './StrokeFont';
 import { roundReal48 } from '../codegen/numeric';
 import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
+import type { ViewShape } from '../codegen/Bytecode';
+import type { BlockType } from './Heap';
+import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
+
+const BYTE_CELL: BinaryCell = { kind: 'integer', bytes: 1, signed: false };
 
 interface Host extends MemoryAccess {
-  allocate(words: number, defaults: StackValue[]): number;
+  /** A heap block: its cells, what they start as, its bytes, and how the
+   * bytes lie when its type is known. */
+  allocate(words: number, defaults: StackValue[], bytes?: number, type?: BlockType & { map?: number }): number;
   free(address: number): void;
-  /** Free heap space, in total and in the largest block, in cells. */
+  /** Free heap space, in total and in the largest block, in bytes. */
   heapAvailable(): { total: number; largest: number };
   /** The current stack pointer, which SPtr reports. */
   stackPointer(): number;
@@ -24,6 +31,12 @@ interface Host extends MemoryAccess {
   sound(frequency: number): void;
   /** A layout by its number, as an untyped parameter's caller passes it. */
   layout?(id: number): BinaryCell[];
+  /** A type's view map and its list of variant parts, by number. */
+  viewMap?(id: number): ViewShape | undefined;
+  refreshes?(id: number): { part: number; offset: number }[];
+  /** Seg and Ofs of an address, and the address Ptr makes. */
+  segmentOf?(address: number): { segment: number; offset: number };
+  pointer?(segment: number, offset: number): number;
 }
 interface Result {
   result?: StackValue;
@@ -171,6 +184,48 @@ export class RuntimeServices {
     this.vectors.clear();
     this.host.sound(0);
   }
+  /** A heap block's type: `count` of a type, by its layout and map, then
+   * `rest` bytes. */
+  private blockType(layout: number, map: number, refresh: number, variants: StackValue | undefined, count: number, rest: number,
+    unitBytes = 0, unitCells = 0): BlockType {
+    const cells = this.host.layout?.(layout) ?? [], shape = this.host.viewMap?.(map);
+    const parts = refresh >= 0 ? (this.host.refreshes?.(refresh) ?? []) : [];
+    const ranges = typeof variants === 'string' ? (JSON.parse(variants) as [number, number][]) : [];
+    if (count === 1 && rest === 0 && shape)
+      return { layout: cells, shape, refresh: parts, variantCells: ranges };
+    const repeated: BinaryCell[] = [];
+    for (let index = 0; index < count; index++)
+      cells.forEach((cell, at) => repeated.push({ ...cell, offset: index * unitCells + (cell.offset ?? at) }));
+    for (let index = 0; index < rest; index++) repeated.push({ ...BYTE_CELL, offset: count * unitCells + index });
+    const byte: ViewShape = { kind: 'cell', cell: BYTE_CELL };
+    return {
+      layout: repeated,
+      shape: { kind: 'record', fields: [
+        ...(count && shape ? [{ offset: 0, cells: count * unitCells, byte: 0, shape: { kind: 'array' as const, count, cells: unitCells, bytes: unitBytes, element: shape } }] : []),
+        ...(rest ? [{ offset: count * unitCells, cells: rest, byte: count * unitBytes, shape: { kind: 'array' as const, count: rest, cells: 1, bytes: 1, element: byte } }] : []),
+      ] },
+      refresh: Array.from({ length: count }, (_, index) => parts.map((part) => ({ part: part.part, offset: part.offset + index * unitCells }))).flat(),
+      variantCells: Array.from({ length: count }, (_, index) =>
+        ranges.map(([from, to]): [number, number] => [from + index * unitCells, to + index * unitCells])).flat(),
+    };
+  }
+  /** Bytes at an address, as far as they reach. */
+  private reach(address: number, layout: BinaryCell[]): number {
+    return this.host.reach?.(address, layout) ?? layout.reduce((size, cell) => size + cell.bytes, 0);
+  }
+  private bytesAt(address: number, layout: BinaryCell[], length: number): Uint8Array {
+    if (this.host.bytesAt) return this.host.bytesAt(address, layout, length);
+    return encodeBinary(this.host, address, layout).subarray(0, length);
+  }
+  private putBytes(address: number, layout: BinaryCell[], bytes: Uint8Array): void {
+    if (this.host.putBytes) {
+      this.host.putBytes(address, layout, bytes);
+      return;
+    }
+    const target = encodeBinary(this.host, address, layout);
+    target.set(bytes.subarray(0, target.length));
+    decodeBinary(this.host, address, layout, target);
+  }
   /** A byte layout: written out, or by its number. */
   layoutOf(value: StackValue | undefined): BinaryCell[] {
     if (typeof value === 'number') return this.host.layout?.(value) ?? [];
@@ -183,9 +238,13 @@ export class RuntimeServices {
       d = Number(args[3]);
     const readString = (address: number) => String(this.host.read(address) ?? '');
     switch (index) {
+      // New: the type's cells, bytes and layout, so a pointer of another
+      // type sees the block's bytes.
       case 4: {
         const defaults = typeof args[2] === 'string' ? (JSON.parse(args[2]) as StackValue[]) : [];
-        this.host.write(a, this.host.allocate(b, defaults));
+        const [bytes = b, layout, map, refresh = -1] = args.slice(3, 7).map(Number);
+        const type = layout === undefined || map === undefined ? undefined : this.blockType(layout, map, refresh, args[7], 1, 0);
+        this.host.write(a, this.host.allocate(b, defaults, bytes, type && map !== undefined ? { ...type, map } : type));
         return {};
       }
       case 5:
@@ -194,19 +253,17 @@ export class RuntimeServices {
         return {};
       // FillChar and Move work on the variables' bytes, in the layout their
       // types give, so a cell holding a word changes byte by byte.
+      // A count past the variable runs on into what follows it in memory.
       case 60: {
         const layout = this.layoutOf(args[3]);
-        const bytes = encodeBinary(this.host, a, layout);
-        bytes.fill(typeof args[2] === 'string' ? args[2].charCodeAt(0) : c & 255, 0, Math.max(0, Math.min(b, bytes.length)));
-        decodeBinary(this.host, a, layout, bytes);
+        const count = Math.max(0, Math.min(b, this.reach(a, layout)));
+        this.putBytes(a, layout, new Uint8Array(count).fill(typeof args[2] === 'string' ? args[2].charCodeAt(0) : c & 255));
         return {};
       }
       case 61: {
-        const source = encodeBinary(this.host, a, this.layoutOf(args[3]));
-        const layout = this.layoutOf(args[4]);
-        const target = encodeBinary(this.host, b, layout);
-        target.set(source.subarray(0, Math.max(0, Math.min(c, source.length, target.length))));
-        decodeBinary(this.host, b, layout, target);
+        const source = this.layoutOf(args[3]), target = this.layoutOf(args[4]);
+        const count = Math.max(0, Math.min(c, this.reach(a, source), this.reach(b, target)));
+        this.putBytes(b, target, this.bytesAt(a, source, count));
         return {};
       }
       case 63:
@@ -215,9 +272,21 @@ export class RuntimeServices {
         return { result: a & 255 };
       case 65:
         return { result: ((a & 255) << 8) | ((a >> 8) & 255) };
+      // GetMem: as many bytes as asked for, which hold as many of the
+      // pointer's type (or of an array's element) as fit, then bytes.
       case 84: {
-        const defaults = typeof args[2] === 'string' ? (JSON.parse(args[2]) as StackValue[]) : [];
-        this.host.write(a, this.host.allocate(Math.max(1, b, defaults.length), defaults));
+        const unit = typeof args[2] === 'string' ? (JSON.parse(args[2]) as StackValue[]) : [];
+        const [layout, map, unitBytes = 0, unitCells = 0, refresh = -1] = args.slice(3, 8).map(Number);
+        if (!Number.isInteger(b) || b < 0) throw new PascalError('Invalid allocation size');
+        if (layout === undefined || map === undefined) {
+          this.host.write(a, this.host.allocate(Math.max(1, b, unit.length), unit));
+          return {};
+        }
+        const count = unitBytes > 0 ? Math.floor(b / unitBytes) : 0, rest = b - count * unitBytes;
+        const type = this.blockType(layout, map, refresh, args[8], count, rest, unitBytes, unitCells);
+        const defaults = Array.from({ length: count }, () => unit).flat();
+        this.host.write(a, this.host.allocate(Math.max(1, count * unitCells + rest), defaults, b,
+          count === 1 && rest === 0 ? { ...type, map } : type));
         return {};
       }
       case 85:
@@ -230,12 +299,17 @@ export class RuntimeServices {
       case 88:
         throw new PascalError(`Run-time error ${String(args.length ? a : 0)}`);
       case 42:
-        // One address space: a pointer is its offset, and every segment is 0.
-        return { result: a * 16 + b };
+        return { result: this.host.pointer?.(a, b) ?? a * 16 + b };
       case 91:
-        return { result: 0 };
+        return { result: this.host.segmentOf?.(a).segment ?? 0 };
       case 92:
-        return { result: a };
+        return { result: this.host.segmentOf?.(a).offset ?? a };
+      case 600:
+        return { result: CODE_SEGMENT };
+      case 601:
+        return { result: DATA_SEGMENT };
+      case 602:
+        return { result: STACK_SEGMENT };
       case 93:
         return { result: this.host.stackPointer() };
       // Turbo Pascal's own generator: RandSeed carries the sequence, so a

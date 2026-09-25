@@ -44,8 +44,11 @@ export enum InternalProcedure {
    * address @ took of a variable of another layout becomes a view of its
    * bytes as the type. */
   RETYPE = 909,
-  /** Two pointers about to be compared, as the cells they address. */
+  /** Two pointers about to be compared, as the bytes they address. */
   NORMALIZE_POINTERS = 910,
+  /** Port[P] and PortW[P]: an address that reads and writes an I/O port,
+   * from the port and how many bytes it moves. */
+  PORT = 911,
 }
 
 /**

@@ -460,18 +460,23 @@ export class Parser {
       const names = this.parseIdentifierList();
       this.expectSymbol(':');
       const varType = this.parseType();
-      // `absolute` is a directive, not a reserved word.
+      // `absolute` is a directive, not a reserved word. It names a variable,
+      // or a segment and offset as constants.
       let absolute: string | undefined;
+      let address: Node[] | undefined;
       if (this.currentToken.isIdentifier() && this.currentToken.value.toLowerCase() === 'absolute') {
         this.advance();
-        if (!this.currentToken.isIdentifier())
-          throw new PascalError('Absolute memory addresses are not supported', this.lineNumber);
-        absolute = this.expectIdentifier();
+        const target = this.parseExpression();
+        if (this.isSymbol(':')) {
+          this.advance();
+          address = [target, this.parseExpression()];
+        } else if (target.type === NodeType.IDENTIFIER) absolute = String(target.name);
+        else throw new PascalError('Variable identifier expected', this.lineNumber);
       }
       this.expectSymbol(';');
 
       variables.push(
-        this.node(NodeType.VAR_DECLARATION, { names, varType, ...(absolute ? { absolute } : {}) }, line)
+        this.node(NodeType.VAR_DECLARATION, { names, varType, ...(absolute ? { absolute } : {}), ...(address ? { address } : {}) }, line)
       );
     }
 
@@ -1332,14 +1337,21 @@ export class Parser {
         this.advance();
         const indices: Node[] = [];
         indices.push(this.parseExpression());
+        // Mem[Seg:Ofs] and its kin take a segment and offset.
+        let segmented = false;
+        if (this.isSymbol(':')) {
+          this.advance();
+          indices.push(this.parseExpression());
+          segmented = true;
+        }
 
-        while (this.isSymbol(',')) {
+        while (!segmented && this.isSymbol(',')) {
           this.advance();
           indices.push(this.parseExpression());
         }
 
         this.expectSymbol(']');
-        node = this.node(NodeType.ARRAY_ACCESS, { array: node, indices, ...switches }, line);
+        node = this.node(NodeType.ARRAY_ACCESS, { array: node, indices, ...(segmented ? { segmented } : {}), ...switches }, line);
       } else if (this.isSymbol('.')) {
         this.advance();
         const field = this.expectIdentifier();

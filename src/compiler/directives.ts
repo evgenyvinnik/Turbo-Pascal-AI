@@ -15,18 +15,21 @@ export interface CompilerSwitches {
   extendedSyntax: boolean;
   /** $T: @ gives a pointer to its operand's type rather than an untyped one. */
   typedPointers: boolean;
+  /** $A: variables and typed constants larger than a byte start on an even
+   * address. */
+  alignData: boolean;
 }
 
 export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
   completeBooleanEvaluation: false, rangeChecking: false, strictVarStrings: true,
   openStrings: false, ioChecking: true, overflowChecking: false, farCalls: false,
-  numericProcessing: false, extendedSyntax: true, typedPointers: false,
+  numericProcessing: false, extendedSyntax: true, typedPointers: false, alignData: true,
 });
 
 const switchNames: Record<string, keyof CompilerSwitches> = {
   B: 'completeBooleanEvaluation', R: 'rangeChecking', V: 'strictVarStrings',
   P: 'openStrings', I: 'ioChecking', Q: 'overflowChecking', F: 'farCalls',
-  N: 'numericProcessing', X: 'extendedSyntax', T: 'typedPointers',
+  N: 'numericProcessing', X: 'extendedSyntax', T: 'typedPointers', A: 'alignData',
 };
 
 /** Apply a switch list such as $B+,R-,I+; include filenames are not switches. */

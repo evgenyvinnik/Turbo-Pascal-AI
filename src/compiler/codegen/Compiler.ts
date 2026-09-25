@@ -37,6 +37,7 @@ import {
 import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
 import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/FileRuntime';
+import { LINEAR_BASE } from '../runtime/AddressSpace';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { RawInstruction } from '../asm/parse';
 import { assemble, type AsmName } from '../asm/resolve';
@@ -44,9 +45,9 @@ import type { AsmBlock, AsmVariable, Operand } from '../asm/types';
 import { NativePascalRequired } from '../errors/NativePascalRequired';
 import { decodeInline, type InlineByte } from '../asm/inline';
 import { ModuleLoader, StandardUnit } from '../stdlib/modules';
-import { ParamMode, type BuiltinDef } from '../stdlib/builtin';
+import { BuiltinProcedure, ParamMode, type BuiltinDef } from '../stdlib/builtin';
 import { TypeKind } from '../symbols/Symbol';
-import { Bytecode, type DebugType, type VariantPartInfo, type ViewShape } from './Bytecode';
+import { Bytecode, type DebugType, type SegmentLayout, type VariantPartInfo, type ViewShape } from './Bytecode';
 import {
   roundReal48,
   integerOperation,
@@ -140,6 +141,11 @@ interface Variable {
   static?: boolean;
   /** A `const` parameter. */
   readOnly?: boolean;
+  /** Declared under $A+: a variable larger than a byte starts on an even
+   * address. */
+  aligned?: boolean;
+  /** Declared `absolute Seg:Ofs`: the address it lies at, as Ptr makes it. */
+  absolute?: number;
 }
 /** One scalar cell of a typed constant's initial value. */
 interface StaticStore {
@@ -378,6 +384,7 @@ export class Compiler {
     for (const routine of this.scope.routines) this.compileRoutine(routine);
     // Typed constants in routines take program storage beyond the globals.
     this.scope.nextOffset = Math.max(this.scope.nextOffset, this.globalOffset);
+    this.bytecode.dataSegment = this.dataSegment([...this.initializationOrder.flatMap((unit) => unit.scope.locals), ...this.scope.locals]);
     // Unit globals share the program activation, but retain separate lexical namespaces.
     this.scope.locals.unshift(...this.initializationOrder.flatMap(unit => unit.scope.locals));
     this.bytecode.setStartAddress();
@@ -663,6 +670,12 @@ export class Compiler {
     return variable;
   }
   private addressVariable(variable: Variable): void {
+    if (variable.absolute !== undefined) {
+      this.literal(variable.absolute, INTEGER);
+      this.literal(this.viewMapId(variable.type), INTEGER);
+      this.emit(Opcode.CSP, 2, InternalProcedure.RETYPE);
+      return;
+    }
     if (variable.view) {
       const target = variable.view.target;
       this.emitView(() => { this.addressVariable(target); }, () => { this.emitLayoutOf(target); }, variable.type, 0,
@@ -974,6 +987,14 @@ export class Compiler {
               Object.values(type).some((value) => (Array.isArray(value) ? value.some(mentions) : mentions(value))));
           if (mentions(declaration.varType)) this.fail(node, 'Error in type definition');
           const type = this.resolveType(declaration.varType);
+          if (declaration.address) {
+            // At a segment and offset: whatever lies there, seen as the type.
+            const [segment, offset] = declaration.address.map((part) => this.ordinalValue(this.constant(part).value) & 0xffff);
+            const absolute = LINEAR_BASE + (((segment ?? 0) * 16 + (offset ?? 0)) % 0x100000);
+            for (const name of declaration.names)
+              this.declare(name, { kind: 'variable', name, type, offset: 0, scope: this.scope, reference: false, absolute }, node);
+            break;
+          }
           if (declaration.absolute) {
             const found = this.lookup(declaration.absolute);
             if (found?.kind !== 'variable')
@@ -990,8 +1011,11 @@ export class Compiler {
                 : { kind: 'variable', name, type, offset: target.offset, scope: target.scope, reference: false, view: { target } }, node);
             break;
           }
-          for (const name of declaration.names)
-            this.scope.locals.push(this.variable(name, type, node));
+          for (const name of declaration.names) {
+            const variable = this.variable(name, type, node);
+            variable.aligned = (node as { alignData?: boolean }).alignData !== false;
+            this.scope.locals.push(variable);
+          }
           break;
         }
         case NodeType.PROCEDURE:
@@ -1589,6 +1613,7 @@ export class Compiler {
     const parent = this.scope, previousFile = this.sourceFile;
     if (typeof declaration.sourceFile === 'string') this.sourceFile = declaration.sourceFile;
     this.scope = this.newScope(parent, routine.name);
+    const parameters: Variable[] = [];
     this.scope.constructorBody = routine.declaration.routineKind === 'constructor';
     if (routine.methodOwner) {
       this.scope.methodOwner = routine.methodOwner;
@@ -1619,6 +1644,7 @@ export class Compiler {
         parameter.reference || Boolean(type.openArray)
       );
       variable.parameter = true;
+      parameters.push(variable);
       if (parameter.readOnly) variable.readOnly = true;
       if (untyped) type.untypedLayout = this.variable(`$layout_${parameter.name}`, INTEGER, declaration);
       if (parameter.openString) {
@@ -1633,6 +1659,7 @@ export class Compiler {
     this.declarations(declaration.block.declarations);
     for (const child of this.scope.routines) this.compileRoutine(child);
     routine.address = this.bytecode.getNextAddress();
+    this.bytecode.frames[routine.address] = this.frame(routine, parameters);
     for (const patch of routine.patches) this.patch(patch, routine.address);
     if (declaration.interrupt)
       this.bytecode.interruptHandlers[routine.proceduralId] = { address: routine.address, parameters: routine.parameters.length };
@@ -1837,10 +1864,10 @@ export class Compiler {
         return integer(name === 'trunc' ? Math.trunc(real) : Math.sign(real) * Math.round(Math.abs(real)));
       }
       case 'ptr': {
-        // A segment and offset; the P-machine has no such addresses, but
-        // Ptr(0, 0) is nil.
-        const offset = second ? this.ordinalValue(this.constant(second).value) : 0;
-        return { kind: 'constant', type: POINTER, value: ordinal() * 16 + offset };
+        // A segment and offset: a linear address, which finds its variable
+        // when it is used. Ptr(0, 0) is nil.
+        const segment = ordinal() & 0xffff, offset = (second ? this.ordinalValue(this.constant(second).value) : 0) & 0xffff;
+        return { kind: 'constant', type: POINTER, value: segment || offset ? LINEAR_BASE + ((segment * 16 + offset) % 0x100000) : 0 };
       }
       default:
         return this.fail(call, 'Constant expression expected');
@@ -1868,6 +1895,7 @@ export class Compiler {
       scope: root,
       reference: false,
       static: true,
+      aligned: (node as { alignData?: boolean }).alignData !== false,
     };
     const stores: StaticStore[] = [];
     this.typedConstantValue(type, node.value, offset, stores);
@@ -2431,6 +2459,7 @@ export class Compiler {
       const base = {
         type: NodeType.POINTER_DEREF,
         pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...symbol.container, type: { ...POINTER, base: symbol.containerType } } },
+        exact: true,
       } as Node;
       return symbol.variants.map((variant) => ({ base, ...variant }));
     }
@@ -2559,6 +2588,7 @@ export class Compiler {
       }
       case NodeType.POINTER_DEREF: {
         const pointer = this.expressionType(node.pointer as Node);
+        if (this.untypedPointer(pointer)) return UNTYPED;
         if (pointer.kind !== 'pointer' || !pointer.base || pointer.base.kind === 'void')
           this.fail(node, 'Typed pointer required');
         return pointer.base;
@@ -2594,6 +2624,8 @@ export class Compiler {
       }
       case NodeType.ARRAY_ACCESS: {
         const access = node as ArrayAccessNode;
+        const memory = this.memoryAccess(node);
+        if (memory) return memory.type;
         let type = this.expressionType(access.array);
         if (this.charPointer(type) && access.indices.length === 1) return CHAR;
         for (const index of access.indices) {
@@ -2687,6 +2719,7 @@ export class Compiler {
         return base.kind === 'untyped' || node.typedPointer !== true ? POINTER : { ...POINTER, base };
       }
       case NodeType.POINTER_DEREF: {
+        if (this.untypedPointer(this.expressionType(node.pointer as Node))) this.fail(node, 'Typed pointer required');
         const type = this.address(node);
         if (this.aggregate(type))
           this.fail(node, 'Aggregate pointer value requires an assignment or matching parameter');
@@ -2724,6 +2757,12 @@ export class Compiler {
       case NodeType.CALL:
         return this.call(node as CallNode, true);
       case NodeType.ARRAY_ACCESS: {
+        const memory = this.memoryAccess(node);
+        if (memory) {
+          memory.emit();
+          this.emit(Opcode.LDI, this.typeCode(memory.type));
+          return memory.type;
+        }
         const callbackType = this.expressionType(node, true);
         if (callbackType.procedureSignature) return this.proceduralCall({ ...node, type: NodeType.CALL, name: '$indirect', arguments: [] }, true, { node, type: callbackType });
         const access = node as ArrayAccessNode;
@@ -2914,6 +2953,11 @@ export class Compiler {
   private emitAddress(node: Node): PascalType {
     node = this.qualified(node);
     this.line = node.lineNumber ?? this.line;
+    const memory = this.memoryAccess(node);
+    if (memory) {
+      memory.emit();
+      return memory.type;
+    }
     if (node.internalVariable) {
       const variable = node.internalVariable as Variable; this.addressVariable(variable); return variable.type;
     }
@@ -2927,7 +2971,8 @@ export class Compiler {
         return reinterpreted.type;
       }
       const pointer = this.expression(node.pointer as Node);
-      if (pointer.kind !== 'pointer' || !pointer.base || pointer.base.kind === 'void')
+      const untyped = this.untypedPointer(pointer);
+      if (!untyped && (pointer.kind !== 'pointer' || !pointer.base || pointer.base.kind === 'void'))
         this.fail(node, 'Typed pointer required');
       const line = node.lineNumber ?? this.line;
       this.helper(`pointer-check-${String(line)}`, 1, (value) => {
@@ -2935,9 +2980,12 @@ export class Compiler {
           throw new PascalError('Nil pointer dereference', line);
         return value;
       });
+      // An untyped pointer's target is an untyped variable, as Move and an
+      // untyped parameter take one.
+      if (untyped || !pointer.base) return UNTYPED;
       // An address @ took of a variable of another type shows its bytes as
-      // this pointer's type.
-      if (!['untyped', 'file'].includes(pointer.base.kind) && !pointer.base.object) {
+      // this pointer's type. A WITH statement's record is its own type.
+      if (!['untyped', 'file'].includes(pointer.base.kind) && !pointer.base.object && node.exact !== true) {
         this.literal(this.viewMapId(pointer.base), INTEGER);
         this.emit(Opcode.CSP, 2, InternalProcedure.RETYPE);
       }
@@ -3440,7 +3488,7 @@ export class Compiler {
     const index = this.bytecode.assembly.push(block) - 1;
     for (const variable of variables) {
       if ('node' in variable) this.address(variable.node);
-      else if (variable.view) this.addressVariable(variable);
+      else if (variable.view || variable.absolute !== undefined) this.addressVariable(variable);
       else this.emit(Opcode.LDA, this.scope.level - variable.scope.level, variable.offset);
     }
     this.literal(index, INTEGER);
@@ -3519,7 +3567,10 @@ export class Compiler {
     const operand = this.qualified(cast.operand);
     const source = operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
     if (source?.kind !== 'variable') {
-      this.address(cast.operand);
+      // P^ of an untyped pointer: whatever lies there, seen as the type.
+      if (operand.type === NodeType.POINTER_DEREF)
+        this.emitView(() => { this.address(cast.operand); }, () => { this.literal(-1, INTEGER); }, cast.type, 0, -1, []);
+      else this.address(cast.operand);
       return;
     }
     this.emitView(() => { this.address(cast.operand); }, () => { this.emitLayoutOf(source); }, cast.type, 0, -1, []);
@@ -3571,12 +3622,12 @@ export class Compiler {
     if (node.type === NodeType.POINTER_DEREF || node.type === NodeType.CALL) return node;
     if (node.type !== NodeType.IDENTIFIER || node.internalVariable) return undefined;
     const symbol = this.lookup(String(node.name));
-    if (symbol?.kind !== 'variable' || symbol.view || symbol.result) return undefined;
+    if (symbol?.kind !== 'variable' || symbol.view || symbol.result || symbol.absolute !== undefined) return undefined;
     if (symbol.container) {
       // A field of a WITH record: the record itself.
       const record = symbol.containerType;
       return record && !record.object
-        ? ({ type: NodeType.POINTER_DEREF, pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...symbol.container, type: { ...POINTER, base: record } } } } as Node)
+        ? ({ type: NodeType.POINTER_DEREF, pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...symbol.container, type: { ...POINTER, base: record } } }, exact: true } as Node)
         : undefined;
     }
     return node;
@@ -3686,7 +3737,7 @@ export class Compiler {
         if (routine) {
           if (routine.privateOwner && !this.inModule(routine.privateOwner)) this.fail(node, `Private object method "${node.name}"`);
           return { routine, type: record.type, receiver: { type: NodeType.POINTER_DEREF,
-            pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...record.pointer, type: { ...POINTER, base: record.type } } } } };
+            pointer: { type: NodeType.IDENTIFIER, internalVariable: { ...record.pointer, type: { ...POINTER, base: record.type } } }, exact: true } };
         }
       }
     }
@@ -3843,6 +3894,8 @@ export class Compiler {
     if (builtin.procedureIndex >= 350 && builtin.procedureIndex <= 370 && builtin.returnType === TypeKind.POINTER)
       return { ...POINTER, base: CHAR };
     if (name === 'hi' || name === 'lo') return BYTE;
+    // Segments and offsets are words.
+    if (['seg', 'ofs', 'sptr', 'cseg', 'dseg', 'sseg'].includes(name)) return WORD;
     if (name === 'swap' && arguments_[0]) return this.promoteInteger(this.expressionType(arguments_[0]));
     if (['trunc', 'round', 'filepos', 'filesize'].includes(name)) return LONGINT;
     const types: Partial<Record<TypeKind, PascalType>> = {
@@ -3889,8 +3942,9 @@ export class Compiler {
       if (name === 'new') {
         this.literal(type.base.size, INTEGER);
         this.literal(JSON.stringify(this.defaults(type.base)), STRING);
+        this.blockType(type.base, false);
       }
-      this.emit(Opcode.CSP, name === 'new' ? 3 : 1, builtin.procedureIndex);
+      this.emit(Opcode.CSP, name === 'new' ? 8 : 1, builtin.procedureIndex);
       if (name === 'new' && methodCall) {
         this.call(methodCall, true);
         const failed = this.emit(Opcode.FJP), done = this.emit(Opcode.UJP);
@@ -3948,6 +4002,8 @@ export class Compiler {
         if (type.openArray) this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
         if (type.kind === 'untyped') {
           const operand = this.qualified(argument);
+          // P^ of an untyped pointer: the bytes at its address.
+          if (operand.type === NodeType.POINTER_DEREF) return () => { this.literal(-1, INTEGER); };
           const source = operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
           if (source?.kind !== 'variable') this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
           return () => { this.emitLayoutOf(source); };
@@ -3994,11 +4050,14 @@ export class Compiler {
       if (pointer.kind !== 'pointer' || pointer.procedureSignature) this.fail(args[0]!, 'Pointer variable required');
       this.requireType(args[1]!, INTEGER, this.expression(args[1]!));
       if (name === 'getmem') {
-        // A typed pointer's block starts as New would leave it.
-        const base = pointer.base && pointer.base.kind !== 'void' ? this.defaults(pointer.base) : [];
-        this.literal(JSON.stringify(base), STRING);
+        // The block holds as many of the pointer's type as fit, or of its
+        // element for an array type, each as New would leave it, then bytes.
+        const base = pointer.base && pointer.base.kind !== 'void' ? pointer.base : BYTE;
+        const unit = base.kind === 'array' && base.element && !base.openArray ? base.element : base;
+        this.literal(JSON.stringify(this.defaults(unit)), STRING);
+        this.blockType(unit, true);
       }
-      this.emit(Opcode.CSP, name === 'getmem' ? 3 : 2, builtin.procedureIndex);
+      this.emit(Opcode.CSP, name === 'getmem' ? 9 : 2, builtin.procedureIndex);
       return VOID;
     }
     if (name === 'typeof') {
@@ -4068,6 +4127,7 @@ export class Compiler {
       const operand = this.qualified(args[1]!);
       const source = buffer.kind === 'untyped' && operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
       if (source?.kind === 'variable') this.emitLayoutOf(source);
+      else if (buffer.kind === 'untyped') this.literal(-1, INTEGER);
       else this.literal(JSON.stringify(this.binaryLayout(buffer)), STRING);
       this.emit(Opcode.CSP, 5, builtin.procedureIndex);
       return VOID;
@@ -4274,6 +4334,121 @@ export class Compiler {
       ...(type.kind === 'set' ? { setByteOffset: Math.floor((type.low ?? 0) / 8) } : {}),
     };
   }
+  /** Pointer, whose target is an untyped variable. */
+  private untypedPointer(type: PascalType): boolean {
+    return type.kind === 'pointer' && !type.procedureSignature && (!type.base || type.base.kind === 'void');
+  }
+  /** Mem, MemW and MemL[Seg:Ofs], a byte, word or long integer of memory,
+   * and Port and PortW[P], an I/O port's byte or word: the type, and how to
+   * find the address. A program may declare the names for itself. */
+  private memoryAccess(node: Node): { type: PascalType; emit: () => void } | undefined {
+    if (node.type !== NodeType.ARRAY_ACCESS) return undefined;
+    const access = node as ArrayAccessNode, array = this.qualified(access.array);
+    if (array.type !== NodeType.IDENTIFIER) return undefined;
+    const name = String(array.name).toLowerCase().replace(/^system\./, '');
+    const types: Record<string, PascalType> = { mem: BYTE, memw: WORD, meml: LONGINT, port: BYTE, portw: WORD };
+    const type = types[name];
+    if (!type || (String(array.name).toLowerCase() === name && this.lookup(name))) return undefined;
+    const port = name.startsWith('port');
+    if (port ? access.indices.length !== 1 || access.segmented : !access.segmented || access.indices.length !== 2)
+      this.fail(node, port ? `${String(array.name)} takes one port number` : `${String(array.name)} takes a segment and offset, as [Seg:Ofs]`);
+    return {
+      type,
+      emit: () => {
+        for (const index of access.indices) this.requireType(index, INTEGER, this.expression(index));
+        if (port) {
+          this.literal(type.byteSize, INTEGER);
+          this.emit(Opcode.CSP, 2, InternalProcedure.PORT);
+          return;
+        }
+        this.emit(Opcode.CSP, 2, BuiltinProcedure.PTR);
+        this.literal(this.viewMapId(type), INTEGER);
+        this.emit(Opcode.CSP, 2, InternalProcedure.RETYPE);
+      },
+    };
+  }
+  /** How a heap block of a type lies in bytes, for New and GetMem: its
+   * bytes (for New), layout and map, its size (for GetMem), its variant
+   * parts, and the records that have them. */
+  private blockType(type: PascalType, repeated: boolean): void {
+    if (!repeated) this.literal(type.byteSize, INTEGER);
+    this.literal(this.layoutId(type), INTEGER);
+    this.literal(this.viewMapId(type), INTEGER);
+    if (repeated) {
+      this.literal(type.byteSize, INTEGER);
+      this.literal(type.size, INTEGER);
+    }
+    this.literal(this.refreshListId(type), INTEGER);
+    this.literal(JSON.stringify(this.variantRanges(type, 0)), STRING);
+  }
+  /** The data segment as Turbo Pascal lays it out: typed constants, the
+   * System unit's first, then the variables, System's, the standard units'
+   * and then those of the units and the program in the order they were
+   * compiled. */
+  private dataSegment(variables: Variable[]): SegmentLayout {
+    const present = STANDARD_VARIABLES.filter((standard) => !standard.unit || this.standardUnits.has(standard.unit));
+    const types = { word: WORD, longint: LONGINT, integer: INTEGER, byte: BYTE, boolean: BOOLEAN, pointer: POINTER, text: TEXTFILE };
+    const standard = (names: readonly string[]) =>
+      names.flatMap((name) => present.filter((entry) => entry.name === name))
+        .map((entry) => ({ offset: this.standardVariable(entry.name), type: types[entry.kind], aligned: true }));
+    return this.segmentLayout([
+      ...standard(['HeapOrg', 'HeapPtr', 'HeapEnd', 'ExitProc', 'ExitCode', 'ErrorAddr', 'RandSeed', 'Test8086', 'Test8087', 'FileMode']),
+      ...this.typedConstants.map(({ variable }) => ({ offset: variable.offset, type: variable.type, aligned: variable.aligned !== false })),
+      ...standard(['Input', 'Output']),
+      ...standard(present.filter((entry) => entry.unit).map((entry) => entry.name)),
+      ...variables.map((variable) => ({ offset: variable.offset, type: variable.type, aligned: variable.aligned !== false })),
+    ]);
+  }
+  /** A routine's frame as Turbo Pascal lays it out on the stack, from its
+   * lowest address: the locals, the last declared first, the function's
+   * result, the saved BP and return address, the parent's frame for a nested
+   * routine, Self, and the parameters, the last first. Each takes whole
+   * words; `var` parameters, and those passed by address, are far pointers. */
+  private frame(routine: Routine, parameters: Variable[]): SegmentLayout {
+    const entries: { offset?: number; type?: PascalType; gap?: number; even: boolean }[] = [];
+    for (const local of [...this.scope.locals].reverse()) entries.push({ offset: local.offset, type: local.type, even: true });
+    if (routine.type.kind !== 'void' && !this.scope.constructorBody) entries.push({ offset: 0, type: routine.type, even: true });
+    entries.push({ gap: 4, even: true });
+    if (this.scope.level > 1) entries.push({ gap: 2, even: true });
+    if (this.scope.self) entries.push({ offset: this.scope.self.offset, type: POINTER, even: true });
+    for (const parameter of [...parameters].reverse()) {
+      const high = parameter.type.openHigh ?? parameter.type.openCapacity;
+      if (high) entries.push({ offset: high.offset, type: WORD, even: true });
+      entries.push({ offset: parameter.offset, type: parameter.reference ? POINTER : parameter.type, even: true });
+    }
+    return this.segmentLayout(entries);
+  }
+  /** Variables' bytes, one after another, at cells of one frame. */
+  private segmentLayout(entries: { offset?: number; type?: PascalType; gap?: number; aligned?: boolean; even?: boolean }[]): SegmentLayout {
+    const layout: BinaryCell[] = [];
+    const fields: Extract<ViewShape, { kind: 'record' }>['fields'] = [];
+    const refreshes: { part: number; offset: number }[] = [];
+    const variantCells: [number, number][] = [];
+    let byte = 0;
+    const pad = (bytes: number) => {
+      if (bytes <= 0) return;
+      layout.push({ kind: 'gap', bytes });
+      byte += bytes;
+    };
+    for (const { offset, type, gap, aligned, even } of entries) {
+      if (offset === undefined || !type) {
+        pad(gap ?? 0);
+        continue;
+      }
+      if ((aligned || even) && type.byteSize > 1 && byte % 2) pad(1);
+      const start = byte;
+      for (const [index, cell] of this.binaryLayout(type).entries()) {
+        layout.push({ ...cell, offset: offset + (cell.offset ?? index) });
+        byte += cell.bytes;
+      }
+      pad(start + type.byteSize - byte);
+      fields.push({ offset, cells: type.size, byte: start, shape: this.viewShape(type) });
+      refreshes.push(...this.variantRefreshes(type, offset));
+      variantCells.push(...this.variantRanges(type, offset));
+      if (even) pad(byte % 2);
+    }
+    return { layout, shape: { kind: 'record', fields }, refresh: this.refreshList(refreshes), variantCells, bytes: byte };
+  }
   /** A type's byte layout, by number. */
   private layoutId(type: PascalType): number {
     const layout = this.binaryLayout(type);
@@ -4322,7 +4497,9 @@ export class Compiler {
   /** The list of variant parts a change to a type's bytes brings up to
    * date, by number, or -1 for none. */
   private refreshListId(type: PascalType): number {
-    const parts = this.variantRefreshes(type, 0);
+    return this.refreshList(this.variantRefreshes(type, 0));
+  }
+  private refreshList(parts: { part: number; offset: number }[]): number {
     if (!parts.length) return -1;
     const key = JSON.stringify(parts);
     let id = this.refreshIds.get(key);
@@ -4367,6 +4544,19 @@ export class Compiler {
     }
     cell?.();
     this.emit(Opcode.CSP, 7 + syncs.length * 3 + (cell ? 1 : 0), InternalProcedure.VIEW);
+  }
+  /** The cells of the records with variant parts in a type, outermost
+   * ones, each from its first cell to past its last. */
+  private variantRanges(type: PascalType, offset: number): [number, number][] {
+    if (type.kind === 'array' && type.element) {
+      const element = type.element, inner = this.variantRanges(element, 0);
+      if (!inner.length) return [];
+      return Array.from({ length: type.size / element.size }, (_, index) =>
+        inner.map(([from, to]): [number, number] => [from + offset + index * element.size, to + offset + index * element.size])).flat();
+    }
+    if (type.kind !== 'record') return [];
+    if (type.variantParts?.length) return [[offset, offset + type.size]];
+    return [...(type.fields?.values() ?? [])].flatMap((field) => this.variantRanges(field.type, offset + field.offset));
   }
   /** The variant parts inside a type, at an offset, to bring up to date
    * after its bytes change as a whole. */

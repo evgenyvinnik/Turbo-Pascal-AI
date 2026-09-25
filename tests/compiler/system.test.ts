@@ -44,9 +44,7 @@ describe('System unit additions', () => {
     expect(() => compile('program T; procedure P(x: array of Byte); begin FillChar(x, 2, 0) end; begin end.')).toThrow(
       /FillChar needs a variable whose type is known here/
     );
-    expect(() => compile('program T; var w: Word absolute $0040:$0017; begin end.')).toThrow(
-      /Absolute memory addresses are not supported/
-    );
+    expect(() => compile('program T; var w: Word absolute 1 + 2; begin end.')).toThrow(/Variable identifier expected/);
     expect(() => compile('program T; const C = 1; var w: Integer absolute C; begin end.')).toThrow(
       /Variable expected: "C"/
     );
@@ -95,12 +93,12 @@ describe('System unit additions', () => {
     ).toThrow(/Object fields must precede its methods/);
   });
 
-  it('keeps one address space, where every segment is zero', () => {
+  it('puts the globals in the data segment, which Seg, Ofs and Ptr agree on', () => {
     expect(
       execute(`program T; var i: Integer; p: Pointer;
       begin p := Ptr(Seg(i), Ofs(i));
-        WriteLn(p = @i, ' ', Seg(i), CSeg, DSeg, SSeg, ' ', Ofs(i) = Ofs(i), ' ', SPtr > 0) end.`)
-    ).toEqual(['TRUE 0000 TRUE TRUE']);
+        WriteLn(p = @i, ' ', Seg(i) = DSeg, ' ', CSeg, ' ', DSeg, ' ', SSeg, ' ', SPtr > 0) end.`)
+    ).toEqual(['TRUE TRUE 4096 8192 12288 TRUE']);
   });
 
   it('treats Input and Output as text files on the console, which a program may redirect', () => {

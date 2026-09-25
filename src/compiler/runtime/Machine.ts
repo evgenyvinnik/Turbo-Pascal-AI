@@ -11,7 +11,7 @@
  */
 
 import { Opcode, TypeCode, Register, MARK_SIZE, inst } from '../types/inst';
-import { Bytecode, sameShape, shapeCell, type ViewShape } from '../codegen/Bytecode';
+import { Bytecode } from '../codegen/Bytecode';
 import { PascalError } from '../errors/PascalError';
 import { describePascalDiagnostic } from '../errors/diagnostics';
 import { InternalProcedure, NativeRegistry } from './Native';
@@ -23,24 +23,11 @@ import { roundReal48 } from '../codegen/numeric';
 import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
 import { VariantRuntime } from './Variants';
-import { decodeBinary, encodeBinary, readBytes, writeBytes, type BinaryCell } from './BinaryCodec';
-
-/** A variable's bytes shown as another type. Its cells are addresses past
- * every real one; loading one decodes it from the variable's bytes, and
- * storing one encodes it into them. */
-interface View {
-  target: number;
-  layout: BinaryCell[];
-  shape: ViewShape;
-  start: number;
-  refresh: number;
-  syncs: { base: number; part: number; case: number }[];
-  /** A view of a variable as its own type, as @ gives: its cells are the
-   * variable's. */
-  identity: boolean;
-}
-/** How many cells one view can show. */
-const VIEW_SPAN = 1 << 20;
+import type { BinaryCell } from './BinaryCodec';
+import type { MemoryAccess } from './FileRuntime';
+import { AddressSpace, HEAP_BYTES, LINEAR_BASE, PORT_BASE, STACK_SEGMENT, STACK_TOP } from './AddressSpace';
+import { Heap, type BlockType } from './Heap';
+import { LowMemory, Ports } from './LowMemory';
 
 /** How many 8086 instructions an asm block runs before the machine lets
  * the rest of the program, and the page, have a turn. */
@@ -76,7 +63,7 @@ export enum MachineState {
 export interface MachineConfig {
   /** Stack size in words (default 65536) */
   stackSize?: number;
-  /** Heap size in words (default 65536) */
+  /** Heap size in words (default as many as the heap's bytes) */
   heapSize?: number;
   /** Maximum instructions to execute (0 = unlimited) */
   maxInstructions?: number;
@@ -114,8 +101,23 @@ export class Machine {
   /** Extreme pointer - highest stack address used (not used in this implementation) */
   private ep: number = 0;
 
+  /** The heap: its blocks take cells down from the top of the store. */
+  private heap: Heap;
   /** New pointer - base of heap (grows downward) */
-  private np: number = 0;
+  private get np(): number {
+    return this.heap.np;
+  }
+  /** The stack's last cell plus one: the heap's cells all lie above it. */
+  private stackLimit: number;
+  /** The memory around the program, and Turbo Pascal's memory as a whole. */
+  private low: LowMemory;
+  private space: AddressSpace;
+  private ports: Ports;
+  /** Where each frame's bytes start on the stack, set as it is called: its
+   * caller's less its own size, as Turbo Pascal's stack grows down. */
+  private frameLinear: Float64Array;
+  /** Where the main frame starts: the data segment's cells. */
+  private globalBase: number;
 
   /** Current execution state */
   private state: MachineState = MachineState.READY;
@@ -140,12 +142,6 @@ export class Machine {
     | undefined;
   /** Keeps variant records' cases in step with their bytes. */
   private variants: VariantRuntime;
-  /** Views of variables' bytes, by number, and their numbers by what they
-   * show, so one view has one address. */
-  private views: View[] = [];
-  private viewKeys = new Map<string, number>();
-  /** Whether a view's cells from an offset already have a type's shape. */
-  private shapeMatches = new Map<string, boolean>();
   /** The frames of interrupt procedures running now, innermost last. */
   private interruptFrames: number[] = [];
   /** When the timer next ticks, 18.2 times a second. */
@@ -155,8 +151,6 @@ export class Machine {
   private readonly native = new NativeRegistry();
   private readonly services: RuntimeServices;
   private wakeTime = 0;
-  private allocations = new Map<number, number>();
-  private freeBlocks: { address: number; words: number }[] = [];
 
   /** Number of instructions executed */
   private instructionCount: number = 0;
@@ -188,7 +182,7 @@ export class Machine {
     );
     this.config = {
       stackSize: config.stackSize ?? 65536,
-      heapSize: config.heapSize ?? 65536,
+      heapSize: config.heapSize ?? HEAP_BYTES,
       maxInstructions: config.maxInstructions ?? 0,
       debug: config.debug ?? false,
       maxOutputChars: config.maxOutputChars ?? 1_048_576,
@@ -200,8 +194,12 @@ export class Machine {
     const totalSize = this.config.stackSize + this.config.heapSize;
     this.dstore = new Array<StackValue>(totalSize).fill(0);
 
-    // Initialize heap pointer to top of memory
-    this.np = totalSize;
+    // The heap's cells lie above the stack's; it has no more bytes than
+    // cells, so its cells never run out first.
+    this.heap = new Heap(this.config.stackSize, totalSize, Math.min(HEAP_BYTES, this.config.heapSize), () => true);
+    this.globalBase = bytecode.typedConstants.length;
+    this.frameLinear = new Float64Array(this.config.stackSize);
+    this.stackLimit = this.config.stackSize;
 
     // Copy typed constants to the beginning of dstore
     for (let i = 0; i < bytecode.typedConstants.length; i++) {
@@ -211,19 +209,41 @@ export class Machine {
     this.mp = bytecode.typedConstants.length;
     this.sp = this.mp - 1;
     for (const standard of bytecode.standardVariables) this.dstore[this.mp + standard.address] = standard.initial;
-    this.startHeapVariables();
     this.services = new RuntimeServices({
-      read: (address) => this.peek(address),
-      write: (address, value) => { this.poke(address, value); },
-      allocate: (words, defaults) => this.allocate(words, defaults),
+      ...this.memory,
+      allocate: (words, defaults, bytes, type) => this.allocate(words, defaults, bytes, type),
       free: (address) => { this.free(address); },
-      heapAvailable: () => this.heapAvailable(),
-      stackPointer: () => this.sp,
-      heapTop: () => this.np,
+      heapAvailable: () => this.heap.available(),
+      stackPointer: () => this.space.stackPointer(),
+      heapTop: () => this.space.heapPointer(this.heap.pointer),
       releaseHeap: (address) => { this.releaseHeap(address); },
       sound: this.config.onSound,
       layout: (id) => this.bytecode.layouts[id] ?? [],
+      viewMap: (id) => this.bytecode.viewMaps[id],
+      refreshes: (id) => this.bytecode.variantRefreshes[id] ?? [],
+      bytesAt: (address, layout, length) => this.space.bytesAt(address, layout, length),
+      putBytes: (address, layout, bytes) => { this.space.putBytes(address, layout, bytes); },
+      reach: (address, layout) => this.space.reach(address, layout),
+      segmentOf: (address) => this.space.segmentOf(address),
+      pointer: (segment, offset) => this.space.pointer(segment, offset),
     }, this.config.fileSystem);
+    this.low = new LowMemory({ console: this.services.console, now: () => new Date(), keysAvailable: () => this.keysAvailable() });
+    this.ports = new Ports({ sound: (frequency) => { this.config.onSound(frequency); }, scanCode: () => this.lastScanCode });
+    this.space = new AddressSpace({
+      memory: this.memory,
+      bytecode,
+      heap: this.heap,
+      low: this.low,
+      variants: this.variants,
+      cells: totalSize,
+      globalBase: this.globalBase,
+      frame: () => ({ base: this.mp, top: this.sp }),
+      caller: (base) => Number(this.dstore[base + 2] ?? 0),
+      routine: (base) => Number(this.dstore[base + 3] ?? 0),
+      frameLinear: (base) => this.frameLinear[base] ?? STACK_SEGMENT * 16 + STACK_TOP,
+      stringCharacter: (reference) => this.stringCharacter(reference),
+    });
+    this.startHeapVariables();
   }
 
   /**
@@ -236,7 +256,10 @@ export class Machine {
     this.inExitChain = false;
     this.pc = this.bytecode.startAddress;
     this.ep = 0;
-    this.np = this.config.stackSize + this.config.heapSize;
+    this.heap.reset();
+    this.low.reset();
+    this.ports.reset();
+    this.space.reset();
     this.state = MachineState.READY;
     this.exitCode = 0;
     this.output = [];
@@ -245,9 +268,6 @@ export class Machine {
     this.inputPos = 0;
     this.inputColumn = 0;
     this.keyQueue = '';
-    this.views = [];
-    this.viewKeys.clear();
-    this.shapeMatches.clear();
     this.assemblyResume = undefined;
     this.interruptFrames = [];
     this.nextTick = 0;
@@ -255,8 +275,6 @@ export class Machine {
     this.instructionCount = 0;
     this.trace = [];
     this.wakeTime = 0;
-    this.allocations.clear();
-    this.freeBlocks = [];
     this.stringCharacters.clear();
     this.stringBacking.clear();
     this.services.reset();
@@ -373,7 +391,9 @@ export class Machine {
         // Call user procedure
         // p = parameter size, q = procedure address
         this.mp = this.sp - MARK_SIZE - p + 1;
+        this.dstore[this.mp + 3] = q; // The routine, whose frame this is
         this.dstore[this.mp + 4] = this.pc; // Save return address
+        this.placeFrame(q);
         this.pc = q;
         break;
 
@@ -387,7 +407,7 @@ export class Machine {
         // Entry - set up registers
         // p = register (0=SP, 2=MP), q = amount
         if ((p as Register) === Register.SP) {
-          if (this.mp + q > Math.min(this.np, this.config.stackSize)) throw new PascalError('Stack overflow');
+          if (this.mp + q > this.stackLimit) throw new PascalError('Stack overflow');
           this.sp = this.mp + q - 1;
         } else if ((p as Register) === Register.EP) {
           this.ep = this.sp + q;
@@ -885,7 +905,7 @@ export class Machine {
       throw new PascalError('Invalid numeric result');
     }
     this.sp++;
-    if (this.sp >= Math.min(this.np, this.config.stackSize)) {
+    if (this.sp >= this.stackLimit) {
       throw new PascalError('Stack overflow');
     }
     this.dstore[this.sp] = value;
@@ -924,91 +944,23 @@ export class Machine {
     return (type as TypeCode) === TypeCode.S || (type as TypeCode) === TypeCode.C ? String(this.pop()) : this.popNumber();
   }
 
-  /** VIEW: the address of a cell of a view, made once for what it shows. */
-  private view(args: number[]): number {
-    const [target = 0, layout = 0, map = 0, start = 0, refresh = -1, identity = 0, count = 0] = args;
-    const syncs = Array.from({ length: count }, (_, index) => ({
-      base: args[7 + index * 3] ?? 0,
-      part: args[8 + index * 3] ?? 0,
-      case: args[9 + index * 3] ?? 0,
-    }));
-    const cell = args[7 + count * 3] ?? target;
-    const id = this.viewId(JSON.stringify(args.slice(0, 7 + count * 3)), () => ({
-      target,
-      layout: this.bytecode.layouts[layout] ?? [],
-      shape: this.bytecode.viewMaps[map] ?? { kind: 'record', fields: [] },
-      start,
-      refresh,
-      syncs,
-      identity: identity !== 0,
-    }));
-    return this.dstore.length * 1024 + id * VIEW_SPAN + (cell - target);
-  }
-  private viewId(key: string, make: () => View): number {
-    let id = this.viewKeys.get(key);
-    if (id === undefined) {
-      id = this.views.push(make()) - 1;
-      this.viewKeys.set(key, id);
-    }
-    return id;
-  }
-  /** Which view an address lies in, and its cell offset there. */
-  private viewAt(address: number): { id: number; view: View; offset: number } | undefined {
-    const offset = address - this.dstore.length * 1024;
-    if (offset < 0 || !Number.isInteger(offset)) return undefined;
-    const id = Math.floor(offset / VIEW_SPAN);
-    const view = this.views[id];
-    return view ? { id, view, offset: offset % VIEW_SPAN } : undefined;
-  }
-  /** RETYPE: a pointer dereferenced as the type of `map`. An address that
-   * already has the type's shape stays, or becomes the variable's own cell;
-   * one of another shape becomes a view of those bytes as the type. */
-  private retype(pointer: number, map: number): number {
-    const at = this.viewAt(pointer);
-    if (!at) return pointer;
-    const entry = shapeCell(at.view.shape, at.offset);
-    const shape = this.bytecode.viewMaps[map];
-    if (!entry || !shape) return pointer;
-    const key = `${String(at.id)}:${String(at.offset)}:${String(map)}`;
-    let matches = this.shapeMatches.get(key);
-    if (matches === undefined) {
-      matches = sameShape(at.view.shape, at.offset, shape);
-      this.shapeMatches.set(key, matches);
-    }
-    // The variable's own cell, unless it has variant parts, whose cases
-    // follow only stores that go through the view.
-    if (matches) return at.view.identity && at.view.refresh < 0 ? at.view.target + at.offset : pointer;
-    const { view } = at;
-    const id = this.viewId(`retype:${key}`, () => ({
-      target: view.target,
-      layout: view.layout,
-      shape,
-      start: view.start + entry.byte,
-      refresh: view.refresh,
-      syncs: view.syncs,
-      identity: false,
-    }));
-    return this.dstore.length * 1024 + id * VIEW_SPAN;
-  }
-  /** An address @ took, as the variable's own cell, so pointers to one cell
-   * compare equal however they were made. */
-  private normalizePointer(value: StackValue): StackValue {
-    const at = typeof value === 'number' ? this.viewAt(value) : undefined;
-    return at?.view.identity ? at.view.target + at.offset : value;
-  }
-  /** The view and cell an address shows, if it is a view's. */
-  private viewCell(address: number): { view: View; byte: number; cell: BinaryCell } | undefined {
-    const offset = address - this.dstore.length * 1024;
-    if (offset < 0) return undefined;
-    const view = this.views[Math.floor(offset / VIEW_SPAN)];
-    const entry = view && shapeCell(view.shape, offset % VIEW_SPAN);
-    return view && entry ? { view, ...entry } : undefined;
-  }
-  private get memory(): { read: (address: number) => StackValue; write: (address: number, value: StackValue) => void } {
-    return { read: (address) => this.peek(address), write: (address, value) => { this.poke(address, value); } };
+  /** The store as the byte codec reads and writes it: a string's
+   * characters past its length, and pointers as segment and offset. */
+  private get memory(): MemoryAccess {
+    return {
+      read: (address) => this.peek(address),
+      write: (address, value) => { this.poke(address, value); },
+      characters: (address) => (address < this.dstore.length && typeof this.dstore[address] === 'string' ? this.stringBytes(address) : undefined),
+      setCharacters: (address, characters) => {
+        if (address < this.dstore.length && typeof this.dstore[address] === 'string') this.stringBacking.set(address, characters);
+      },
+      pointerBits: (value) => this.space.pointerBits(value),
+      pointerValue: (bits) => this.space.pointerValue(bits),
+    };
   }
   private checkAddress(address: number): void {
-    if (!Number.isInteger(address) || address < 0 || (address >= this.dstore.length && !this.stringCharacter(address) && !this.viewCell(address))) {
+    if (!Number.isInteger(address) || address < 0 ||
+      (address >= this.dstore.length && address < LINEAR_BASE && !this.stringCharacter(address) && !this.space.viewCell(address))) {
       throw new PascalError('Invalid memory address');
     }
   }
@@ -1140,16 +1092,20 @@ export class Machine {
       return;
     }
     if (procedureIndex === (InternalProcedure.VIEW as number)) {
-      this.push(this.view(args.map(Number)));
+      this.push(this.space.view(args.map(Number)));
       return;
     }
     if (procedureIndex === (InternalProcedure.RETYPE as number)) {
-      this.push(this.retype(Number(args[0]), Number(args[1])));
+      this.push(this.space.retype(Number(args[0]), Number(args[1])));
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.PORT as number)) {
+      this.push(PORT_BASE + (Number(args[1]) === 2 ? 0x10000 : 0) + (Number(args[0]) & 0xffff));
       return;
     }
     if (procedureIndex === (InternalProcedure.NORMALIZE_POINTERS as number)) {
-      this.push(this.normalizePointer(args[0] ?? 0));
-      this.push(this.normalizePointer(args[1] ?? 0));
+      this.push(this.space.normalize(args[0] ?? 0));
+      this.push(this.space.normalize(args[1] ?? 0));
       return;
     }
     if (procedureIndex === (InternalProcedure.VARIANT_SYNC as number)) {
@@ -1317,6 +1273,9 @@ export class Machine {
       now: () => new Date(),
       handles: (number) => this.handler(number) !== undefined,
       scanCode: () => this.lastScanCode,
+      readLinear: (linear, length) => this.space.readLinear(linear, length),
+      writeLinear: (linear, bytes) => { this.space.writeLinear(linear, bytes); },
+      linearPointer: (linear) => LINEAR_BASE + linear,
     };
   }
   /** The program's interrupt procedure for an interrupt, if it set one. */
@@ -1336,7 +1295,9 @@ export class Machine {
     this.push(0);
     for (let index = 12 - handler.parameters; index < 12; index++) this.push(registers[index] ?? 0);
     this.mp = this.sp - MARK_SIZE - handler.parameters + 1;
+    this.dstore[this.mp + 3] = handler.address;
     this.dstore[this.mp + 4] = returnPc;
+    this.placeFrame(handler.address);
     this.pc = handler.address;
     this.interruptFrames.push(this.mp);
     return this.mp;
@@ -1665,18 +1626,16 @@ export class Machine {
 
   poke(address: number, value: StackValue): void {
     this.checkAddress(address);
-    const shown = this.viewCell(address);
-    if (shown) {
-      // Into the viewed variable's bytes; a string stores only its length
-      // and characters, as Turbo Pascal copies it.
-      const { view, byte, cell } = shown;
-      const bytes = encodeBinary({ read: () => value, write: () => undefined }, 0, [{ ...cell, offset: 0 }]);
-      const used = cell.kind === 'string' ? (bytes[0] ?? 0) + 1 : bytes.length;
-      writeBytes(this.memory, view.target, view.layout, view.start + byte, bytes.subarray(0, used));
-      for (const { part, offset } of this.bytecode.variantRefreshes[view.refresh] ?? []) this.variants.refresh(view.target + offset, part);
-      for (const sync of view.syncs) this.variants.sync(sync.base, sync.part, sync.case);
+    if (address >= PORT_BASE) {
+      const port = address - PORT_BASE;
+      this.ports.write(port & 0xffff, Number(value), port >= 0x10000 ? 2 : 1);
       return;
     }
+    if (address >= LINEAR_BASE) {
+      this.space.pokeLinear(address, value);
+      return;
+    }
+    if (address >= this.dstore.length && this.space.poke(address, value)) return;
     const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
@@ -1697,31 +1656,26 @@ export class Machine {
     this.dstore[address] = value;
   }
 
-  private allocate(words: number, defaults: StackValue[]): number {
-    if (!Number.isInteger(words) || words <= 0) throw new PascalError('Invalid allocation size');
-    const free = this.freeBlocks.findIndex((block) => block.words >= words);
-    let address: number;
-    if (free >= 0) {
-      const block = this.freeBlocks[free]!;
-      address = block.address;
-      block.address += words; block.words -= words;
-      if (block.words === 0) this.freeBlocks.splice(free, 1);
-    } else {
-      address = this.np - words;
-      if (address <= this.sp || address < this.config.stackSize) throw new PascalError('Heap overflow');
-      this.np = address;
-      this.setStandardValue('HeapPtr', this.np);
-    }
-    this.allocations.set(address, words);
+  /** A heap block of `words` cells holding `bytes` bytes, the cells set to
+   * `defaults`; a typed one knows how its bytes lie. */
+  private allocate(words: number, defaults: StackValue[], bytes = words, type?: BlockType & { map?: number }): number {
+    const address = this.heap.allocate(words, bytes, type, type?.map);
     for (let i = 0; i < words; i++) this.dstore[address + i] = defaults[i] ?? 0;
+    this.setStandardValue('HeapPtr', this.space.heapPointer(this.heap.pointer));
     return address;
+  }
+  /** A new frame's bytes lie below its caller's. */
+  private placeFrame(routine: number): void {
+    const caller = Number(this.dstore[this.mp + 2] ?? 0);
+    const below = caller > this.globalBase ? (this.frameLinear[caller] ?? 0) : STACK_SEGMENT * 16 + STACK_TOP;
+    this.frameLinear[this.mp] = below - (this.bytecode.frames[routine]?.bytes ?? 0);
   }
   /** HeapOrg and HeapEnd bound the heap, which grows down from HeapOrg;
    * HeapPtr follows its top. */
   private startHeapVariables(): void {
-    this.setStandardValue('HeapOrg', this.config.stackSize + this.config.heapSize);
-    this.setStandardValue('HeapEnd', this.config.stackSize);
-    this.setStandardValue('HeapPtr', this.np);
+    this.setStandardValue('HeapOrg', this.space.heapPointer(0));
+    this.setStandardValue('HeapEnd', this.space.heapPointer(this.heap.size));
+    this.setStandardValue('HeapPtr', this.space.heapPointer(this.heap.pointer));
   }
   /** One of the System unit's variables, by name. */
   private standardValue(name: string): number | undefined {
@@ -1732,34 +1686,14 @@ export class Machine {
     const address = this.standardAddress(name);
     if (address !== undefined) this.dstore[address] = value;
   }
-  /** Release, which drops every block above a mark at once. */
-  private releaseHeap(address: number): void {
-    if (!Number.isInteger(address) || address < this.config.stackSize || address > this.config.stackSize + this.config.heapSize)
-      throw new PascalError('Invalid or disposed pointer');
-    for (const block of [...this.allocations.keys()]) if (block >= this.np && block < address) this.allocations.delete(block);
-    this.freeBlocks = this.freeBlocks.filter((block) => block.address >= address);
-    this.np = address;
-    this.setStandardValue('HeapPtr', this.np);
-  }
-  /** The heap lies between the stack's reserve and np, plus disposed blocks. */
-  private heapAvailable(): { total: number; largest: number } {
-    const top = Math.max(0, this.np - this.config.stackSize);
-    return {
-      total: top + this.freeBlocks.reduce((sum, block) => sum + block.words, 0),
-      largest: Math.max(top, ...this.freeBlocks.map((block) => block.words)),
-    };
+  /** Release, which drops every block above a HeapPtr Mark recorded. */
+  private releaseHeap(pointer: number): void {
+    this.heap.release(this.space.heapOffset(pointer));
+    this.setStandardValue('HeapPtr', this.space.heapPointer(this.heap.pointer));
   }
   private free(address: number): void {
-    const words = this.allocations.get(address);
-    if (words === undefined) throw new PascalError('Invalid or disposed pointer');
-    this.allocations.delete(address);
-    this.freeBlocks.push({ address, words });
-    this.freeBlocks.sort((a, b) => a.address - b.address);
-    for (let i = 0; i + 1 < this.freeBlocks.length;) {
-      const first = this.freeBlocks[i]!, next = this.freeBlocks[i + 1]!;
-      if (first.address + first.words === next.address) { first.words += next.words; this.freeBlocks.splice(i + 1, 1); }
-      else i++;
-    }
+    this.heap.free(this.space.blockStart(address));
+    this.setStandardValue('HeapPtr', this.space.heapPointer(this.heap.pointer));
   }
 
   /**
@@ -1795,14 +1729,14 @@ export class Machine {
    * @param address - The stack address
    */
   peek(address: number): StackValue {
-    const shown = this.viewCell(address);
-    if (shown) {
-      const { view, byte, cell } = shown;
-      let value: StackValue = 0;
-      decodeBinary({ read: () => 0, write: (_, decoded) => { value = decoded; } }, 0, [{ ...cell, offset: 0 }],
-        readBytes(this.memory, view.target, view.layout, view.start + byte, cell.bytes));
-      return value;
+    if (address < this.dstore.length) return this.dstore[address] ?? 0;
+    if (address >= PORT_BASE) {
+      const port = address - PORT_BASE;
+      return this.ports.read(port & 0xffff, port >= 0x10000 ? 2 : 1);
     }
+    if (address >= LINEAR_BASE) return this.space.peekLinear(address);
+    const shown = this.space.peek(address);
+    if (shown !== undefined) return shown;
     const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');

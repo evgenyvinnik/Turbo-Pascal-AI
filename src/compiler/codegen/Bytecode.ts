@@ -26,12 +26,32 @@ export function shapeCell(shape: ViewShape, offset: number): { byte: number; cel
     const inner = shapeCell(shape.element, offset - index * shape.cells);
     return inner && { byte: index * shape.bytes + inner.byte, cell: inner.cell };
   }
-  for (const field of shape.fields) {
-    if (offset < field.offset || offset >= field.offset + field.cells) continue;
-    const inner = shapeCell(field.shape, offset - field.offset);
-    if (inner) return { byte: field.byte + inner.byte, cell: inner.cell };
+  const field = fieldAt(shape, offset);
+  const inner = field && shapeCell(field.shape, offset - field.offset);
+  return field && inner && { byte: field.byte + inner.byte, cell: inner.cell };
+}
+
+type RecordShape = Extract<ViewShape, { kind: 'record' }>;
+const sortedFields = new WeakMap<RecordShape, RecordShape['fields']>();
+/** The field of a record's shape that holds a cell. Fields' cells never
+ * overlap, so a record of many, as the data segment is, is searched in
+ * order of their cells. */
+function fieldAt(shape: RecordShape, offset: number): RecordShape['fields'][number] | undefined {
+  if (shape.fields.length <= 8)
+    return shape.fields.find((field) => offset >= field.offset && offset < field.offset + field.cells);
+  let fields = sortedFields.get(shape);
+  if (!fields) {
+    fields = shape.fields.filter((field) => field.cells > 0).sort((a, b) => a.offset - b.offset);
+    sortedFields.set(shape, fields);
   }
-  return undefined;
+  let low = 0, high = fields.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (fields[middle]!.offset <= offset) low = middle;
+    else high = middle - 1;
+  }
+  const field = fields[low];
+  return field && offset >= field.offset && offset < field.offset + field.cells ? field : undefined;
 }
 
 /** How many cells a shape spans. */
@@ -59,6 +79,23 @@ export function sameShape(shape: ViewShape, offset: number, target: ViewShape): 
   }
   return true;
 }
+
+/** Where variables lie in the bytes of a segment of Turbo Pascal's memory:
+ * the data segment's globals and typed constants, or one routine's frame on
+ * the stack. Cell offsets are from the start of the frame that holds them. */
+export interface SegmentLayout {
+  /** The bytes in order, with the gaps between variables. */
+  layout: BinaryCell[];
+  /** Each variable's cells and the byte it starts at. */
+  shape: ViewShape;
+  /** The variant parts in the variables, by number in variantRefreshes, or -1. */
+  refresh: number;
+  /** The cells of variables with variant parts, whose cases follow only
+   * stores that go through their bytes. */
+  variantCells: [number, number][];
+  bytes: number;
+}
+export const EMPTY_SEGMENT: SegmentLayout = { layout: [], shape: { kind: 'record', fields: [] }, refresh: -1, variantCells: [], bytes: 0 };
 
 /** A variant part of a record: its cases, each in cells of its own, and its
  * shadow, the part's bytes as Turbo Pascal stores them. Offsets are cells
@@ -155,6 +192,12 @@ export class Bytecode {
   /** Lists of variant parts inside a type, by number, which a byte-level
    * change to a variable of that type brings up to date. */
   public variantRefreshes: { part: number; offset: number }[][] = [];
+
+  /** The data segment: the globals and typed constants, in the main frame. */
+  public dataSegment: SegmentLayout = EMPTY_SEGMENT;
+
+  /** Each routine's frame on the stack, by the address the routine starts at. */
+  public frames: Record<number, SegmentLayout> = {};
 
   /** Interrupt procedures, by the value @Handler gives: where each starts
    * and how many of the register parameters it declares. */

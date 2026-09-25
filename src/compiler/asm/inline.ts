@@ -4,6 +4,7 @@ import {
   WORD_REGISTERS,
   type Instruction,
   type Operand,
+  type SegmentRegister,
   type WordRegister,
 } from './types';
 
@@ -112,6 +113,8 @@ export function decodeInline(
     kind: 'register',
     register: wide ? WORD_REGISTERS[index]! : BYTE_REGISTERS[index]!,
   });
+  /** The current instruction's segment prefix, as ES: is. */
+  let override: SegmentRegister | undefined;
   /** The r/m operand of a ModRM byte. */
   const rm = (modrm: number, wide: boolean): Operand => {
     const mod = modrm >> 6,
@@ -126,6 +129,7 @@ export function decodeInline(
         ...(address.variable !== undefined ? { variable: address.variable } : {}),
         registers: [],
         displacement: address.displacement,
+        ...(override ? { segment: override } : {}),
       };
     }
     const bases = MEMORY_BASES[rmField]!;
@@ -139,6 +143,7 @@ export function decodeInline(
       ...(address.variable !== undefined ? { variable: address.variable } : {}),
       registers,
       displacement: address.displacement,
+      ...(override ? { segment: override } : {}),
     };
   };
   const immediate = (wide: boolean): Operand => ({
@@ -149,9 +154,13 @@ export function decodeInline(
   while (at < bytes.length) {
     starts.push(at);
     let repeat: Instruction['repeat'];
+    override = undefined;
     let opcode = byte();
     for (;;) {
-      if ([0x26, 0x2e, 0x36, 0x3e].includes(opcode)) opcode = byte();
+      if ([0x26, 0x2e, 0x36, 0x3e].includes(opcode)) {
+        override = SEGMENT_REGISTERS[(opcode >> 3) & 3];
+        opcode = byte();
+      }
       else if (opcode === 0xf3 || opcode === 0xf2) {
         repeat = opcode === 0xf3 ? 'rep' : 'repne';
         opcode = byte();
