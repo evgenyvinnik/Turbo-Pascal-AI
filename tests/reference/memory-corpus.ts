@@ -39,6 +39,18 @@ end.`,
     output: ['256', '22136', '18', '4660', '305397761', 'hello 5', '5 h'],
   },
   {
+    name: 'memory-packed-string-types-take-string-constants',
+    source: `program T;
+type Name = array[1..3] of Char;
+const K = 'xyz';
+var n: Name; z: array[0..3] of Char;
+procedure Show(v: Name); begin Write(v[1], v[3], ' ') end;
+begin
+  n := K; z := 'abcd'; Show('pqr'); WriteLn(n[2], z[0], z[3])
+end.`,
+    output: ['pr yad'],
+  },
+  {
     name: 'memory-untyped-pointer-targets',
     source: `program T;
 type TPair = packed record a, b: Word end;

@@ -101,6 +101,58 @@ end.`);
   await expect(canvas).toHaveCount(0);
 });
 
+test('BIOS mode 13h shows $A000 in the VGA palette the program sets', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program Vga;
+uses Dos;
+var r: Registers; x: Integer;
+begin
+  r.AX := $13; Intr($10, r);
+  for x := 0 to 9 do Mem[$A000:x] := 4;
+  Port[$3C8] := 200; Port[$3C9] := 63; Port[$3C9] := 32; Port[$3C9] := 0;
+  Mem[$A000:320] := 200;
+  ReadLn;
+  r.AX := 3; Intr($10, r);
+end.`);
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('width', '320');
+  const pixel = (x: number, y: number) => canvas.evaluate((element: HTMLCanvasElement, [px, py]) => Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data), [x, y]);
+  // Color 4 of the default palette is the EGA's red; 200 is what the program set.
+  await expect.poll(() => pixel(9, 0)).toEqual([170, 0, 0, 255]);
+  await expect.poll(() => pixel(0, 1)).toEqual([255, 130, 0, 255]);
+  await ide.press('Enter');
+  await expect(canvas).toHaveCount(0);
+});
+
+test('the timer interrupt ticks while ReadKey waits for a key', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program Ticks;
+uses Dos, Crt;
+var n: Word; old: Pointer; c: Char;
+procedure Tick; interrupt; begin Inc(n) end;
+begin
+  GetIntVec($1C, old); SetIntVec($1C, @Tick);
+  ClrScr; Write('Press'); n := 0;
+  c := ReadKey;
+  WriteLn(' ', n > 5);
+  SetIntVec($1C, old);
+  ReadLn;
+end.`);
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  await expect(ide.row(0)).toContainText('Press');
+  // Half a second is about nine ticks of 18.2 a second.
+  await page.waitForTimeout(500);
+  await ide.type('x');
+  await expect(ide.row(0)).toContainText('Press TRUE');
+  await ide.press('Enter');
+});
+
 test('the Pascal virtual disk persists text files across a page reload', async ({ page }) => {
   let ide = await Ide.open(page);
   await ide.typeSource(`program SaveData;

@@ -22,6 +22,24 @@ export interface AsmContext {
   resolve(path: string[], line: number): AsmName | undefined;
   /** Assembly the P-machine does not run: the native compiler takes it. */
   unsupported(reason: string): never;
+  /** {$G+}: 80286 opcodes are enabled. They are unless this is false. */
+  instructions286?: boolean;
+}
+
+/** Instructions and forms the 80286 added to the 8086's: an immediate
+ * PUSH, IMUL with an immediate, and a shift or rotate by a count other than
+ * one, as well as these mnemonics. */
+const OPCODES_286 = new Set(['pusha', 'popa', 'enter', 'leave', 'bound', 'ins', 'insb', 'insw', 'outs', 'outsb', 'outsw']);
+const SHIFTS = new Set(['shl', 'sal', 'shr', 'sar', 'rol', 'ror', 'rcl', 'rcr']);
+function needs286(mnemonic: string, operands: Operand[]): boolean {
+  if (OPCODES_286.has(mnemonic)) return true;
+  if (mnemonic === 'push') return operands[0]?.kind === 'immediate';
+  if (mnemonic === 'imul') return operands.length > 1;
+  if (SHIFTS.has(mnemonic)) {
+    const count = operands[1];
+    return count?.kind === 'immediate' && count.value !== 1;
+  }
+  return false;
 }
 
 const JUMPS = new Set([
@@ -386,6 +404,7 @@ export function assemble(
       return { kind: 'immediate', value: value.constant };
     };
     const operands = instruction.operands.map(operand);
+    if (context.instructions286 === false && needs286(mnemonic, operands)) fail('286/287 instructions are not enabled');
     if (JUMPS.has(mnemonic) && operands[0]?.kind !== 'label') {
       if (mnemonic === 'call') context.unsupported('Calls from assembler');
       fail('Label expected');

@@ -1,7 +1,17 @@
 import { CP437 } from '../../tui/vgaFont';
 
+/** A screen that draws text itself, as the BIOS draws it on a CGA graphics
+ * screen: each cell written, a row moved up or down, cells cleared. */
+export interface TextCanvas {
+  drawCell(index: number): void;
+  copyRow(from: number, to: number, left: number, right: number): void;
+  clearCells(row: number, start: number, end: number): void;
+}
+
 /** The CRT unit's text video memory, independent of a browser or terminal. */
 export class TextConsole {
+  /** Where text also goes in a graphics mode, as Graph3's modes show it. */
+  canvas: TextCanvas | null = null;
   cols = 80;
   rows = 25;
   chars = Array<string>(80 * 25).fill(' ');
@@ -92,12 +102,14 @@ export class TextConsole {
       this.attributes[to * this.cols + col] =
         this.attributes[from * this.cols + col] ?? this.attribute;
     }
+    this.canvas?.copyRow(from, to, this.left, this.right);
   }
   private clearRow(row: number, start: number): void {
     for (let col = start; col <= this.right; col++) {
       this.chars[row * this.cols + col] = ' ';
       this.attributes[row * this.cols + col] = this.attribute;
     }
+    this.canvas?.clearCells(row, start, this.right);
   }
   private newline(): void {
     this.y++;
@@ -119,6 +131,7 @@ export class TextConsole {
         const index = (this.top + this.y - 1) * this.cols + this.left + this.x - 1;
         this.chars[index] = CP437[char.charCodeAt(0)] ?? '?';
         this.attributes[index] = this.attribute;
+        this.canvas?.drawCell(index);
         this.x++;
         if (this.x > this.right - this.left + 1) {
           this.x = 1;

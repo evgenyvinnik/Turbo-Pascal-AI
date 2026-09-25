@@ -17,7 +17,7 @@ export const COMPILER_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   35: 'Label identifier expected', 36: 'BEGIN expected', 37: 'END expected',
   38: 'Integer expression expected', 39: 'Ordinal expression expected',
   40: 'Boolean expression expected', 41: 'Operand types do not match operator',
-  42: 'Error in expression', 44: 'Field identifier expected', 50: 'DO expected',
+  42: 'Error in expression', 44: 'Field identifier expected', 49: 'Data segment too large', 50: 'DO expected',
   54: 'OF expected', 55: 'INTERFACE expected', 57: 'THEN expected',
   58: 'TO or DOWNTO expected', 59: 'Undefined forward', 61: 'Invalid typecast',
   62: 'Division by zero', 63: 'Invalid file type',
@@ -30,10 +30,11 @@ export const COMPILER_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   85: '";" expected', 86: '":" expected', 87: '"," expected',
   88: '"(" expected', 89: '")" expected', 90: '"=" expected',
   91: '":=" expected', 92: '"[" or "(." expected', 93: '"]" or ".)" expected',
-  94: '"." expected', 95: '".." expected', 104: 'Ordinal variable expected',
+  94: '"." expected', 95: '".." expected', 96: 'Too many variables', 104: 'Ordinal variable expected',
   108: 'Overflow in arithmetic operation', 109: 'No enclosing FOR, WHILE, or REPEAT statement',
   113: 'Error in statement', 116: 'Must be in 8087 mode to compile this',
   117: 'Target address not found', 119: 'No inherited methods are accessible here',
+  159: '286/287 instructions are not enabled',
   121: 'Invalid qualifier', 162: 'ASM expected',
 };
 
@@ -86,6 +87,7 @@ const COMPILE_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Boolean expression expected$/, 40],
   [/^IN requires|^Invalid set operator$|^AND, OR and XOR require|^NOT requires|^Numeric operands required/, 41],
   [/^Unexpected token in expression:|^Invalid constant expression$/, 42], [/^Unknown record field\b/, 44],
+  [/^Data segment too large$/, 49], [/^Too many variables$/, 96],
   [/^Expected 'to' or 'downto',/, 58], [/^Unresolved forward declaration\b/, 59],
   [/^Ordinal typecast required$|^Typecast requires one value$|^Invalid typecast/, 61], [/^Division by zero/, 62],
   [/^ReadLn\/WriteLn require a text file$|^Untyped files require BlockRead\/BlockWrite$/, 63],
@@ -98,6 +100,7 @@ const COMPILE_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Inc and Dec require an ordinal variable$/, 104], [/^Arithmetic overflow$/, 108],
   [/^\w+ is only valid inside a loop$/, 109], [/^Unexpected token in statement:/, 113],
   [/^Array or string expected$|^An array variable is required$/, 121],
+  [/^286\/287 instructions are not enabled$/, 159],
 ];
 const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^File not found\b/, 2], [/^Invalid file name$|^Path not found\b/, 3],

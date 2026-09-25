@@ -193,6 +193,25 @@ describe('Memory by address', () => {
     expect(screen.chars[80]).toBe('A');
   });
 
+  it('shows mode 13h at $A000, with the VGA palette at ports 3C7h to 3C9h', () => {
+    const machine = run(`program T; uses Dos; var r: Registers; x, y: Integer; red, green, blue: Byte;
+      begin r.AX := $13; Intr($10, r);
+        for y := 0 to 1 do for x := 0 to 319 do Mem[$A000:y * 320 + x] := (x + y) and 255;
+        Port[$3C8] := 1; Port[$3C9] := 63; Port[$3C9] := 32; Port[$3C9] := 0;
+        Port[$3C7] := 4; red := Port[$3C9]; green := Port[$3C9]; blue := Port[$3C9];
+        asm mov ah, 0Ch; mov al, 9; mov cx, 10; mov dx, 20; int 10h end;
+        r.AH := $0D; r.CX := 10; r.DX := 20; Intr($10, r);
+        WriteLn(Mem[$A000:330], ' ', r.AL, ' ', red, ' ', green, ' ', blue) end.`);
+    expect(machine.getOutput()).toEqual(['11 9 42 0 0']);
+    const graphics = machine.getGraphics();
+    expect([graphics.initialized, graphics.width, graphics.height, graphics.pixels[5]]).toEqual([true, 320, 200, 5]);
+    // The default palette's EGA colors, and the one the program set.
+    expect(graphics.colors()?.slice(0, 3)).toEqual([0x000000, 0xff8200, 0x00aa00]);
+    const text = run(`program T; begin asm mov ax, 13h; int 10h; mov ax, 3; int 10h end; Mem[$A000:0] := 7; WriteLn(Mem[$A000:0]) end.`);
+    expect(text.getGraphics().initialized).toBe(false);
+    expect(text.getOutput()).toEqual(['7']);
+  });
+
   it("shows the BIOS's variables at $40, and its ports through Port", () => {
     expect(
       output(`program T; var Ticks: LongInt absolute $40:$6C; Cols: Word absolute $40:$4A;

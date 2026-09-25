@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
@@ -135,6 +135,14 @@ describe('The built-in assembler in the P-machine', () => {
     expect(sounds).toEqual([440, 0]);
   });
 
+  it('takes 80286 opcodes only under {$G+}, as Turbo Pascal does', () => {
+    for (const code of ['pusha', 'popa', 'push 5', 'imul ax, bx, 3', 'shl ax, 3', 'rol bl, 2'])
+      expect(() => compile(`program T; begin asm ${code} end end.`)).toThrow(/286\/287 instructions are not enabled/);
+    expect(() => compile('program T; begin asm shl ax, 1; push ax; imul bx end end.')).not.toThrow();
+    expect(output(`program T; {$G+} var r: Word; begin asm mov ax, 3; push 40; pop bx; imul ax, bx, 2; shl ax, 2; mov r, ax end; WriteLn(r) end.`))
+      .toEqual(['320']);
+  });
+
   it('checks operands as Turbo Pascal does', () => {
     expect(() => compile('program T; var x: Byte; begin asm mov ax, x end end.')).toThrow(
       /Operand size mismatch/
@@ -202,12 +210,43 @@ describe('Inline machine code', () => {
 });
 
 describe('Interrupt procedures', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('runs a timer interrupt procedure on each tick', () => {
     expect(
       output(`program T; uses Dos; var Ticks: Word; Old: Pointer;
     procedure Tick; interrupt; begin Inc(Ticks) end;
     begin GetIntVec($1C, Old); SetIntVec($1C, @Tick); while Ticks < 2 do; SetIntVec($1C, Old); WriteLn(Ticks, ' ', Old <> nil) end.`)
     ).toEqual(['2 TRUE']);
+  });
+
+  it('ticks while the program waits for a key or in Delay, as the PC timer does', () => {
+    vi.useFakeTimers({ now: new Date(2026, 0, 1, 12, 0, 0) });
+    const machine = execute(`program T; uses Dos, Crt; var Ticks: Word; Old: Pointer; c: Char;
+    procedure Tick; interrupt; begin Inc(Ticks) end;
+    begin GetIntVec($1C, Old); SetIntVec($1C, @Tick); Ticks := 0; Delay(200); WriteLn(Ticks >= 3, ' ', Ticks <= 4);
+      Ticks := 0; c := ReadKey; WriteLn(c, ' ', Ticks); SetIntVec($1C, Old) end.`);
+    expect(machine.getState()).toBe(MachineState.SLEEPING);
+    // Each 55 ms the procedure runs, and the delay goes on.
+    for (let elapsed = 0; elapsed < 200; elapsed += 10) {
+      expect(machine.getOutput()).toEqual([]);
+      vi.advanceTimersByTime(10);
+      machine.runSlice();
+    }
+    machine.runSlice();
+    expect(machine.getOutput()).toEqual(['TRUE TRUE']);
+    expect(machine.getState()).toBe(MachineState.WAITING);
+    // ReadKey waits on through the ticks, and still takes the key.
+    for (let elapsed = 0; elapsed < 110; elapsed += 55) {
+      vi.advanceTimersByTime(55);
+      machine.runSlice();
+      expect(machine.getState()).toBe(MachineState.WAITING);
+    }
+    machine.provideKey('x');
+    machine.run();
+    expect(machine.getOutput()).toEqual(['TRUE TRUE', 'x 2']);
   });
 
   it('passes the registers to a software interrupt procedure and takes them back', () => {

@@ -178,6 +178,17 @@ it('writes the memory past a small buffer, and rejects invalid forward type cycl
   );
 });
 
+it('fills a packed string type from a string constant of its length', () => {
+  expect(
+    execute(`program T; type Name = array[1..3] of Char; const K = 'xyz';
+    var n: Name; z: array[0..3] of Char; procedure Show(v: Name); begin Write(v[1], v[3], ' ') end;
+    begin n := K; z := 'abcd'; Show('pqr'); WriteLn(n[2], z[0], z[3]) end.`).getOutput()
+  ).toEqual(['pr yad']);
+  // Only one of exactly as many characters, as the Language Guide defines it.
+  expect(() => compile("program T; var z: array[1..4] of Char; begin z := 'ab' end.")).toThrow(/Type mismatch/);
+  expect(() => compile("program T; var z: array[0..2] of Char; begin z := 'abcd' end.")).toThrow(/Type mismatch/);
+});
+
 it('reads hexadecimal integers and adjacent Pascal character-code strings', () => {
   expect(
     execute("program T;begin WriteLn($FF, ',', Ord(#27), ',', 'A'#66#$43)end.").getOutput()

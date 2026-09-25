@@ -60,7 +60,8 @@ export enum MachineState {
  * Configuration options for the Machine
  */
 export interface MachineConfig {
-  /** Stack size in words (default 65536) */
+  /** Stack size in words (default 131072): room for a full data segment's
+   * globals and the frames of the calls on top of them. */
   stackSize?: number;
   /** Heap size in words (default as many as the heap's bytes) */
   heapSize?: number;
@@ -143,6 +144,9 @@ export class Machine {
   private variants: VariantRuntime;
   /** The frames of interrupt procedures running now, innermost last. */
   private interruptFrames: number[] = [];
+  /** A timer interrupt that came while the program waited for a key or in
+   * Delay: its frame, and when that delay ends. */
+  private idleTick: { frame: number; sleeping: number | undefined } | undefined;
   /** When the timer next ticks, 18.2 times a second. */
   private nextTick = 0;
   /** The scan code of the last key pressed. */
@@ -180,7 +184,7 @@ export class Machine {
       bytecode.variantParts
     );
     this.config = {
-      stackSize: config.stackSize ?? 65536,
+      stackSize: config.stackSize ?? 131072,
       heapSize: config.heapSize ?? HEAP_BYTES,
       maxInstructions: config.maxInstructions ?? 0,
       debug: config.debug ?? false,
@@ -226,8 +230,8 @@ export class Machine {
       segmentOf: (address) => this.space.segmentOf(address),
       pointer: (segment, offset) => this.space.pointer(segment, offset),
     }, this.config.fileSystem);
-    this.low = new LowMemory({ console: this.services.console, now: () => new Date(), keysAvailable: () => this.keysAvailable() });
-    this.ports = new Ports({ sound: (frequency) => { this.config.onSound(frequency); }, scanCode: () => this.lastScanCode });
+    this.low = new LowMemory({ console: this.services.console, graphics: this.services.graphics, now: () => new Date(), keysAvailable: () => this.keysAvailable() });
+    this.ports = new Ports({ sound: (frequency) => { this.config.onSound(frequency); }, scanCode: () => this.lastScanCode, graphics: this.services.graphics });
     this.space = new AddressSpace({
       memory: this.memory,
       bytecode,
@@ -269,6 +273,7 @@ export class Machine {
     this.keyQueue = '';
     this.assemblyResume = undefined;
     this.interruptFrames = [];
+    this.idleTick = undefined;
     this.nextTick = 0;
     this.lastScanCode = 0;
     this.instructionCount = 0;
@@ -301,7 +306,8 @@ export class Machine {
   /** Execute a bounded slice, preserving registers when paused or awaiting input. */
   runSlice(budget = 10_000): void {
     if (!Number.isInteger(budget) || budget <= 0) throw new RangeError('Invalid instruction budget');
-    if (this.state === MachineState.WAITING || this.state === MachineState.STOPPED || this.state === MachineState.ERROR) return;
+    if (this.state === MachineState.STOPPED || this.state === MachineState.ERROR) return;
+    if (this.state === MachineState.WAITING && !this.tickWhileIdle()) return;
     if (!this.wake()) return;
     this.state = MachineState.RUNNING;
     for (let i = 0; i < budget && this.getState() === MachineState.RUNNING; i += 1) this.step();
@@ -438,6 +444,15 @@ export class Machine {
             (p as TypeCode) !== TypeCode.P ? (this.dstore[this.mp] ?? 0) : 0;
           const oldMp = this.mp;
           if (this.interruptFrames.at(-1) === oldMp) this.interruptFrames.pop();
+          // A timer interrupt that came during Delay: the delay goes on.
+          if (this.idleTick?.frame === oldMp) {
+            const until = this.idleTick.sleeping;
+            this.idleTick = undefined;
+            if (until !== undefined && Date.now() < until) {
+              this.wakeTime = until;
+              this.state = MachineState.SLEEPING;
+            }
+          }
           this.sp = oldMp - 1;
           this.pc = this.dstore[oldMp + 4] as number;
           this.mp = this.dstore[oldMp + 2] as number;
@@ -1266,6 +1281,7 @@ export class Machine {
         return this.input[this.inputPos]?.[this.inputColumn] ?? '\r';
       },
       console: this.services.console,
+      graphics: this.services.graphics,
       sound: (frequency) => {
         this.config.onSound(frequency);
       },
@@ -1302,11 +1318,35 @@ export class Machine {
     return this.mp;
   }
   /** Interrupts 08h and 1Ch, when the program handles them. */
-  private timerTick(): void {
+  private timerTick(): number | undefined {
     const now = Date.now();
-    if (now < this.nextTick) return;
+    if (now < this.nextTick) return undefined;
     this.nextTick = now + 55;
-    if (this.callInterrupt(0x08, this.pc) === undefined) this.callInterrupt(0x1c, this.pc);
+    return this.callInterrupt(0x08, this.pc) ?? this.callInterrupt(0x1c, this.pc);
+  }
+  /** When the timer interrupt next comes, if the program handles it. It
+   * comes while the program waits for a key or in Delay too, as the PC's
+   * timer interrupts the BIOS's keyboard wait and Delay's loop, so the host
+   * runs the machine then. */
+  nextTimerTick(): number | undefined {
+    if (this.handler(0x08) === undefined && this.handler(0x1c) === undefined) return undefined;
+    return Math.max(this.nextTick, Date.now());
+  }
+  /** The timer's interrupt while the program waits: its interrupt
+   * procedure runs, and then the program waits again, for the key in
+   * ReadKey or Read, or for the rest of its Delay. An asm block waiting for
+   * a key keeps its registers, so it waits on undisturbed. */
+  tickWhileIdle(): boolean {
+    if (this.interruptFrames.length || this.nextTimerTick() === undefined || Date.now() < this.nextTick) return false;
+    const instruction = this.bytecode.istore[this.pc];
+    if (this.state === MachineState.WAITING && instruction !== undefined && inst.getOpcode(instruction) === (Opcode.CSP as number) &&
+      inst.getOperand2(instruction) === (InternalProcedure.ASSEMBLY as number)) return false;
+    const sleeping = this.state === MachineState.SLEEPING ? this.wakeTime : undefined;
+    const frame = this.timerTick();
+    if (frame === undefined) return false;
+    this.idleTick = { frame, sleeping };
+    this.state = MachineState.PAUSED;
+    return true;
   }
   /** Raise an interrupt the program handles, before its next instruction.
    * False when no interrupt procedure handles it. */
@@ -1574,9 +1614,23 @@ export class Machine {
   getGraphics() { return this.services.graphics; }
   getFileSystem() { return this.config.fileSystem; }
   getWakeTime(): number { return this.wakeTime; }
+  /** Memory at a segment and offset, as Mem, MemW and MemL reach it: a
+   * little-endian number of `bytes` bytes, read or written. */
+  readMemory(segment: number, offset: number, bytes: number): number {
+    const linear = ((segment & 0xffff) * 16 + (offset & 0xffff)) % 0x100000;
+    return Array.from(this.space.readLinear(linear, bytes)).reduceRight((value, byte) => value * 256 + byte, 0);
+  }
+  writeMemory(segment: number, offset: number, bytes: number, value: number): void {
+    const linear = ((segment & 0xffff) * 16 + (offset & 0xffff)) % 0x100000;
+    this.space.writeLinear(linear, Uint8Array.from({ length: bytes }, (_, index) => Math.floor(value / 256 ** index) & 0xff));
+  }
+  /** Ptr: the pointer a segment and offset make. */
+  pointerTo(segment: number, offset: number): number {
+    return this.space.pointer(segment, offset);
+  }
   wake(): boolean {
     if (this.state !== MachineState.SLEEPING) return true;
-    if (Date.now() < this.wakeTime) return false;
+    if (Date.now() < this.wakeTime) return this.tickWhileIdle();
     this.state = MachineState.PAUSED;
     return true;
   }

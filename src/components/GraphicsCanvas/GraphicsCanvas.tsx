@@ -78,7 +78,7 @@ export function GraphicsCanvas({ width = 640, height = 480 }: GraphicsCanvasProp
 
     if (!graphics) return;
     const pixels = ctx.createImageData(graphics.width, graphics.height);
-    const colors = EGA_PALETTE.map((color) => Number.parseInt(color.slice(1), 16));
+    const colors = graphics.colors ?? EGA_PALETTE.map((color) => Number.parseInt(color.slice(1), 16));
     for (let index = 0; index < graphics.pixels.length; index += 1) {
       const color = colors[graphics.pixels[index] ?? 0] ?? 0;
       pixels.data[index * 4] = color >> 16;

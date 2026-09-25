@@ -169,7 +169,7 @@ function publish(session: Session, extra?: string): void {
   const graphicsChanged = screen.graphics?.revision !== graphics.revision;
   useProgramScreenStore.setState({
     ...(consoleChanged ? { console: { cols: console.cols, rows: console.rows, chars: [...console.chars], attributes: console.attributes.slice(), x: cursor.x, y: cursor.y, cursorVisible: console.cursorVisible, revision: console.revision, attribute: console.attribute } } : {}),
-    ...(graphicsChanged ? { graphics: { width: graphics.width, height: graphics.height, pixels: graphics.display(), revision: graphics.revision } } : {}),
+    ...(graphicsChanged ? { graphics: { width: graphics.width, height: graphics.height, pixels: graphics.display(), revision: graphics.revision, ...(graphics.dac ? { colors: graphics.colors() ?? [] } : {}) } } : {}),
     ...((console.active && consoleChanged) || (graphics.initialized && graphicsChanged) ? { visible: true, kind: graphics.initialized ? 'graphics' : 'text' } : {}),
   });
   if (!graphics.initialized && screen.kind === 'graphics' && screen.visible) useProgramScreenStore.setState({ kind: 'text', visible: console.active });
@@ -229,7 +229,9 @@ function fail(session: Session, error: unknown): void {
   ]));
 }
 
+/** Run the program's next slice after `delay`, in place of any pending. */
 function schedule(session: Session, delay = 0): void {
+  if (session.timer !== null) clearTimeout(session.timer);
   session.timer = setTimeout(() => {
     session.timer = null;
     if (current !== session) return;
@@ -243,7 +245,12 @@ function schedule(session: Session, delay = 0): void {
       } else if (state === MachineState.WAITING) {
         useCompilerStore.getState().setRuntime('waiting');
         if (session.machine.getConsole().active || session.machine.getGraphics().initialized) {
-          useProgramScreenStore.setState({ visible: true, waiting: true, input: '', kind: session.machine.getGraphics().initialized ? 'graphics' : 'text' });
+          // What the user has typed so far survives a timer interrupt's turn.
+          const typed = useProgramScreenStore.getState().waiting ? {} : { input: '' };
+          useProgramScreenStore.setState({ visible: true, waiting: true, ...typed, kind: session.machine.getGraphics().initialized ? 'graphics' : 'text' });
+          // The program's timer interrupt procedure runs while it waits.
+          const tick = session.machine.nextTimerTick();
+          if (tick !== undefined) schedule(session, Math.max(1, tick - Date.now()));
           return;
         }
         useDialogStore.getState().open(inputDialog(session.machine.getOutput()), {}, (result, values) => {
@@ -269,7 +276,9 @@ function schedule(session: Session, delay = 0): void {
         compiler.setMessages([...compiler.messages, `${session.file}: Program finished`]);
         useProgramScreenStore.setState({ waiting: false, input: '' });
       } else if (state === MachineState.SLEEPING) {
-        schedule(session, Math.max(1, session.machine.getWakeTime() - Date.now()));
+        // Until Delay ends, or the timer interrupt comes first.
+        const wake = Math.min(session.machine.getWakeTime(), session.machine.nextTimerTick() ?? Infinity);
+        schedule(session, Math.max(1, wake - Date.now()));
       } else {
         schedule(session);
       }
@@ -317,7 +326,7 @@ export function handleProgramScreenKey(event: KeyboardEvent): boolean {
           session.debugger.continueAfterInput();
           useProgramScreenStore.setState({ waiting: false, input: '' });
           useCompilerStore.getState().setRuntime('running');
-          if (session.timer === null) schedule(session);
+          schedule(session);
         }
       } catch (error) { fail(session, error); }
     }

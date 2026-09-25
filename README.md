@@ -254,11 +254,11 @@ core language:
 - **CRT:** cursor positioning, windows, colors, clearing, line insertion/deletion, scrolling, text modes, keyboard input, sound, and nonblocking delays. `TextAttr`, `WindMin`, `WindMax` and `LastMode` follow the screen, and storing into them changes it; `CheckBreak`, `CheckEOF`, `CheckSnow` and `DirectVideo` are there for programs that set them.
 - **Graph:** a palette-index VGA framebuffer with pixels, lines, rectangles, bars, arcs/ellipses, sectors, flood fills, viewports, line/fill styles, and bitmap/stroke text. The default font is the IBM 8×8 bitmap. Non-default fonts load `.CHR` files from the virtual drive using the path supplied to `InitGraph`; original Borland font files are not bundled. `SetUserCharSize` supports custom stroke scaling.
 - **DOS:** date/time getters and setters use a virtual clock; environment values (`GetEnv`, `EnvCount`, `EnvStr`) and disk-capacity queries refer to the virtual DOS environment. `Registers`, `SearchRec`, `DateTime` and the path string types are declared, and `DosError` reports each call. `Intr` and `MsDos` run interrupts on the [built-in assembler](#built-in-assembler)'s 8086, with the registers from `Registers` and back. `FindFirst`/`FindNext` list the virtual drive with DOS's wildcards and attributes, in the order entries were made; `GetFAttr`/`SetFAttr` (a read-only file refuses writes) and `GetFTime`/`SetFTime` keep file attributes and times; `PackTime`, `UnpackTime`, `FSplit`, `FExpand` and `FSearch` work on names and times. `SetIntVec` and `GetIntVec` install interrupt procedures. `Exec` cannot start another program in the P-machine, so it reports DOS error 8, not enough memory, as Turbo Pascal does without a `{$M}` that leaves room; `Keep` ends the program. `GetCBreak`, `SetCBreak`, `GetVerify`, `SetVerify` and `SwapVectors` exist. `FileRec(F)` and `TextRec(T)` show a file's DOS handle, its mode (`fmClosed`, `fmInput`, `fmOutput`, `fmInOut`), its record or buffer size and the name it was assigned, in Turbo Pascal's 128- and 256-byte layouts; storing into them does not change the file.
-- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `TypeOf`, `GetMem`/`FreeMem`, `Mark`/`Release`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `SeekEof`/`SeekEoln`, `MkDir`/`ChDir`/`RmDir`/`GetDir`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables: over a variable of the same layout one shares its cells, and over another it sees its bytes, as `B: array[0..1] of Byte absolute W` does, through `var` parameters, pointers and assembly too. A program may declare a System or standard-unit name again, as `procedure Double`, and reach the unit's as `System.Double`. The System variables `ExitCode` (the program's exit status), `RandSeed` (the seed of Borland's generator, so setting it repeats a sequence), `FileMode`, `Test8087` and `Test8086` exist. Exit procedures installed in `ExitProc` run, the last installed first, when the program ends, calls `Halt` or stops on a run-time error; there `ExitCode` and `ErrorAddr` describe the error, and an exit procedure that clears `ErrorAddr` ends the program quietly. `HeapOrg`, `HeapPtr` and `HeapEnd` bound the heap, which grows down from `HeapOrg`. `Input` and `Output` are text files on the console: `Assign(Output, 'LOG.TXT')` sends plain `Write` to a file, `Assign(Output, '')` brings it back, and both can be passed as `var` Text parameters. Each run starts in the drive's root directory.
+- **The rest of System:** `FillChar` and `Move` change a variable's bytes through its type's layout, with `Hi`, `Lo`, `Swap`, `Addr`, `TypeOf`, `GetMem`/`FreeMem`, `Mark`/`Release`, `MemAvail`/`MaxAvail`, `Flush`, `SetTextBuf`, `SeekEof`/`SeekEoln`, `MkDir`/`ChDir`/`RmDir`/`GetDir`, `RunError`, `ParamCount`/`ParamStr`, and `absolute` variables: over a variable of the same layout one shares its cells, and over another it sees its bytes, as `B: array[0..1] of Byte absolute W` does, through `var` parameters, pointers and assembly too. A program may declare a System or standard-unit name again, as `procedure Double`, and reach the unit's as `System.Double`. The System variables `ExitCode` (the program's exit status), `RandSeed` (the seed of Borland's generator, so setting it repeats a sequence), `FileMode`, `Test8087` and `Test8086` exist. Exit procedures installed in `ExitProc` run, the last installed first, when the program ends, calls `Halt` or stops on a run-time error; there `ExitCode` and `ErrorAddr` describe the error, and an exit procedure that clears `ErrorAddr` ends the program quietly. `HeapOrg`, `HeapPtr` and `HeapEnd` bound the heap, which fills upward from `HeapOrg` in 8-byte steps. `Input` and `Output` are text files on the console: `Assign(Output, 'LOG.TXT')` sends plain `Write` to a file, `Assign(Output, '')` brings it back, and both can be passed as `var` Text parameters. Each run starts in the drive's root directory.
 - **Strings and Printer:** under `{$X+}` a `PChar` holds a string constant in storage of its own that ends with `#0`, can be indexed and moved by a count, and a zero-based `array of Char` passes as one. The `Strings` unit's routines work on them. The `Printer` unit's `Lst` writes to the file `LPT1` on the virtual drive.
 - **Overlay:** every unit is resident, so `OvrInit`, `OvrInitEMS`, `OvrSetBuf` and the rest succeed and leave `OvrResult` as `ovrOk`; `{$O+}` and `{$O unit}` are accepted.
 - **Turbo3:** `Kbd` reads keys as they are pressed, without echo, and `AssignKbd` opens another text file on the keyboard. `MemAvail` and `MaxAvail` count 16-byte paragraphs, `LongFileSize`, `LongFilePos` and `LongSeek` use reals, and `HighVideo`/`NormVideo` (yellow) and `LowVideo` (light gray) set Turbo Pascal 3's colors. `CBreak` is there, and Crt's `C40`/`C80` name the color modes.
-- **Graph3:** Turbo Pascal 3's CGA screens: `GraphColorMode` and `GraphMode` (320×200 in four colors, with the four palettes of the reference manual and its black-and-white palettes) and `HiRes` (640×200 in two). The screen keeps color numbers, so `Palette`, `GraphBackground` and `HiResColor` recolor what is drawn. `Plot`, `Draw`, `Circle`, `Arc`, `FillScreen`, `FillShape`, `FillPattern`/`Pattern`, `GetPic`/`PutPic` (in Turbo Pascal 3's buffer layout), `GetDotColor`, `ColorTable` (color -1) and `GraphWindow` clipping work, as do turtlegraphics: turtle coordinates from the middle of the window with Y upwards, headings clockwise from North, `Wrap`/`NoWrap`, `TurtleWindow`, `TurtleDelay` and a visible turtle. `TextMode` returns to text.
+- **Graph3:** Turbo Pascal 3's CGA screens: `GraphColorMode` and `GraphMode` (320×200 in four colors, with the four palettes of the reference manual and its black-and-white palettes) and `HiRes` (640×200 in two). The screen keeps color numbers, so `Palette`, `GraphBackground` and `HiResColor` recolor what is drawn. `Plot`, `Draw`, `Circle`, `Arc`, `FillScreen`, `FillShape`, `FillPattern`/`Pattern`, `GetPic`/`PutPic` (in Turbo Pascal 3's buffer layout), `GetDotColor`, `ColorTable` (color -1) and `GraphWindow` clipping work, as do turtlegraphics: turtle coordinates from the middle of the window with Y upwards, headings clockwise from North, `Wrap`/`NoWrap`, `TurtleWindow`, `TurtleDelay` and a visible turtle. `Write` and `WriteLn` draw on the graphics screen in the BIOS's 8×8 characters, in the text color, 40 columns to a line in the 320-dot modes and 80 in `HiRes`; scrolling moves the dots up and `ClrScr` clears them. `TextMode` returns to text.
 
 `Byte`, `ShortInt`, `Word`, `Integer`, and `LongInt` retain their Pascal widths.
 Integer expression promotion and overflow follow those widths, including
@@ -283,12 +283,19 @@ filenames to keep both copies. A failed batch preserves existing files. Pascal
 programs cannot access the host filesystem or change the host clock. Source
 printing uses the browser's print dialog; the original DOS printer-filter
 settings are retained as UI preferences. Graph emulates VGA modes 640×200,
-640×350, and 640×480; unsupported drivers report a graphics error.
+640×350, and 640×480; unsupported drivers report a graphics error. BIOS mode
+13h (320×200 in 256 colors), which `INT 10h` sets from `Intr` or assembly,
+shows a dot per byte of `Mem[$A000:0]` onward, with the VGA's default palette,
+which ports 3C7h to 3C9h read and set.
 
 ### Compiler switches and includes
 
-The P-machine implements `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$N`, `$T` and
-`$X`, with Turbo Pascal defaults (`B- R- V+ P- I+ Q- F- N- T- X+`). Under `$X+` a
+The P-machine implements `$A`, `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$G`, `$N`,
+`$T` and `$X`, with Turbo Pascal defaults (`A+ B- R- V+ P- I+ Q- F- G- N- T- X+`).
+`$A+` (the Word align data option) starts globals and typed constants larger
+than a byte at even offsets in the data segment. `$G+` (the 286 instructions
+option) lets the built-in assembler take 80286 opcodes, which under `$G-` are
+error 159, as in Turbo Pascal. Under `$X+` a
 function may be called as a statement, though not a System function, as in
 Turbo Pascal. Under `$T-` `@X` is an untyped pointer, which any pointer takes;
 `$T+` (the Typed @ operator option) makes it a pointer to X's type. A module that uses `Single`,
@@ -339,28 +346,32 @@ own interfaces and licenses; see [DOS distribution notices](public/dos/licenses/
 `inline` routines run on an 8086 inside the P-machine. It has the 8086's
 registers and flags and runs its integer, logic, shift, stack, string (`REP
 MOVSB` and the rest), jump, `LOOP` and local `CALL`/`RET` instructions, with
-the 286's `PUSHA`, `POPA`, immediate `PUSH` and three-operand `IMUL`. Operands
+the 286's `PUSHA`, `POPA`, immediate `PUSH` and three-operand `IMUL` under `{$G+}`. Operands
 name Pascal variables, fields (`p.X`, `[bx].TPoint.X`), constants, `@Result` and
 `@` labels; the assembler checks operand sizes as Turbo Pascal does. Memory is
 the variables' own storage: an address in a register comes from `LEA`, `OFFSET`,
 `LES`/`LDS` of a `var` parameter or pointer, and moves along its variable byte by
-byte, so strings, arrays and records can be walked. An assembler function returns
+byte, so strings, arrays and records can be walked. A register holding a number
+addresses memory by a segment register and offset, as the 8086 does: `DS` is
+`DSeg` and `SS` is `SSeg`, so `[BX]` with `BX = Ofs(X)` is a global, and
+`ES:[DI]` with `ES = $B800` is the screen. An assembler function returns
 AL, AX or DX:AX, and an assembler routine gets its large value parameters by
 address, as in Turbo Pascal. `inline` decodes the same instructions from machine
 code, taking a variable's name as its address (`$8B/$46/<X` is `MOV AX, X`), and
 an `inline` routine's code pops its arguments.
 
-Interrupts reach the IDE's screen and keyboard: `INT 10h` (mode, cursor,
-characters, teletype), `INT 16h` (keys with BIOS scan codes, waiting as `ReadKey`
+Interrupts reach the IDE's screen and keyboard: `INT 10h` (mode, mode 13h and
+its dots, cursor, characters, teletype), `INT 16h` (keys with BIOS scan codes, waiting as `ReadKey`
 does), `INT 21h` (character and `$`-string output, keyboard, date, time,
 version, exit with a code through the exit procedures), `INT 1Ah` (timer ticks),
 `INT 15h` function 86h (wait) and `INT 33h` (no mouse). Ports 42h, 43h and 61h
-drive the speaker, port 60h reads the last scan code and 3DAh toggles retrace.
+drive the speaker, port 60h reads the last scan code, 3DAh toggles retrace and
+3C7h to 3C9h hold the VGA palette.
 An `interrupt` procedure, of `Word` register parameters from `Flags` to `BP`
 (or only the last of them), installed with `SetIntVec`, handles `INT` from
 assembly, getting the registers and giving back what it changes; interrupts
-08h and 1Ch tick 18.2 times a second while the program runs, and 09h comes with
-each key. Addresses outside any variable (video memory, `[0]`), data
+08h and 1Ch tick 18.2 times a second, while the program runs and while it
+waits in `ReadKey`, `Read` or `Delay`, and 09h comes with each key. Data
 directives, calls to Pascal routines from assembly, BCD and 386 instructions
 are beyond it: such a program opens the native compiler instead.
 
@@ -388,22 +399,19 @@ variable's bytes as its own type wherever it is dereferenced. Reading or
 writing past the variable through such a pointer is a run-time error rather
 than whatever memory follows it. An address made by `Ptr` or from a string's
 character is a plain one, which reads memory byte by byte, past the variable
-too. It does not
-implement original overlay/linker formats, `.BGI` loading, or all compiler
-switches. A structure may be up to
-65520 bytes, as in Turbo Pascal, but a variable must fit its frame, so a type
-that large serves typecasts, views and the heap. Timer interrupts tick only
-while the program runs instructions, not while it waits in `ReadKey` or
-`Delay`. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
+too. A structure, and the data segment, hold up to 65520 bytes, as in Turbo
+Pascal. It does not implement original overlay/linker formats or `.BGI`
+loading. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
-circle's centre, and text written in its modes goes to the text screen. In particular alignment, overlay, and code
-generation options are retained as IDE preferences without full VM semantics.
+circle's centre. The Overlays allowed option is retained as an IDE preference,
+since every unit stays resident.
 The VM always enforces its memory/instruction limits. `Extended` is held as a
 double rather than in 80 bits, and `Comp` keeps whole numbers in one too, so
 values beyond 2^53 lose precision; transcendental math
 uses JavaScript functions, rounded to Real48 outside 8087 code. Debugger
-expressions inspect data, operators, and selected pure built-ins; they do not
-execute user routines. Help is newly authored, and recognized diagnostics use
+expressions take what Turbo Pascal 7's do: data, operators, the functions
+allowed in constant declarations, and `Mem`, `MemW` and `MemL`; as there, they
+do not call the program's routines. Help is newly authored, and recognized diagnostics use
 Borland numbers while preserving explanatory detail; implementation-specific
 errors remain explicitly unnumbered.
 

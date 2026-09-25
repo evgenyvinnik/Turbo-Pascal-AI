@@ -368,6 +368,7 @@ async function doCompile(thenRun: boolean, debugAction: DebugAction = 'run', tar
     openStrings: ide().compilerOptions.syntax?.[4] ?? false,
     farCalls: ide().compilerOptions.codegen?.[0] ?? false,
     alignData: ide().compilerOptions.codegen?.[2] ?? true,
+    instructions286: ide().compilerOptions.codegen?.[3] ?? false,
     sources, defines: ide().defines.split(/[;,\s]+/).filter(Boolean),
     includeDirectories: String(directories?.include ?? '').split(';').filter(Boolean),
     unitDirectories: String(directories?.unit ?? '').split(';').filter(Boolean),

@@ -52,7 +52,9 @@ export class SourceDebugger {
     if (this.paused) return;
     for (let count = 0; count < budget; count += 1) {
       const state = this.machine.getState();
-      if (state === MachineState.STOPPED || state === MachineState.ERROR || state === MachineState.WAITING) return;
+      if (state === MachineState.STOPPED || state === MachineState.ERROR) return;
+      // While it waits for input, only the timer interrupt runs.
+      if (state === MachineState.WAITING && !this.machine.tickWhileIdle()) return;
       if (state === MachineState.SLEEPING && !this.machine.wake()) return;
       const line = this.bytecode.statementLines[this.machine.getPC()];
       if (line !== undefined) {
@@ -217,6 +219,8 @@ export class SourceDebugger {
       case NodeType.ARRAY_ACCESS:
       case NodeType.FIELD_ACCESS:
       case NodeType.POINTER_DEREF: {
+        const memory = this.memory(node);
+        if (memory) return this.machine.readMemory(memory.segment, memory.offset, memory.bytes);
         const location = this.location(node);
         return this.readLocation(location);
       }
@@ -272,7 +276,18 @@ export class SourceDebugger {
       }
       case NodeType.CALL: {
         const call = node as CallNode;
+        // SizeOf, High and Low of a variable go by its type.
+        const name = call.name.toLowerCase();
+        if (['sizeof', 'high', 'low'].includes(name) && call.arguments.length === 1) {
+          const { type } = this.location(call.arguments[0]!);
+          if (name === 'sizeof') return type.byteSize ?? type.size;
+          if (type.kind === 'string') return name === 'high' ? type.capacity ?? 255 : 0;
+          const bound = name === 'high' ? type.high : type.low;
+          if (bound === undefined) throw new Error('An array or ordinal variable is required');
+          return bound;
+        }
         const args = call.arguments.map((arg) => this.value(arg));
+        const word = () => Number(args[0]) & 0xffff;
         const functions: Record<string, () => unknown> = {
           abs: () => Math.abs(Number(args[0])), sqr: () => Number(args[0]) ** 2,
           sqrt: () => Math.sqrt(Number(args[0])), round: () => Math.sign(Number(args[0])) * Math.floor(Math.abs(Number(args[0])) + 0.5),
@@ -280,13 +295,27 @@ export class SourceDebugger {
           ord: () => typeof args[0] === 'string' ? args[0].charCodeAt(0) : Number(args[0]),
           chr: () => String.fromCharCode(Number(args[0])), odd: () => Number(args[0]) % 2 !== 0,
           succ: () => Number(args[0]) + 1, pred: () => Number(args[0]) - 1,
+          hi: () => word() >> 8, lo: () => word() & 0xff, swap: () => ((word() & 0xff) << 8) | (word() >> 8),
+          ptr: () => this.machine.pointerTo(Number(args[0]), Number(args[1])),
         };
-        const invoke = functions[call.name.toLowerCase()];
+        const invoke = functions[name];
         if (invoke) return invoke();
-        throw new Error('Only pure built-in functions can be evaluated while paused');
+        // As in Turbo Pascal, the functions of constant expressions; the
+        // program's own routines do not run while it is paused.
+        throw new Error('Only the functions allowed in constant expressions can be evaluated while paused');
       }
     }
     throw new Error('Unsupported debugger expression');
+  }
+
+  /** Mem, MemW or MemL[Seg:Ofs], which the debugger reads as Turbo Pascal's does. */
+  private memory(node: Node): { segment: number; offset: number; bytes: number } | undefined {
+    if (node.type !== NodeType.ARRAY_ACCESS) return undefined;
+    const access = node as ArrayAccessNode;
+    if (!access.segmented || access.array.type !== NodeType.IDENTIFIER) return undefined;
+    const bytes = { mem: 1, memw: 2, meml: 4 }[(access.array as IdentifierNode).name.toLowerCase()];
+    if (!bytes) return undefined;
+    return { segment: Number(this.value(access.indices[0]!)), offset: Number(this.value(access.indices[1]!)), bytes };
   }
 
   evaluate(expression: string): DebugValue {
@@ -299,6 +328,13 @@ export class SourceDebugger {
 
   modify(expression: string, replacement: string): DebugValue {
     if (!this.paused) throw new Error('Pause the program before modifying a variable');
+    const memory = this.memory(this.parse(expression));
+    if (memory) {
+      const value = this.value(this.parse(replacement));
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= 256 ** memory.bytes) throw new Error('Value out of range');
+      this.machine.writeMemory(memory.segment, memory.offset, memory.bytes, value);
+      return this.evaluate(expression);
+    }
     const location = this.location(this.parse(expression));
     const value = this.value(this.parse(replacement));
     const kind = location.type.kind;
