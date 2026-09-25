@@ -50,7 +50,7 @@ interface Result {
 export class RuntimeServices {
   readonly console = new TextConsole();
   readonly graphics = new GraphicsRuntime();
-  readonly graph3 = new Graph3(this.graphics);
+  readonly graph3 = new Graph3(this.graphics, this.console);
   readonly files: FileRuntime;
   private clockOffset = 0;
   private fontPath = '';

@@ -4,7 +4,9 @@ export interface ConsoleSnapshot {
   cols: number; rows: number; chars: string[]; attributes: Uint8Array;
   x: number; y: number; cursorVisible: boolean; revision: number; attribute: number;
 }
-export interface GraphicsSnapshot { width: number; height: number; pixels: Uint8Array; revision: number }
+/** The program's graphics screen; `colors`, as RGB, are mode 13h's palette
+ * where it replaces the EGA's sixteen. */
+export interface GraphicsSnapshot { width: number; height: number; pixels: Uint8Array; revision: number; colors?: number[] }
 interface ProgramScreenState {
   visible: boolean;
   kind: 'text' | 'graphics';

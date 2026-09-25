@@ -1,6 +1,30 @@
 import { BGI_FONT } from '../../tui/bgiFont';
 import type { StrokeFont } from './StrokeFont';
 
+/** The VGA's palette when BIOS mode 13h starts, as six-bit red, green and
+ * blue: the sixteen EGA colors, a gray ramp, then rings of 24 hues at three
+ * brightnesses and three saturations, and black. */
+function defaultVgaPalette(): [number, number, number][] {
+  const ega: [number, number, number][] = [
+    [0, 0, 0], [0, 0, 42], [0, 42, 0], [0, 42, 42], [42, 0, 0], [42, 0, 42], [42, 21, 0], [42, 42, 42],
+    [21, 21, 21], [21, 21, 63], [21, 63, 21], [21, 63, 63], [63, 21, 21], [63, 21, 63], [63, 63, 21], [63, 63, 63],
+  ];
+  const grays = [0, 5, 8, 11, 14, 17, 20, 24, 28, 32, 36, 40, 45, 50, 56, 63].map((v): [number, number, number] => [v, v, v]);
+  const ring = ([a, b, c, d, e]: number[]): [number, number, number][] => [
+    [a, a, e], [b, a, e], [c, a, e], [d, a, e], [e, a, e], [e, a, d], [e, a, c], [e, a, b],
+    [e, a, a], [e, b, a], [e, c, a], [e, d, a], [e, e, a], [d, e, a], [c, e, a], [b, e, a],
+    [a, e, a], [a, e, b], [a, e, c], [a, e, d], [a, e, e], [a, d, e], [a, c, e], [a, b, e],
+  ] as [number, number, number][];
+  const steps = [
+    [0, 16, 31, 47, 63], [31, 39, 47, 55, 63], [45, 49, 54, 58, 63],
+    [0, 7, 14, 21, 28], [14, 17, 21, 24, 28], [20, 22, 24, 26, 28],
+    [0, 4, 8, 12, 16], [8, 10, 12, 14, 16], [11, 12, 13, 15, 16],
+  ];
+  return [...ega, ...grays, ...steps.flatMap(ring), ...Array.from({ length: 8 }, (): [number, number, number] => [0, 0, 0])];
+}
+/** A six-bit DAC level as eight bits. */
+const eightBit = (level: number) => ((level & 63) << 2) | ((level & 63) >> 4);
+
 /** Deterministic, palette-index BGI framebuffer. Drawing works in Node and browsers. */
 export class GraphicsRuntime {
   width = 640;
@@ -28,6 +52,13 @@ export class GraphicsRuntime {
   verticalJustify = 2;
   /** Graph3's CGA screens hold color numbers, which this maps to colors. */
   palette: number[] | null = null;
+  /** BIOS mode 13h's 256 colors, as the VGA's DAC holds them in six bits
+   * each, while that mode is on. */
+  dac: [number, number, number][] | null = null;
+  /** The DAC's ports: the entry being written or read, and which of its
+   * red, green and blue comes next. */
+  private dacWrite = { index: 0, component: 0 };
+  private dacRead = { index: 0, component: 0 };
   /** Dots shown over the screen without being part of it: Graph3's turtle. */
   decoration: { x: number; y: number; color: number }[] = [];
   private viewport = { left: 0, top: 0, right: 639, bottom: 479, clip: true };
@@ -44,6 +75,7 @@ export class GraphicsRuntime {
       return;
     }
     this.palette = null;
+    this.dac = null;
     this.decoration = [];
     this.driver = driver === 0 ? 9 : driver;
     this.mode = driver === 0 ? 2 : mode;
@@ -61,6 +93,51 @@ export class GraphicsRuntime {
     this.verticalJustify = 2;
     this.viewport = { left: 0, top: 0, right: this.width - 1, bottom: this.height - 1, clip: true };
     this.revision++;
+  }
+  /** BIOS mode 13h: 320 by 200 dots of 256 colors, one byte each at
+   * $A000:0, and the VGA's default palette. */
+  vgaMode(): void {
+    this.init(9, 0);
+    this.width = 320;
+    this.height = 200;
+    this.pixels = new Uint8Array(320 * 200);
+    this.mode = 0x13;
+    this.dac = defaultVgaPalette();
+    this.dacWrite = { index: 0, component: 0 };
+    this.dacRead = { index: 0, component: 0 };
+    this.viewport = { left: 0, top: 0, right: 319, bottom: 199, clip: true };
+    this.revision++;
+  }
+  /** Leave a BIOS graphics mode for text. */
+  textMode(): void {
+    if (!this.initialized) return;
+    this.initialized = false;
+    this.dac = null;
+    this.revision++;
+  }
+  /** The 256 colors as 24-bit RGB, while mode 13h is on. */
+  colors(): number[] | undefined {
+    return this.dac?.map(([red, green, blue]) => (eightBit(red) << 16) | (eightBit(green) << 8) | eightBit(blue));
+  }
+  /** Ports 3C7h, 3C8h and 3C9h: choose an entry to read or write, then its
+   * red, green and blue in turn. */
+  dacPort(port: number, value?: number): number {
+    const dac = this.dac;
+    if (!dac) return 0xff;
+    if (value === undefined) {
+      if (port !== 0x3c9) return port === 0x3c8 ? this.dacWrite.index : 0;
+      const level = dac[this.dacRead.index]![this.dacRead.component]!;
+      if (++this.dacRead.component === 3) this.dacRead = { index: (this.dacRead.index + 1) & 255, component: 0 };
+      return level;
+    }
+    if (port === 0x3c8) this.dacWrite = { index: value & 255, component: 0 };
+    else if (port === 0x3c7) this.dacRead = { index: value & 255, component: 0 };
+    else if (port === 0x3c9) {
+      dac[this.dacWrite.index]![this.dacWrite.component] = value & 63;
+      if (++this.dacWrite.component === 3) this.dacWrite = { index: (this.dacWrite.index + 1) & 255, component: 0 };
+      this.revision++;
+    }
+    return 0;
   }
   /** The screen as colors, for display. */
   display(): Uint8Array {

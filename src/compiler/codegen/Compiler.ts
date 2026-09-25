@@ -226,6 +226,11 @@ interface Scope {
   exits: number[];
   loops: Loop[];
 }
+/** The bytes a segment holds, as Turbo Pascal's data segment does at most. */
+const SEGMENT_BYTES = 65520;
+/** How many cells a frame may take: more than a segment's worth of bytes,
+ * since a value takes one cell whatever its size. */
+const FRAME_CELLS = 1 << 20;
 const INTEGER: PascalType = { kind: 'integer', size: 1, byteSize: 2, low: -32768, high: 32767 };
 const SHORTINT: PascalType = { ...INTEGER, byteSize: 1, low: -128, high: 127 };
 const BYTE: PascalType = { ...INTEGER, byteSize: 1, low: 0, high: 255 };
@@ -385,6 +390,8 @@ export class Compiler {
     // Typed constants in routines take program storage beyond the globals.
     this.scope.nextOffset = Math.max(this.scope.nextOffset, this.globalOffset);
     this.bytecode.dataSegment = this.dataSegment([...this.initializationOrder.flatMap((unit) => unit.scope.locals), ...this.scope.locals]);
+    // Turbo Pascal's data segment holds 65520 bytes, the used units' included.
+    if (this.bytecode.dataSegment.bytes > SEGMENT_BYTES) this.fail(root, 'Data segment too large');
     // Unit globals share the program activation, but retain separate lexical namespaces.
     this.scope.locals.unshift(...this.initializationOrder.flatMap(unit => unit.scope.locals));
     this.bytecode.setStartAddress();
@@ -652,7 +659,7 @@ export class Compiler {
       reference,
     };
     this.scope.nextOffset += reference ? 1 : type.size;
-    if (this.scope.nextOffset > 32767)
+    if (this.scope.nextOffset > FRAME_CELLS)
       this.fail(node, 'Variable storage exceeds the supported frame size');
     this.declare(name, variable, node);
     return variable;
@@ -1659,7 +1666,10 @@ export class Compiler {
     this.declarations(declaration.block.declarations);
     for (const child of this.scope.routines) this.compileRoutine(child);
     routine.address = this.bytecode.getNextAddress();
-    this.bytecode.frames[routine.address] = this.frame(routine, parameters);
+    const frame = this.frame(routine, parameters);
+    // A routine's variables must fit a segment too.
+    if (frame.bytes > 65536) this.fail(declaration, 'Too many variables');
+    this.bytecode.frames[routine.address] = frame;
     for (const patch of routine.patches) this.patch(patch, routine.address);
     if (declaration.interrupt)
       this.bytecode.interruptHandlers[routine.proceduralId] = { address: routine.address, parameters: routine.parameters.length };
@@ -1732,7 +1742,7 @@ export class Compiler {
     }
     if (!routine) this.exitChain(block);
     this.emit(routine ? Opcode.RTN : Opcode.STP, routine ? this.typeCode(routine.type) : 0);
-    if (this.scope.nextOffset > 32767) this.fail(block, 'Frame storage exceeds supported size');
+    if (this.scope.nextOffset > FRAME_CELLS) this.fail(block, 'Frame storage exceeds supported size');
     this.bytecode.setOperand2(entry, this.scope.nextOffset);
     if (!routine) for (const unit of this.initializationOrder)
       this.recordDebugScope(unit.scope, unit.debugStart ?? entry, unit.debugEnd ?? entry, this.scope.nextOffset);
@@ -1885,7 +1895,7 @@ export class Compiler {
     const offset = module ? this.scope.nextOffset : this.globalOffset;
     if (module) this.scope.nextOffset += type.size;
     else this.globalOffset += type.size;
-    if (offset + type.size > 32767)
+    if (offset + type.size > FRAME_CELLS)
       this.fail(node, 'Variable storage exceeds the supported frame size');
     const variable: Variable = {
       kind: 'variable',
@@ -2013,6 +2023,15 @@ export class Compiler {
     const value = this.constant(node);
     return this.text(value.type) ? String(value.value) : undefined;
   }
+  /** A string constant of N characters, where a packed string type of N
+   * characters, array[M..N] of Char, takes it as Turbo Pascal lets one. */
+  private packedText(type: PascalType, node: Node): string | undefined {
+    if (type.kind !== 'array' || type.openArray || type.element?.kind !== 'char' || type.size < 2 || !this.constantExpression(node))
+      return undefined;
+    const value = this.constant(node);
+    const text = this.text(value.type) || value.type.kind === 'char' ? String(value.value) : undefined;
+    return text?.length === type.size ? text : undefined;
+  }
   /** Under {$X+} a zero-based array of Char stands for a PChar to its first
    * character. Leaves that address on the stack when the node is one. */
   private emitCharArrayPointer(node: Node): boolean {
@@ -2056,7 +2075,7 @@ export class Compiler {
     // the program starts or where the constant is used.
     const offset = Math.max(this.globalOffset, root.nextOffset);
     this.globalOffset = root.nextOffset = offset + type.size;
-    if (offset + type.size > 32767)
+    if (offset + type.size > FRAME_CELLS)
       this.fail(node, 'Variable storage exceeds the supported frame size');
     const stores: StaticStore[] = [];
     for (let index = 0; index <= text.length; index++)
@@ -2407,14 +2426,16 @@ export class Compiler {
       const sourceType = this.expressionType(node.value);
       if (targetType.openArray || sourceType.openArray)
         this.fail(node, 'Open arrays cannot be assigned as a whole');
-      this.requireType(node, targetType, sourceType);
+      const text = this.packedText(targetType, node.value);
+      if (text === undefined) this.requireType(node, targetType, sourceType);
       const destination = this.temp(POINTER),
         source = this.temp(POINTER);
       this.addressVariable(destination);
       this.address(node.target);
       this.emit(Opcode.STI, TypeCode.A);
       this.addressVariable(source);
-      this.address(node.value);
+      if (text !== undefined) this.emitStaticText(text, node.value);
+      else this.address(node.value);
       this.emit(Opcode.STI, TypeCode.A);
       const vmtOffsets = this.objectVmtOffsets(targetType);
       for (let index = 0; index < targetType.size; index++) {
@@ -3228,10 +3249,12 @@ export class Compiler {
           this.requireWritable(argument);
           words++;
         } else if (this.aggregate(parameter.type)) {
-          this.requireType(argument, parameter.type, this.expressionType(argument));
+          const text = this.packedText(parameter.type, argument);
+          if (text === undefined) this.requireType(argument, parameter.type, this.expressionType(argument));
           const source = this.temp(POINTER);
           this.addressVariable(source);
-          this.address(argument);
+          if (text !== undefined) this.emitStaticText(text, argument);
+          else this.address(argument);
           this.emit(Opcode.STI, TypeCode.A);
           for (let cell = 0; cell < parameter.type.size; cell++) {
             this.loadVariable(source);
@@ -3395,6 +3418,7 @@ export class Compiler {
     const { block, keys } = assemble(raw, {
       resolve: (path, at) => this.assemblyName(path, at, pointers, assembler),
       unsupported: (reason) => this.unsupportedAssembly(reason),
+      instructions286: node.instructions286 !== false,
     }, line);
     const result = assembler ? this.resultVariable() : undefined;
     if (result) {

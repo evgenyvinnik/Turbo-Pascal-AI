@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
+import { BGI_FONT } from '../../src/tui/bgiFont';
 
 const compile = (source: string) =>
   new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse());
@@ -103,6 +104,28 @@ describe('Graph3: Turbo Pascal 3 graphics', () => {
     expect(graphics.decoration.length).toBeGreaterThan(0);
     expect(graphics.pixels.every((dot) => dot === 0)).toBe(true);
     expect(graphics.display().some((dot) => dot !== 0)).toBe(true);
+  });
+
+  it('writes text on the graphics screen in the BIOS 8 by 8 characters', () => {
+    const glyph = (graphics: ReturnType<Machine['getGraphics']>, x: number, y: number) =>
+      Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => graphics.pixels[(y + row) * graphics.width + x + col]));
+    const expected = (char: string, color: number) =>
+      Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => ((BGI_FONT[char.charCodeAt(0) * 8 + row] ?? 0) & (128 >>> col) ? color : 0)));
+    const color = start(`program T; uses Crt, Graph3; begin GraphColorMode; Plot(3, 3, 1); TextColor(2); Write('A'); GotoXY(39, 25); Write('Z');
+      TextColor(3); GotoXY(1, 2); Write('b') end.`).getGraphics();
+    // The cell's other dots are the background's, over what was drawn there.
+    expect(glyph(color, 0, 0)).toEqual(expected('A', 2));
+    expect(glyph(color, 304, 192)).toEqual(expected('Z', 2));
+    expect(glyph(color, 0, 8)).toEqual(expected('b', 3));
+    const hires = start(`program T; uses Crt, Graph3; begin HiRes; GotoXY(80, 1); Write('B') end.`).getGraphics();
+    expect(glyph(hires, 632, 0)).toEqual(expected('B', 1));
+    // Scrolling moves the dots up a row of characters; ClrScr clears them.
+    const scrolled = start(`program T; uses Crt, Graph3; var a, b, c: Integer;
+      begin GraphColorMode; Plot(100, 100, 3); GotoXY(1, 25); WriteLn; a := GetDotColor(100, 92); b := GetDotColor(100, 100);
+        ClrScr; c := GetDotColor(100, 92); TextMode(C80); Write(a, b, c) end.`);
+    // After TextMode, text goes to the text screen again.
+    expect(scrolled.getOutput()).toEqual(['300']);
+    expect(scrolled.getConsole().chars.slice(0, 3).join('')).toBe('300');
   });
 
   it('leaves graphics on TextMode, and needs a graphics mode to draw', () => {

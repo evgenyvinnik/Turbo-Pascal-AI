@@ -10,7 +10,7 @@ describe('Turbo Pascal source directives', () => {
     expect(applyCompilerSwitches('$B+,R+,V-,P+,I-,Q+,N+,T+,A-', switches)).toBe(true);
     expect(switches).toEqual({ completeBooleanEvaluation: true, rangeChecking: true, strictVarStrings: false,
       openStrings: true, ioChecking: false, overflowChecking: true, farCalls: false, numericProcessing: true,
-      extendedSyntax: true, typedPointers: true, alignData: false });
+      extendedSyntax: true, typedPointers: true, alignData: false, instructions286: false });
     expect(applyCompilerSwitches('$I settings.inc', switches)).toBe(false);
   });
   it('does not tokenize excluded source and preserves original line numbers', () => {

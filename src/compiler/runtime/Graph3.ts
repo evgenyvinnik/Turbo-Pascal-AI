@@ -1,5 +1,8 @@
 import { PascalError } from '../errors/PascalError';
 import type { GraphicsRuntime } from './GraphicsRuntime';
+import type { TextCanvas, TextConsole } from './TextConsole';
+import { BGI_FONT } from '../../tui/bgiFont';
+import { glyphCode } from '../../tui/vgaFont';
 
 /** Colors 1 to 3 of Palette(0) to Palette(3) in GraphColorMode. */
 const COLOR_PALETTES = [
@@ -24,7 +27,7 @@ type Mode = 'mono' | 'color' | 'hires';
  * turtlegraphics. The screen holds color numbers, not colors, so a new
  * palette recolors what is already drawn, as on the CGA.
  */
-export class Graph3 {
+export class Graph3 implements TextCanvas {
   mode: Mode | null = null;
   private paletteNumber = 3;
   private background = 0;
@@ -34,11 +37,12 @@ export class Graph3 {
   private window = { left: 0, top: 0, right: 319, bottom: 199 };
   private turtle = { x: 0, y: 0, heading: 0, pen: true, color: 3, visible: false, wrap: false };
   delay = 0;
-  constructor(private g: GraphicsRuntime) {}
+  constructor(private g: GraphicsRuntime, private console?: TextConsole) {}
 
   reset(): void {
     this.mode = null;
     this.delay = 0;
+    if (this.console?.canvas === this) this.console.canvas = null;
   }
   private get active(): boolean {
     return this.mode !== null && this.g.initialized && this.g.driver === CGA;
@@ -74,9 +78,48 @@ export class Graph3 {
     };
     this.setWindow(0, 0, g.width - 1, 199);
     this.showPalette();
+    // Text goes on the graphics screen, in the BIOS's 8 by 8 characters:
+    // 40 columns in the 320-dot modes, 80 in HiRes. Crt's LastMode stays.
+    const console = this.console;
+    if (console) {
+      const last = console.lastMode;
+      console.mode(mode === 'hires' ? 6 : mode === 'mono' ? 5 : 4);
+      console.lastMode = last;
+      console.canvas = this;
+    }
+  }
+  /** A character cell, as the BIOS writes one in a graphics mode: the
+   * character in the text color, the rest of the cell in the background. */
+  drawCell(index: number): void {
+    const console = this.console;
+    if (!console || !this.active) return;
+    const g = this.g, x = (index % console.cols) * 8, y = Math.floor(index / console.cols) * 8;
+    const code = glyphCode(console.chars[index] ?? ' '), color = (console.attributes[index] ?? 7) & (this.mode === 'hires' ? 1 : 3);
+    for (let row = 0; row < 8; row++) {
+      const bits = BGI_FONT[code * 8 + row] ?? 0;
+      for (let col = 0; col < 8; col++) g.pixels[(y + row) * g.width + x + col] = bits & (128 >>> col) ? color : 0;
+    }
+    g.revision++;
+  }
+  /** Scrolling moves the dots of a row of characters. */
+  copyRow(from: number, to: number, left: number, right: number): void {
+    if (!this.active) return;
+    const g = this.g;
+    for (let row = 0; row < 8; row++) {
+      const source = (from * 8 + row) * g.width, target = (to * 8 + row) * g.width;
+      g.pixels.copyWithin(target + left * 8, source + left * 8, source + (right + 1) * 8);
+    }
+    g.revision++;
+  }
+  clearCells(row: number, start: number, end: number): void {
+    if (!this.active) return;
+    const g = this.g;
+    for (let line = row * 8; line < row * 8 + 8; line++) g.pixels.fill(0, line * g.width + start * 8, line * g.width + (end + 1) * 8);
+    g.revision++;
   }
   /** TextMode leaves graphics. */
   leave(): void {
+    if (this.console?.canvas === this) this.console.canvas = null;
     if (!this.active) return;
     this.mode = null;
     this.g.initialized = false;

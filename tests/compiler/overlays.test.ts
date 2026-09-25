@@ -269,9 +269,17 @@ describe('Structure sizes', () => {
     expect(() => compile('program T; type B = array[0..65520] of Byte; begin end.')).toThrow(
       /Array size exceeds supported storage/
     );
+    // A global that large leaves no room for the System unit's own data.
     expect(() => compile('program T; var b: array[0..65519] of Byte; begin end.')).toThrow(
-      /exceeds the supported frame size/
+      /Data segment too large/
     );
+    expect(
+      output(`program T; var b: array[0..60000] of Byte; c: Byte;
+      begin FillChar(b, SizeOf(b), 2); c := 5; b[60000] := 3; WriteLn(b[0] + b[59999] + b[60000], ' ', c) end.`)
+    ).toEqual(['7 5']);
+    // So may a program's code, past 32K instructions.
+    const lines = Array.from({ length: 4000 }, (_, i) => `if a > ${String(i)} then b := b + 1;`).join('\n');
+    expect(output(`program T; var a, b: LongInt; begin a := 5000; b := 0;\n${lines}\nWriteLn(b) end.`)).toEqual(['4000']);
     expect(() => compile('program T; type R = Integer; var r: R; begin end.')).toThrow(
       /Duplicate identifier/
     );

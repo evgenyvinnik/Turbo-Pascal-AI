@@ -614,6 +614,8 @@ export class AddressSpace {
     const shown = this.viewCell(address);
     if (!shown) return undefined;
     const { view, byte, cell } = shown;
+    const direct = this.directCell(view, byte, cell, false);
+    if (direct !== undefined) return this.host.memory.read(direct);
     let value: StackValue = 0;
     decodeBinary({ read: () => 0, write: (_, decoded) => { value = decoded; }, pointerValue: (bits) => this.pointerValue(bits) },
       0, [{ ...cell, offset: 0 }], this.viewBytes(view, byte, cell.bytes));
@@ -625,11 +627,33 @@ export class AddressSpace {
     const shown = this.viewCell(address);
     if (!shown) return false;
     const { view, byte, cell } = shown;
+    const direct = this.directCell(view, byte, cell, true);
+    if (direct !== undefined) {
+      this.host.memory.write(direct, value);
+      for (const sync of view.syncs) this.host.variants.sync(sync.base, sync.part, sync.case);
+      return true;
+    }
     const bytes = encodeBinary({ read: () => value, write: () => undefined, pointerBits: (pointer) => this.pointerBits(pointer) }, 0, [{ ...cell, offset: 0 }]);
     const used = cell.kind === 'string' ? (bytes[0] ?? 0) + 1 : bytes.length;
     this.putViewBytes(view, byte, bytes.subarray(0, used));
     for (const sync of view.syncs) this.host.variants.sync(sync.base, sync.part, sync.case);
     return true;
+  }
+  /** The cell a view's cell is, where the bytes beneath it are one cell of
+   * the same type: then a load or store needs no bytes, as a pointer into a
+   * GetMem block larger than a PByteArray's elements shows. A store into a
+   * variant part's bytes still goes through them, so its cases follow. */
+  private directCell(view: View, byte: number, cell: BinaryCell, store: boolean): number | undefined {
+    if (view.raw) return undefined;
+    const start = view.start + byte, region = view.region;
+    const at = cellAtByte(region.layout, start);
+    if (at?.at !== start) return undefined;
+    const found = region.layout[at.index]!;
+    if (found.kind !== cell.kind || found.bytes !== cell.bytes || Boolean(found.signed) !== Boolean(cell.signed) ||
+      (found.setByteOffset ?? 0) !== (cell.setByteOffset ?? 0) || found.kind === 'gap') return undefined;
+    this.beyond(view, start, cell.bytes);
+    if (store && region.refresh.length && (region.linear === undefined || this.refreshesWithin(region, start, cell.bytes).length)) return undefined;
+    return region.target + (found.offset ?? at.index);
   }
   /** Whether bytes from `start` lie outside the variable a view is bound to. */
   private beyond(view: View, start: number, length: number): void {

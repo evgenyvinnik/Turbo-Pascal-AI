@@ -4,6 +4,7 @@ import { registerSize } from '../asm/types';
 import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { MemoryAccess } from './FileRuntime';
 import type { TextConsole } from './TextConsole';
+import type { GraphicsRuntime } from './GraphicsRuntime';
 import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
 
 /** An address the P-machine can follow: a variable's cells, a byte offset
@@ -28,6 +29,8 @@ export interface AsmHost extends MemoryAccess {
   takeKey(): string;
   peekKey(): string | undefined;
   console: TextConsole;
+  /** The graphics screen, which BIOS mode 13h shows. */
+  graphics?: GraphicsRuntime;
   sound(frequency: number): void;
   now(): Date;
   /** Whether the program's own interrupt procedure handles an interrupt. */
@@ -1091,7 +1094,13 @@ export class Asm86 {
       case 0x10:
         switch (ah) {
           case 0x00:
+            // Mode 13h: 320 by 200 dots of 256 colors.
+            if ((al & 0x7f) === 0x13 && this.host.graphics) {
+              this.host.graphics.vgaMode();
+              return undefined;
+            }
             if (![0, 1, 2, 3, 7].includes(al & 0x7f)) this.unsupported(number, ah);
+            this.host.graphics?.textMode();
             screen.mode(al & 0x7f);
             return undefined;
           case 0x01:
@@ -1133,6 +1142,20 @@ export class Asm86 {
           case 0x0e:
             this.host.output(String.fromCharCode(al));
             return undefined;
+          // A dot of mode 13h's screen: written from AL, or read into it.
+          case 0x0c:
+          case 0x0d: {
+            const graphics = this.host.graphics;
+            if (!graphics?.dac) this.unsupported(number, ah);
+            const x = this.number(r.cx), y = this.number(r.dx);
+            if (x < graphics.width && y < graphics.height) {
+              if (ah === 0x0c) {
+                graphics.pixels[y * graphics.width + x] = al;
+                graphics.revision++;
+              } else this.setRegister('al', graphics.pixels[y * graphics.width + x] ?? 0);
+            }
+            return undefined;
+          }
           case 0x0f:
             this.setRegister('al', screen.lastMode & 0xff);
             this.setRegister('ah', screen.cols);

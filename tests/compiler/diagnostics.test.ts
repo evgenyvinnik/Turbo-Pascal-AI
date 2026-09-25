@@ -25,6 +25,8 @@ describe('Borland diagnostic presentation', () => {
     ['program Demo; const N = 1 div 0; begin end.', 62, 'Division by zero'],
     ['program Demo; begin end', 10, 'Unexpected end of file'],
     ['program Demo; begin Break end.', 109, 'No enclosing FOR, WHILE, or REPEAT statement'],
+    ['program Demo; begin asm pusha end end.', 159, '286/287 instructions are not enabled'],
+    ['program Demo; var a: array[0..65519] of Byte; begin end.', 49, 'Data segment too large'],
   ])('classifies an actual compiler failure: %s', (source, code, message) => {
     const error = errorFor(source);
     const diagnostic = describePascalDiagnostic(error, 'compiler');

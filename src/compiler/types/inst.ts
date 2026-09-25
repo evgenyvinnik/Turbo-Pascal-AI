@@ -9,16 +9,18 @@
 
 import { PascalError } from '../errors/PascalError';
 
-// Bit layout constants for instruction encoding
+// Bit layout constants for instruction encoding. The opcode and operand 1
+// fill the low 17 bits; operand 2, an address or offset, is the rest of the
+// number above them, so a program or a frame may exceed 32K.
 const OPCODE_BITS = 8;
 const OPERAND1_BITS = 9;
-const OPERAND2_BITS = 15;
 const OPCODE_MASK = (1 << OPCODE_BITS) - 1;
 const OPERAND1_MASK = (1 << OPERAND1_BITS) - 1;
-const OPERAND2_MASK = (1 << OPERAND2_BITS) - 1;
+const OPERAND2_MAX = 2 ** 31 - 1;
 const OPCODE_SHIFT = 0;
 const OPERAND1_SHIFT = OPCODE_SHIFT + OPCODE_BITS;
 const OPERAND2_SHIFT = OPERAND1_SHIFT + OPERAND1_BITS;
+const OPERAND2_SCALE = 2 ** OPERAND2_SHIFT;
 
 /**
  * Opcodes for the P-machine instruction set
@@ -321,15 +323,11 @@ export const inst = {
     if (operand2 < 0) {
       throw new PascalError(`negative operand2: ${String(operand2)}`);
     }
-    if (operand2 > OPERAND2_MASK) {
+    if (operand2 > OPERAND2_MAX) {
       throw new PascalError(`too large operand2: ${String(operand2)}`);
     }
 
-    return (
-      (opcode << OPCODE_SHIFT) |
-      (operand1 << OPERAND1_SHIFT) |
-      (operand2 << OPERAND2_SHIFT)
-    );
+    return ((opcode << OPCODE_SHIFT) | (operand1 << OPERAND1_SHIFT)) + operand2 * OPERAND2_SCALE;
   },
 
   /**
@@ -356,7 +354,8 @@ export const inst = {
    * @returns Operand 2
    */
   getOperand2(instruction: number): number {
-    return (instruction >>> OPERAND2_SHIFT) & OPERAND2_MASK;
+    // Most instructions fit 31 bits, where a shift is quicker than division.
+    return instruction < 0x80000000 ? instruction >>> OPERAND2_SHIFT : Math.floor(instruction / OPERAND2_SCALE);
   },
 
   /**

@@ -1,14 +1,18 @@
 import { CP437, glyphCode } from '../../tui/vgaFont';
 import type { TextConsole } from './TextConsole';
+import type { GraphicsRuntime } from './GraphicsRuntime';
 
 /** Colour text video memory, as Mem[$B800:0] reaches it. */
 export const VIDEO_TEXT = 0xb8000;
+/** VGA graphics memory, which mode 13h shows a dot per byte of. */
+export const VIDEO_GRAPHICS = 0xa0000;
 /** The BIOS data area, at segment $40. */
 export const BIOS_DATA = 0x400;
 
 /** What the machine shows of the PC around the program. */
 export interface LowMemoryHost {
   console: TextConsole;
+  graphics?: GraphicsRuntime;
   /** The time of day, for the BIOS tick count. */
   now(): Date;
   /** How many keys wait to be read, which the BIOS keyboard buffer holds. */
@@ -27,6 +31,8 @@ export class LowMemory {
   }
 
   read(linear: number): number {
+    const dot = this.dot(linear);
+    if (dot !== undefined) return this.host.graphics!.pixels[dot] ?? 0;
     const screen = this.screenCell(linear);
     if (screen) {
       const { console, index, attribute } = screen;
@@ -37,6 +43,13 @@ export class LowMemory {
   }
 
   write(linear: number, byte: number): void {
+    const dot = this.dot(linear);
+    if (dot !== undefined) {
+      const graphics = this.host.graphics!;
+      graphics.pixels[dot] = byte & 0xff;
+      graphics.revision++;
+      return;
+    }
     const screen = this.screenCell(linear);
     if (screen) {
       const { console, index, attribute } = screen;
@@ -49,6 +62,11 @@ export class LowMemory {
     this.ram.set(linear, byte & 0xff);
   }
 
+  /** The dot a byte of VGA memory shows, while mode 13h is on. */
+  private dot(linear: number): number | undefined {
+    const graphics = this.host.graphics, offset = linear - VIDEO_GRAPHICS;
+    return graphics?.dac && offset >= 0 && offset < graphics.pixels.length ? offset : undefined;
+  }
   /** The screen cell a byte of video memory shows: its character, or at an
    * odd address its attribute. */
   private screenCell(linear: number): { console: TextConsole; index: number; attribute: boolean } | undefined {
@@ -85,13 +103,14 @@ export class LowMemory {
 }
 
 /** The PC's I/O ports, as Port and PortW reach them: the VGA status
- * register's retrace, whose waits then end, the keyboard's scan code, and
- * the PC speaker, whose timer channel 2 sets the pitch and port 61h turns it
- * on. Other ports read as $FF and ignore what is written. */
+ * register's retrace, whose waits then end, the VGA's palette, the
+ * keyboard's scan code, and the PC speaker, whose timer channel 2 sets the
+ * pitch and port 61h turns it on. Other ports read as $FF and ignore what
+ * is written. */
 export class Ports {
   private toggle = 0;
   private timer = { divisor: 0, low: true, gate: 0 };
-  constructor(private host: { sound(frequency: number): void; scanCode(): number }) {}
+  constructor(private host: { sound(frequency: number): void; scanCode(): number; graphics?: GraphicsRuntime }) {}
 
   reset(): void {
     this.toggle = 0;
@@ -100,6 +119,7 @@ export class Ports {
   read(port: number, bytes: number): number {
     const one = (at: number) => {
       if (at === 0x3da) return (this.toggle ^= 0x09);
+      if (at >= 0x3c7 && at <= 0x3c9 && this.host.graphics) return this.host.graphics.dacPort(at);
       if (at === 0x61) return this.timer.gate;
       if (at === 0x60) return this.host.scanCode() & 0xff;
       return 0xff;
@@ -109,7 +129,8 @@ export class Ports {
   write(port: number, value: number, bytes: number): void {
     const one = (at: number, byte: number) => {
       const timer = this.timer;
-      if (at === 0x43) timer.low = true;
+      if (at >= 0x3c7 && at <= 0x3c9) this.host.graphics?.dacPort(at, byte);
+      else if (at === 0x43) timer.low = true;
       else if (at === 0x42) {
         timer.divisor = timer.low ? (timer.divisor & 0xff00) | byte : (timer.divisor & 0xff) | (byte << 8);
         timer.low = !timer.low;
