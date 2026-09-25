@@ -24,7 +24,7 @@ import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
 import { VariantRuntime } from './Variants';
 import type { MemoryAccess } from './FileRuntime';
-import { AddressSpace, HEAP_BYTES, LINEAR_BASE, PORT_BASE, STACK_SEGMENT, STACK_TOP } from './AddressSpace';
+import { AddressSpace, HEAP_BYTES, LINEAR_BASE, MAX_CELLS, PORT_BASE, STACK_SEGMENT, STACK_TOP, VIEW_BASE } from './AddressSpace';
 import { Heap, type BlockType } from './Heap';
 import { LowMemory, Ports } from './LowMemory';
 
@@ -195,6 +195,7 @@ export class Machine {
 
     // Initialize data store with combined stack and heap size
     const totalSize = this.config.stackSize + this.config.heapSize;
+    if (totalSize > MAX_CELLS) throw new RangeError('The stack and heap are too large');
     this.dstore = new Array<StackValue>(totalSize).fill(0);
 
     // The heap's cells lie above the stack's; it has no more bytes than
@@ -444,15 +445,7 @@ export class Machine {
             (p as TypeCode) !== TypeCode.P ? (this.dstore[this.mp] ?? 0) : 0;
           const oldMp = this.mp;
           if (this.interruptFrames.at(-1) === oldMp) this.interruptFrames.pop();
-          // A timer interrupt that came during Delay: the delay goes on.
-          if (this.idleTick?.frame === oldMp) {
-            const until = this.idleTick.sleeping;
-            this.idleTick = undefined;
-            if (until !== undefined && Date.now() < until) {
-              this.wakeTime = until;
-              this.state = MachineState.SLEEPING;
-            }
-          }
+          if (this.idleTick !== undefined) this.returnFromIdleTick(oldMp);
           this.sp = oldMp - 1;
           this.pc = this.dstore[oldMp + 4] as number;
           this.mp = this.dstore[oldMp + 2] as number;
@@ -974,7 +967,8 @@ export class Machine {
   }
   private checkAddress(address: number): void {
     if (!Number.isInteger(address) || address < 0 ||
-      (address >= this.dstore.length && address < LINEAR_BASE && !this.stringCharacter(address) && !this.space.viewCell(address))) {
+      (address >= this.dstore.length && address < LINEAR_BASE && !this.stringCharacter(address)) ||
+      (address >= VIEW_BASE && !this.space.viewCell(address))) {
       throw new PascalError('Invalid memory address');
     }
   }
@@ -999,6 +993,12 @@ export class Machine {
    * @param procIndex - Procedure index
    */
   private callStandardProcedure(argCount: number, procedureIndex: number): void {
+    // Most calls are the compiler's helpers and the machine's services for
+    // views and pointers, which neither touch the screen nor do I/O.
+    if (procedureIndex >= 1000 || (procedureIndex >= (InternalProcedure.VIEW as number) && procedureIndex <= (InternalProcedure.PORT as number))) {
+      this.quickProcedure(argCount, procedureIndex);
+      return;
+    }
     // Crt's TextAttr, WindMin and WindMax are the screen's own: what the
     // program stored there takes effect, and what the call changed shows.
     const attribute = this.standardValue('TextAttr');
@@ -1019,6 +1019,36 @@ export class Machine {
       this.setStandardValue('WindMax', screen.windMax);
       this.setStandardValue('LastMode', screen.lastMode);
     }
+  }
+  /** A helper or an address service: its arguments, its work, its result. */
+  private quickProcedure(argCount: number, procedureIndex: number): void {
+    const args: StackValue[] = new Array<StackValue>(argCount);
+    for (let i = argCount - 1; i >= 0; i -= 1) args[i] = this.pop();
+    switch (procedureIndex) {
+      case InternalProcedure.VIEW as number:
+        this.push(this.space.view(args.map(Number)));
+        return;
+      case InternalProcedure.RETYPE as number:
+        this.push(this.space.retype(Number(args[0]), Number(args[1])));
+        return;
+      case InternalProcedure.NORMALIZE_POINTERS as number: {
+        const a = args[0] ?? 0, b = args[1] ?? 0;
+        // Nil, and two cells, are what they are: no other form names their bytes.
+        const plain = a === 0 || b === 0 || a === b ||
+          (typeof a === 'number' && typeof b === 'number' && a < this.dstore.length && b < this.dstore.length);
+        this.push(plain ? a : this.space.normalize(a));
+        this.push(plain ? b : this.space.normalize(b));
+        return;
+      }
+      case InternalProcedure.PORT as number:
+        this.push(PORT_BASE + (Number(args[1]) === 2 ? 0x10000 : 0) + (Number(args[0]) & 0xffff));
+        return;
+    }
+    const procedure = this.bytecode.native?.procedures[procedureIndex] ?? this.native.procedures[procedureIndex];
+    if (!procedure) throw new PascalError(`Unsupported standard procedure: ${String(procedureIndex)}`);
+    const result = procedure(...args);
+    if (typeof result === 'number' && !Number.isFinite(result)) throw new PascalError('Invalid numeric result');
+    if (result !== undefined && result !== null) this.push(result as StackValue);
   }
   private standardProcedure(argCount: number, procedureIndex: number): void {
     if (procedureIndex === (InternalProcedure.ASSEMBLY as number)) {
@@ -1103,23 +1133,6 @@ export class Machine {
         if (bytes !== undefined) this.stringBacking.set(copy + cell, bytes);
       }
       this.push(copy);
-      return;
-    }
-    if (procedureIndex === (InternalProcedure.VIEW as number)) {
-      this.push(this.space.view(args.map(Number)));
-      return;
-    }
-    if (procedureIndex === (InternalProcedure.RETYPE as number)) {
-      this.push(this.space.retype(Number(args[0]), Number(args[1])));
-      return;
-    }
-    if (procedureIndex === (InternalProcedure.PORT as number)) {
-      this.push(PORT_BASE + (Number(args[1]) === 2 ? 0x10000 : 0) + (Number(args[0]) & 0xffff));
-      return;
-    }
-    if (procedureIndex === (InternalProcedure.NORMALIZE_POINTERS as number)) {
-      this.push(this.space.normalize(args[0] ?? 0));
-      this.push(this.space.normalize(args[1] ?? 0));
       return;
     }
     if (procedureIndex === (InternalProcedure.VARIANT_SYNC as number)) {
@@ -1651,7 +1664,7 @@ export class Machine {
   private stringCharacter(reference: number): { address: number; index: number; capacity: number } | undefined {
     const known = this.stringCharacters.get(reference);
     if (known) return known;
-    if (!Number.isInteger(reference) || reference < this.dstore.length) return undefined;
+    if (!Number.isInteger(reference) || reference < this.dstore.length || reference >= LINEAR_BASE) return undefined;
     const offset = reference - this.dstore.length;
     const address = Math.floor(offset / 256),
       index = offset % 256;
@@ -1679,6 +1692,10 @@ export class Machine {
 
   poke(address: number, value: StackValue): void {
     this.checkAddress(address);
+    if (address >= VIEW_BASE) {
+      this.space.poke(address, value);
+      return;
+    }
     if (address >= PORT_BASE) {
       const port = address - PORT_BASE;
       this.ports.write(port & 0xffff, Number(value), port >= 0x10000 ? 2 : 1);
@@ -1688,7 +1705,6 @@ export class Machine {
       this.space.pokeLinear(address, value);
       return;
     }
-    if (address >= this.dstore.length && this.space.poke(address, value)) return;
     const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');
@@ -1716,6 +1732,16 @@ export class Machine {
     for (let i = 0; i < words; i++) this.dstore[address + i] = defaults[i] ?? 0;
     this.setStandardValue('HeapPtr', this.space.heapPointer(this.heap.pointer));
     return address;
+  }
+  /** A timer interrupt that came during Delay: the delay goes on. */
+  private returnFromIdleTick(frame: number): void {
+    if (this.idleTick?.frame !== frame) return;
+    const until = this.idleTick.sleeping;
+    this.idleTick = undefined;
+    if (until !== undefined && Date.now() < until) {
+      this.wakeTime = until;
+      this.state = MachineState.SLEEPING;
+    }
   }
   /** A new frame's bytes lie below its caller's. */
   private placeFrame(routine: number): void {
@@ -1783,13 +1809,12 @@ export class Machine {
    */
   peek(address: number): StackValue {
     if (address < this.dstore.length) return this.dstore[address] ?? 0;
+    if (address >= VIEW_BASE) return this.space.peek(address) ?? 0;
     if (address >= PORT_BASE) {
       const port = address - PORT_BASE;
       return this.ports.read(port & 0xffff, port >= 0x10000 ? 2 : 1);
     }
     if (address >= LINEAR_BASE) return this.space.peekLinear(address);
-    const shown = this.space.peek(address);
-    if (shown !== undefined) return shown;
     const character = this.stringCharacter(address);
     if (character) {
       const text = String(this.dstore[character.address] ?? '');

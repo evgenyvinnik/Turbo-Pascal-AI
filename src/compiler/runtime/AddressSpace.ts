@@ -19,13 +19,25 @@ const HEAP_START = HEAP_SEGMENT * 16;
 export const HEAP_BYTES = (HEAP_END_SEGMENT - HEAP_SEGMENT) * 16;
 /** Where SP starts, at the top of the stack segment. */
 export const STACK_TOP = 0xfff0;
+/* Addresses are numbers in ranges that stay below 2^31, so the store and the
+ * stack hold only small integers, which JavaScript engines keep fast:
+ *   cells             from 0
+ *   string characters from the store's size (its cells times 257 at most)
+ *   linear addresses  LINEAR_BASE .. +1M
+ *   I/O ports         PORT_BASE .. +128K
+ *   views             VIEW_BASE, VIEW_SPAN cells each */
 /** An address made from a segment and offset, as Ptr makes one, is this
  * plus its linear address, so adding to it moves byte by byte. */
-export const LINEAR_BASE = 2 ** 48;
+export const LINEAR_BASE = 2 ** 28;
 /** Port[P] is this plus P, and PortW[P] that plus 65536. */
 export const PORT_BASE = LINEAR_BASE + 2 ** 24;
+/** Where views' addresses start. */
+export const VIEW_BASE = 2 ** 29;
 /** How many cells one view can show. */
-const VIEW_SPAN = 1 << 20;
+const VIEW_SPAN = 1 << 17;
+/** The largest store whose string characters' addresses stay below
+ * LINEAR_BASE. */
+export const MAX_CELLS = Math.floor(LINEAR_BASE / 257);
 const MEGABYTE = 0x100000;
 const RAW_SEGMENT = 0xf000;
 /** Types whose RETYPE of a plain cell is remembered: keys stay small integers. */
@@ -147,7 +159,7 @@ export class AddressSpace {
   }
 
   private get viewBase(): number {
-    return this.host.cells * 1024;
+    return VIEW_BASE;
   }
 
   // ---------- Regions ----------
@@ -252,7 +264,7 @@ export class AddressSpace {
    * or a linear address. */
   private placeOf(address: number): Place | undefined {
     if (!Number.isFinite(address) || address < 0) return undefined;
-    if (address >= LINEAR_BASE) return this.placeAt((address - LINEAR_BASE) % MEGABYTE);
+    if (address >= LINEAR_BASE && address < PORT_BASE) return this.placeAt((address - LINEAR_BASE) % MEGABYTE);
     if (address >= this.viewBase) {
       const shown = this.viewCell(address);
       if (!shown) return undefined;
@@ -260,7 +272,7 @@ export class AddressSpace {
       if (view.raw) return { linear: (view.region.linear ?? 0) + view.start + byte };
       return { region: view.region, byte: view.start + byte };
     }
-    if (address >= this.host.cells) {
+    if (address >= this.host.cells && address < LINEAR_BASE) {
       const character = this.host.stringCharacter(address);
       if (!character) return undefined;
       const place = this.placeOfCell(character.address);
@@ -471,7 +483,7 @@ export class AddressSpace {
   /** Which view an address lies in, and its cell offset there. */
   private viewAt(address: number): { id: number; view: View; offset: number } | undefined {
     const offset = address - this.viewBase;
-    if (offset < 0 || !Number.isInteger(offset) || address >= LINEAR_BASE) return undefined;
+    if (offset < 0 || !Number.isInteger(offset)) return undefined;
     const id = Math.floor(offset / VIEW_SPAN);
     const view = this.views[id];
     return view ? { id, view, offset: offset % VIEW_SPAN } : undefined;
@@ -528,6 +540,8 @@ export class AddressSpace {
       // What a global's or a heap block's cell became is kept while the
       // heap's blocks stay as they are; a frame's changes with each call.
       const heap = this.host.heap;
+      // A block New made, dereferenced as its own type: the usual case.
+      if (heap.holds(pointer) && heap.mapAt(pointer) === map) return pointer;
       if (this.plainGeneration !== heap.generation) {
         this.plainRetypes.clear();
         this.plainGeneration = heap.generation;
