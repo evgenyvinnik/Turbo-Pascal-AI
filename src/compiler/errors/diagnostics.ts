@@ -239,7 +239,7 @@ const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Heap overflow$/, 203],
   [/^Invalid or disposed pointer$/, 204],
   [/^Real overflow$/, 205],
-  [/^Invalid numeric result$/, 207],
+  [/^Invalid numeric result$|^Invalid floating point operation$/, 207],
   [/^Object not initialized$/, 210],
   [/^Call to abstract method$/, 211],
   [/^Arithmetic overflow$/, 215],
@@ -266,7 +266,7 @@ const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   // What real mode would read as stray memory or run as stray code, and
   // Borland Pascal's protected mode stops: a general protection fault.
   [
-    /^Invalid memory address$|^Nil pointer dereference$|^Invalid (?:instruction address|nonlocal label|assembler block|address combination|arithmetic on an address|operand|destination operand)$|^Stack underflow|^Unknown opcode\b|^Unsupported (?:standard procedure|instruction)\b|^Unknown Graph3 routine$|^Graphics not initialized$|^Absolute memory addresses are not supported$|^An address (?:cannot|inside)|^Memory operand expected$|^Operand size unknown$|^Only labels in this block can be jumped to$|^The type this address points at is not known$/,
+    /^Invalid memory address$|^Nil pointer dereference$|^Invalid (?:instruction address|nonlocal label|assembler block|address combination|arithmetic on an address|operand|destination operand)$|^Stack underflow|^Unknown opcode\b|^Unsupported (?:standard procedure|instruction)\b|^Unknown Graph3 routine$|^Invalid integer (?:operand|operator)\b|^Graphics not initialized$|^Absolute memory addresses are not supported$|^An address (?:cannot|inside)|^Memory operand expected$|^Operand size unknown$|^Only labels in this block can be jumped to$|^The type this address points at is not known$/,
     216,
   ],
 ];

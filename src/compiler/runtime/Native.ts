@@ -17,6 +17,11 @@ import {
   intReal,
   roundReal,
   sqrtReal,
+  sinReal,
+  cosReal,
+  arcTanReal,
+  expReal,
+  lnReal,
   truncReal,
 } from '../codegen/float80';
 
@@ -198,8 +203,7 @@ export class NativeRegistry implements INative {
    */
   private registerStandardProcedures(): void {
     // Math functions
-    // An Extended beyond a double's precision keeps it, as the 8087 does;
-    // the transcendental functions compute in a double.
+    // An Extended beyond a double's precision keeps it, as the 8087 does.
     this.register(StandardProcedure.ABS, 'Abs', 1, true, (x) => {
       return x instanceof Float80 ? absReal(x) : Math.abs(this.toNumber(x));
     });
@@ -215,23 +219,23 @@ export class NativeRegistry implements INative {
     });
 
     this.register(StandardProcedure.SIN, 'Sin', 1, true, (x) => {
-      return Math.sin(this.toNumber(x));
+      return x instanceof Float80 ? sinReal(x) : Math.sin(this.toNumber(x));
     });
 
     this.register(StandardProcedure.COS, 'Cos', 1, true, (x) => {
-      return Math.cos(this.toNumber(x));
+      return x instanceof Float80 ? cosReal(x) : Math.cos(this.toNumber(x));
     });
 
     this.register(StandardProcedure.ARCTAN, 'Arctan', 1, true, (x) => {
-      return Math.atan(this.toNumber(x));
+      return x instanceof Float80 ? arcTanReal(x) : Math.atan(this.toNumber(x));
     });
 
     this.register(StandardProcedure.EXP, 'Exp', 1, true, (x) => {
-      return Math.exp(this.toNumber(x));
+      return x instanceof Float80 ? expReal(x) : Math.exp(this.toNumber(x));
     });
 
     this.register(StandardProcedure.LN, 'Ln', 1, true, (x) => {
-      return Math.log(this.toNumber(x));
+      return x instanceof Float80 ? lnReal(x) : Math.log(this.toNumber(x));
     });
 
     this.register(StandardProcedure.TRUNC, 'Trunc', 1, true, (x) => {

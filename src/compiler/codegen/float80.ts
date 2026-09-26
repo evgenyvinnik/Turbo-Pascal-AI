@@ -301,3 +301,230 @@ export function decodeComp(bytes: Uint8Array): Real {
   for (let i = 7; i >= 0; i--) bits = (bits << 8n) | BigInt(bytes[i] ?? 0);
   return toReal(BigInt.asIntN(64, bits));
 }
+
+// ---------- Transcendental functions ----------
+//
+// Exp, Ln, Sin, Cos and ArcTan to Extended's 64 bits: each is computed in
+// fixed point, a bigint holding the value × 2^p, with p far past 64 bits, and
+// rounded once to the nearest 64-bit significand. A result that cancels to
+// few bits, such as Sin near a multiple of π, is computed again with more.
+
+/** The fewest significant bits a fixed-point result needs before rounding. */
+const RESULT_BITS = 128;
+/** The most bits the functions work with, past which a result is taken as it is. */
+const MOST_BITS = 1 << 15;
+
+/** The value in fixed point: value × 2^p, toward zero. */
+function fixed(value: Exact, p: number): bigint {
+  const shift = value.e + p;
+  const magnitude = shift >= 0 ? value.n << BigInt(shift) : value.n >> BigInt(-shift);
+  return value.negative ? -magnitude : magnitude;
+}
+
+/** atan(1/n) × 2^p, for a whole n > 1, by its series. */
+function atanInverse(n: bigint, p: number): bigint {
+  const one = 1n << BigInt(p);
+  const square = n * n;
+  let power = one / n,
+    sum = power;
+  for (let k = 1n; power !== 0n; k++) {
+    power /= square;
+    const term = power / (2n * k + 1n);
+    sum += k % 2n ? -term : term;
+  }
+  return sum;
+}
+
+const constants = new Map<string, bigint>();
+/** π × 2^p, by Machin's formula, and ln 2 × 2^p, as 2 atanh(1/3). */
+function piFixed(p: number): bigint {
+  const key = `pi:${String(p)}`;
+  let value = constants.get(key);
+  if (value === undefined) {
+    const guard = p + 16;
+    value = (16n * atanInverse(5n, guard) - 4n * atanInverse(239n, guard)) >> 16n;
+    constants.set(key, value);
+  }
+  return value;
+}
+function ln2Fixed(p: number): bigint {
+  const key = `ln2:${String(p)}`;
+  let value = constants.get(key);
+  if (value === undefined) {
+    const guard = p + 16;
+    value = (2n * atanhFixed((1n << BigInt(guard)) / 3n, guard)) >> 16n;
+    constants.set(key, value);
+  }
+  return value;
+}
+
+/** atanh(t) × 2^p for |t| well below 1, t × 2^p given: t + t³/3 + t⁵/5 + … */
+function atanhFixed(t: bigint, p: number): bigint {
+  const square = (t * t) >> BigInt(p);
+  let power = t,
+    sum = t;
+  for (let k = 1n; power !== 0n; k++) {
+    // Toward zero, so that a negative term dies out too.
+    power = (power * square) / (1n << BigInt(p));
+    sum += power / (2n * k + 1n);
+  }
+  return sum;
+}
+
+/** The floor of the square root of a whole number. */
+function isqrt(value: bigint): bigint {
+  if (value < 2n) return value;
+  let root = 1n << BigInt(Math.ceil(bitLength(value) / 2));
+  for (;;) {
+    const next = (root + value / root) >> 1n;
+    if (next >= root) return root;
+    root = next;
+  }
+}
+
+/** Runs `compute` at more bits until its result has enough to round, and
+ * rounds it: compute(p) gives the result × 2^p. */
+function converge(bits: number, compute: (p: number) => bigint, line: number): Real {
+  let p = bits;
+  for (;;) {
+    const result = compute(p);
+    const magnitude = result < 0n ? -result : result;
+    const length = bitLength(magnitude);
+    if (length >= RESULT_BITS || p >= MOST_BITS) {
+      if (magnitude === 0n) return 0;
+      return roundExtended(result < 0n, magnitude, 1n, -p, line);
+    }
+    p = Math.min(MOST_BITS, p + RESULT_BITS - length + 64);
+  }
+}
+
+/** Where a value's leading bit lies: value < 2^magnitudeBits(value). */
+function magnitudeBits(value: Exact): number {
+  return value.n === 0n ? -Infinity : value.e + bitLength(value.n);
+}
+
+/** e^x, as the 8087's F2XM1 and FSCALE give it, to 64 bits. */
+export function expReal(value: Real, line = -1): Real {
+  const x = exact(value);
+  if (x.n === 0n) return 1;
+  // Past these e^x is beyond Extended, or below its least value.
+  if (magnitudeBits(x) > 15 || Math.abs(Number(value)) > 11400) {
+    if (x.negative) return 0;
+    throw new PascalError('Real overflow', line);
+  }
+  // x = k ln 2 + r, |r| ≤ ln 2 / 2, and e^x = 2^k e^r, where e^r, near 1,
+  // keeps every bit; 2^k is only the exponent it is rounded with.
+  const p = RESULT_BITS + 48;
+  const ln2 = ln2Fixed(p);
+  const f = fixed(x, p);
+  const k = (f * 2n + ln2) / (2n * ln2) - (f < 0n ? 1n : 0n);
+  const r = f - k * ln2;
+  const one = 1n << BigInt(p);
+  let term = one,
+    sum = one;
+  for (let i = 1n; term !== 0n; i++) {
+    term = (term * r) / (one * i);
+    sum += term;
+  }
+  return roundExtended(false, sum, 1n, Number(k) - p, line);
+}
+
+/** ln x, as the 8087's FYL2X gives it, to 64 bits. */
+export function lnReal(value: Real, line = -1): Real {
+  const x = exact(value);
+  if (x.n === 0n || x.negative) throw new PascalError('Invalid floating point operation', line);
+  // x = m × 2^k with m within [√½, √2), and ln x = k ln 2 + 2 atanh((m-1)/(m+1)).
+  const length = bitLength(x.n);
+  let k = x.e + length - 1;
+  let top = length - 1;
+  // m's significand against 2^top: past √2, take it as half its double.
+  if (x.n * x.n > 2n << BigInt(2 * top)) {
+    k += 1;
+    top += 1;
+  }
+  if (k === 0 && x.n === 1n << BigInt(top)) return 0;
+  return converge(
+    RESULT_BITS + 16,
+    (p) => {
+      const one = 1n << BigInt(p);
+      const m = (x.n << BigInt(p)) >> BigInt(top);
+      const t = ((m - one) << BigInt(p)) / (m + one);
+      return 2n * atanhFixed(t, p) + BigInt(k) * ln2Fixed(p);
+    },
+    line
+  );
+}
+
+/** Sin and Cos: x reduced by multiples of π/2, then the series of the rest. */
+function sinCos(value: Real, cosine: boolean, line: number): Real {
+  const x = exact(value);
+  if (x.n === 0n) return cosine ? 1 : 0;
+  // Enough bits for the whole part of x and π/2's multiples of it.
+  const whole = Math.max(0, magnitudeBits(x));
+  return converge(
+    RESULT_BITS + 16,
+    (p) => {
+      const q = p + whole + 16;
+      const halfPi = piFixed(q) >> 1n;
+      const f = fixed(x, q);
+      const k = (f * 2n + halfPi) / (2n * halfPi) - (f < 0n ? 1n : 0n);
+      const r = f - k * halfPi;
+      const one = 1n << BigInt(q);
+      const square = (r * r) >> BigInt(q);
+      // sin r = r - r³/3! + …, cos r = 1 - r²/2! + …
+      const series = (first: bigint, start: bigint) => {
+        let term = first,
+          sum = first;
+        for (let i = start; term !== 0n; i += 2n) {
+          term = -(term * square) / (one * i * (i + 1n));
+          sum += term;
+        }
+        return sum;
+      };
+      const quadrant = Number(((k % 4n) + 4n + (cosine ? 1n : 0n)) % 4n);
+      const result = quadrant % 2 === 0 ? series(r, 2n) : series(one, 1n);
+      const signed = quadrant >= 2 ? -result : result;
+      return signed >> BigInt(q - p);
+    },
+    line
+  );
+}
+export function sinReal(value: Real, line = -1): Real {
+  return sinCos(value, false, line);
+}
+export function cosReal(value: Real, line = -1): Real {
+  return sinCos(value, true, line);
+}
+
+/** ArcTan, as the 8087's FPATAN gives it, to 64 bits. */
+export function arcTanReal(value: Real, line = -1): Real {
+  const x = exact(value);
+  if (x.n === 0n) return 0;
+  return converge(
+    RESULT_BITS + 16,
+    (p) => {
+      const q = p + 8;
+      const unit = 1n << BigInt(q);
+      let f = fixed({ ...x, negative: false }, q);
+      // Past 1, atan x = π/2 - atan(1/x).
+      const inverted = f > unit;
+      if (inverted) f = (unit << BigInt(q)) / f;
+      // atan y = 2 atan(y / (1 + √(1 + y²))), twice, leaves y below tan(π/16).
+      for (let i = 0; i < 2; i++)
+        f = (f << BigInt(q)) / (unit + isqrt((unit << BigInt(q)) + f * f));
+      const square = (f * f) >> BigInt(q);
+      let power = f,
+        sum = f;
+      for (let k = 1n; power !== 0n; k++) {
+        power = (power * square) >> BigInt(q);
+        const term = power / (2n * k + 1n);
+        sum += k % 2n ? -term : term;
+      }
+      let result = sum * 4n;
+      if (inverted) result = (piFixed(q) >> 1n) - result;
+      result >>= BigInt(q - p);
+      return x.negative ? -result : result;
+    },
+    line
+  );
+}

@@ -38,7 +38,18 @@ import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
 import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/FileRuntime';
 import { LINEAR_BASE, farAddress } from '../runtime/AddressSpace';
-import { Float80, extendedOperation, parseReal, sqrtReal, type Real } from './float80';
+import {
+  Float80,
+  arcTanReal,
+  cosReal,
+  expReal,
+  extendedOperation,
+  lnReal,
+  parseReal,
+  sinReal,
+  sqrtReal,
+  type Real,
+} from './float80';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { RawInstruction } from '../asm/parse';
 import { assemble, type AsmName } from '../asm/resolve';
@@ -340,6 +351,14 @@ const INTERMEDIATE: PascalType = { ...EXTENDED, approximate: true };
 const EXTENDED_CONSTANT: PascalType = { ...INTERMEDIATE, extendedValue: true };
 /** Pi as the 8087's FLDPI loads it, to 64 bits. */
 const EXTENDED_PI = new Float80(false, 0xc90fdaa22168c235n, -62);
+/** The functions the 8087 computes to Extended's 64 bits, by name. */
+const TRANSCENDENTAL: Readonly<Record<string, (value: Real, line: number) => Real>> = {
+  sin: sinReal,
+  cos: cosReal,
+  arctan: arcTanReal,
+  exp: expReal,
+  ln: lnReal,
+};
 const BOOLEAN: PascalType = { kind: 'boolean', size: 1, byteSize: 1, low: 0, high: 1 };
 const CHAR: PascalType = { kind: 'char', size: 1, byteSize: 1, low: 0, high: 255 };
 const STRING: PascalType = { kind: 'string', size: 1, byteSize: 256, capacity: 255 };
@@ -5224,9 +5243,10 @@ export class Compiler {
         : type;
     }
     if (name === 'random' && arguments_.length === 0) return this.realResult();
-    // Sqrt, Int and Frac of an Extended or Comp keep its precision.
+    // Sqrt, Int, Frac and the transcendental functions of an Extended or
+    // Comp keep its precision.
     if (
-      ['sqrt', 'int', 'frac'].includes(name) &&
+      ['sqrt', 'int', 'frac', ...Object.keys(TRANSCENDENTAL)].includes(name) &&
       arguments_[0] &&
       this.exactReal(this.expressionType(arguments_[0]))
     )
@@ -5737,6 +5757,7 @@ export class Compiler {
     });
     const returnType = this.builtinReturn(builtin, args);
     this.line = node.lineNumber ?? this.line;
+    const transcendental = Object.hasOwn(TRANSCENDENTAL, name) ? TRANSCENDENTAL[name] : undefined;
     if (['abs', 'sqr', 'succ', 'pred'].includes(name) && returnType.kind === 'integer') {
       this.integerHelper(name, returnType, node, 1);
     } else if (
@@ -5748,6 +5769,18 @@ export class Compiler {
       const line = node.lineNumber ?? this.line;
       this.helper(`8087x-sqrt-${String(line)}`, 1, (value) =>
         sqrtReal(value instanceof Float80 ? value : Number(value), line)
+      );
+    } else if (
+      transcendental &&
+      args[0] &&
+      this.coprocessorMode() &&
+      (this.exactContext || this.exactReal(this.expressionType(args[0])))
+    ) {
+      // As are its transcendental functions' results.
+      const line = node.lineNumber ?? this.line;
+      const compute = transcendental;
+      this.helper(`8087x-${name}-${String(line)}`, 1, (value) =>
+        compute(value instanceof Float80 ? value : Number(value), line)
       );
     } else if (name === 'sqr' && returnType.kind === 'real') {
       const line = node.lineNumber ?? this.line;

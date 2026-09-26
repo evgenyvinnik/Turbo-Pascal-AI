@@ -12,6 +12,13 @@ import {
   extendedOperation,
   parseReal,
   sqrtReal,
+  expReal,
+  lnReal,
+  sinReal,
+  cosReal,
+  arcTanReal,
+  roundExtended,
+  type Real,
 } from '../../src/compiler/codegen/float80';
 
 const compile = (source: string) =>
@@ -276,5 +283,59 @@ describe('Turbo Pascal numeric representation', () => {
     ]);
     expect(decodeExtended(encodeExtended(third))).toEqual(third);
     expect(() => parseReal('1e5000')).toThrow(/Real overflow/);
+  });
+});
+
+describe('The 8087 transcendental functions', () => {
+  // Each value, correctly rounded to a 64-bit significand, as mpmath computes it.
+  it.each([
+    [expReal, 1, false, 0xadf85458a2bb4a9bn, -62],
+    [expReal, -1, false, 0xbc5ab1b16779be35n, -65],
+    [expReal, 0.5, false, 0xd3094c70f034de4cn, -63],
+    [expReal, 100, false, 0x9a4a54d8b8dfa566n, 81],
+    [expReal, -10000, false, 0x8479f29f94542ce4n, -14490],
+    [lnReal, 2, false, 0xb17217f7d1cf79acn, -64],
+    [lnReal, 0.1, true, 0x935d8dddaaa8ab17n, -62],
+    [lnReal, 1e-300, true, 0xacb1a23fc3fda9aan, -54],
+    [lnReal, 1.0000001, false, 0xd6bf9423db2490ecn, -87],
+    [sinReal, 1, false, 0xd76aa47848677021n, -64],
+    [sinReal, 355, true, 0xfcde8183e8ef14edn, -79],
+    [sinReal, 1e-10, false, 0xdbe6fecebdedd800n, -97],
+    [sinReal, 1e22, true, 0xda29d5bb5f9cb87dn, -64],
+    [cosReal, 1, false, 0x8a51407da8345c92n, -64],
+    [cosReal, 1.5707963267948966, false, 0x8d313198a2e03707n, -117],
+    [arcTanReal, 1, false, 0xc90fdaa22168c235n, -64],
+    [arcTanReal, -3, true, 0x9fe0bb5bd42affecn, -63],
+    [arcTanReal, 1e-8, false, 0xabcc77118461ce63n, -90],
+    [arcTanReal, 1e30, false, 0xc90fdaa22168c235n, -63],
+  ] as [(value: Real) => Real, number, boolean, bigint, number][])(
+    '%o(%s) rounds to the nearest 64-bit value',
+    (compute, argument, negative, significand, exponent) => {
+      expect(encodeExtended(compute(argument))).toEqual(
+        encodeExtended(roundExtended(negative, significand, 1n, exponent))
+      );
+    }
+  );
+
+  it('stop Ln of a value that is not positive with error 207, and Exp past Extended with 205', () => {
+    expect(() => lnReal(-1, 3)).toThrow('Invalid floating point operation');
+    expect(() => lnReal(0, 3)).toThrow('Invalid floating point operation');
+    expect(() => expReal(12000, 3)).toThrow('Real overflow');
+    expect(expReal(-12000)).toBe(0);
+  });
+
+  it('give an Extended program every digit Turbo Pascal prints', () => {
+    expect(
+      execute(`program T; var x: Extended;
+      begin x := 1; WriteLn(Exp(x):0:18); WriteLn(Ln(2 * x):0:18); WriteLn(Sin(x):0:18);
+        WriteLn(Cos(x):0:18); WriteLn(ArcTan(x) * 4:0:18); x := 100; WriteLn(Ln(x):0:18) end.`)
+    ).toEqual([
+      '2.718281828459045240',
+      '0.693147180559945309',
+      '0.841470984807896507',
+      '0.540302305868139717',
+      '3.141592653589793240',
+      '4.605170185988091370',
+    ]);
   });
 });

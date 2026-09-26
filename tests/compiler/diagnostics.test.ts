@@ -115,9 +115,19 @@ describe('Borland diagnostic presentation', () => {
   test('numbers every run-time error the machine and its libraries raise', () => {
     const root = path.resolve(__dirname, '../../src/compiler');
     const unnumbered: string[] = [];
-    for (const dir of ['runtime', 'stdlib']) {
-      for (const file of readdirSync(path.join(root, dir)).filter((name) => name.endsWith('.ts'))) {
-        const source = readFileSync(path.join(root, dir, file), 'utf8');
+    // The real-number modules raise theirs at run time too.
+    const files = [
+      ...['runtime', 'stdlib'].flatMap((dir) =>
+        readdirSync(path.join(root, dir))
+          .filter((name) => name.endsWith('.ts'))
+          .map((name) => path.join(dir, name))
+      ),
+      'codegen/float80.ts',
+      'codegen/numeric.ts',
+    ];
+    {
+      for (const file of files) {
+        const source = readFileSync(path.join(root, file), 'utf8');
         for (const match of source.matchAll(/new PascalError\(\s*(['`])((?:\\.|(?!\1).)*)\1/g)) {
           const message = (match[2] ?? '').replace(/\$\{[^}]*\}/g, '7');
           const diagnostic = describePascalDiagnostic(new PascalError(message, 1), 'runtime');

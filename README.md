@@ -412,8 +412,10 @@ loading. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
 circle's centre. The Overlays allowed option is retained as an IDE preference,
 since every unit stays resident.
-The VM always enforces its memory/instruction limits. Transcendental functions
-(`Sin`, `Cos`, `ArcTan`, `Ln`, `Exp`) use JavaScript's, which work in doubles,
+The VM always enforces its memory/instruction limits. In 8087 code, `Sin`,
+`Cos`, `ArcTan`, `Ln` and `Exp` of an `Extended` or `Comp`, or stored in one,
+give Extended's 64 bits, the exact value rounded to the nearest; the 8087
+itself is within one unit of that last bit. Elsewhere they compute in doubles,
 rounded to Real48 outside 8087 code. Debugger
 expressions take what Turbo Pascal 7's do: data, operators, the functions
 allowed in constant declarations, and `Mem`, `MemW` and `MemL`; as there, they
