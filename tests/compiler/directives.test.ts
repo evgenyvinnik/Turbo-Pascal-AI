@@ -8,11 +8,13 @@ import {
 import { Lexer, Stream } from '../../src/compiler/lexer';
 import { Parser } from '../../src/compiler/parser';
 import { PascalError } from '../../src/compiler/errors';
+import { Compiler } from '../../src/compiler/codegen/Compiler';
+import { Machine } from '../../src/compiler/runtime/Machine';
 
 describe('Turbo Pascal source directives', () => {
   it('applies comma-separated switches and distinguishes include names from I/O checking', () => {
     const switches = { ...DEFAULT_SWITCHES };
-    expect(applyCompilerSwitches('$B+,R+,V-,P+,I-,Q+,N+,T+,A-', switches)).toBe(true);
+    expect(applyCompilerSwitches('$B+,R+,V-,P+,I-,Q+,N+,T+,A-,S-,D-,L-,O+', switches)).toBe(true);
     expect(switches).toEqual({
       completeBooleanEvaluation: true,
       rangeChecking: true,
@@ -26,8 +28,15 @@ describe('Turbo Pascal source directives', () => {
       typedPointers: true,
       alignData: false,
       instructions286: false,
+      stackChecking: false,
+      debugInfo: false,
+      localSymbols: false,
+      symbolInfo: true,
+      emulation: true,
+      overlaysAllowed: true,
     });
     expect(applyCompilerSwitches('$I settings.inc', switches)).toBe(false);
+    expect(applyCompilerSwitches('$M 16384,0,655360', switches)).toBe(false);
   });
   it('does not tokenize excluded source and preserves original line numbers', () => {
     const source = `program P;\n{$IFDEF OTHER}\n@ invalid ?? # garbage\n{$ELSE}\nbegin WriteLn('ok'); end.\n{$ENDIF}`;
@@ -104,5 +113,19 @@ describe('Turbo Pascal source directives', () => {
         resolveInclude: () => ({ filename: 'bad.inc', source: '{$ENDIF}' }),
       })
     ).toThrow('Unexpected ENDIF');
+  });
+});
+
+describe('Switches Turbo Pascal adds for the debugger, stack and overlays', () => {
+  it('can be tested with IFOPT', () => {
+    const result = preprocessPascal(
+      `{$S-,D-,O+}program P; begin {$IFOPT S-}Write('S-');{$ENDIF}{$IFOPT D+}Write('D+');{$ELSE}Write('D-');{$ENDIF}{$IFOPT O+}Write('O+');{$ENDIF}{$IFOPT L+}WriteLn('L+');{$ENDIF} end.`
+    );
+    const bytecode = new Compiler().compile(
+      new Parser(new Lexer(new Stream(result.source))).parse()
+    );
+    const machine = new Machine(bytecode);
+    machine.run();
+    expect(machine.getOutput()).toEqual(['S-D-O+L+']);
   });
 });

@@ -20,6 +20,61 @@ export interface CompilerSwitches {
   alignData: boolean;
   /** $G: 80286 code generation, and 80286 opcodes in the built-in assembler. */
   instructions286: boolean;
+  /** $S: each routine checks, as it is entered, that its frame fits the stack. */
+  stackChecking: boolean;
+  /** $D, a global switch: the module's line numbers, which the debugger steps
+   * by and a run-time error is found by. */
+  debugInfo: boolean;
+  /** $L, a global switch: the names of the module's routines' locals, which
+   * the debugger shows. */
+  localSymbols: boolean;
+  /** $Y, a global switch: symbol reference information. */
+  symbolInfo: boolean;
+  /** $E: the 8087 emulator, which a PC with an 8087, as this one has, leaves
+   * to the chip. */
+  emulation: boolean;
+  /** $O: code that can be overlaid, which a unit {$O Name} names must have. */
+  overlaysAllowed: boolean;
+}
+
+/** $M stack size, low heap limit, high heap limit: the program's memory. */
+export interface MemorySizes {
+  stack: number;
+  heapMin: number;
+  heapMax: number;
+}
+export const DEFAULT_MEMORY_SIZES: Readonly<MemorySizes> = Object.freeze({
+  stack: 16384,
+  heapMin: 0,
+  heapMax: 655360,
+});
+/** The sizes a {$M stack, low, high} directive gives, if the comment is one;
+ * numbers may be decimal or $hex. */
+export function memorySizesDirective(comment: string, line = -1): MemorySizes | undefined {
+  const match = /^\$M\s+(.*)$/is.exec(comment.trim());
+  if (!match) return undefined;
+  const parts = (match[1] ?? '').split(',').map((part) => part.trim());
+  const values = parts.map((part) =>
+    /^\$[0-9a-f]+$/i.test(part)
+      ? parseInt(part.slice(1), 16)
+      : /^\d+$/.test(part)
+        ? Number(part)
+        : NaN
+  );
+  const [stack, heapMin, heapMax] = values;
+  if (
+    values.length !== 3 ||
+    stack === undefined ||
+    heapMin === undefined ||
+    heapMax === undefined ||
+    values.some((value) => !Number.isFinite(value))
+  )
+    throw new PascalError('Invalid compiler directive', line);
+  // As Turbo Pascal allows: a stack of 1024 to 65520 bytes, and heap limits
+  // up to 655360 with the low one at most the high.
+  if (stack < 1024 || stack > 65520 || heapMax > 655360 || heapMin > heapMax)
+    throw new PascalError('Invalid compiler directive', line);
+  return { stack, heapMin, heapMax };
 }
 
 export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
@@ -35,6 +90,12 @@ export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
   typedPointers: false,
   alignData: true,
   instructions286: false,
+  stackChecking: true,
+  debugInfo: true,
+  localSymbols: true,
+  symbolInfo: true,
+  emulation: true,
+  overlaysAllowed: false,
 });
 
 const switchNames: Record<string, keyof CompilerSwitches> = {
@@ -50,6 +111,12 @@ const switchNames: Record<string, keyof CompilerSwitches> = {
   T: 'typedPointers',
   A: 'alignData',
   G: 'instructions286',
+  S: 'stackChecking',
+  D: 'debugInfo',
+  L: 'localSymbols',
+  Y: 'symbolInfo',
+  E: 'emulation',
+  O: 'overlaysAllowed',
 };
 
 /** Apply a switch list such as $B+,R-,I+; include filenames are not switches. */

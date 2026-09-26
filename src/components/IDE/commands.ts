@@ -32,6 +32,7 @@ import { openLocalMenu } from './localMenu';
 import { programArgumentsDialog } from './programArgumentsDialog';
 import { parseGrepArguments, searchGrepFiles } from './grepSearch';
 import { sourcePath } from '@compiler/project';
+import { memorySizesDirective, type MemorySizes } from '@compiler/directives';
 import { openDosSession } from '@services/dos/dosSession';
 import { openNativePascalSession } from '@services/dos/nativePascal';
 
@@ -535,8 +536,15 @@ async function doCompile(
     typedPointers: ide().compilerOptions.syntax?.[3] ?? false,
     openStrings: ide().compilerOptions.syntax?.[4] ?? false,
     farCalls: ide().compilerOptions.codegen?.[0] ?? false,
+    overlaysAllowed: ide().compilerOptions.codegen?.[1] ?? false,
     alignData: ide().compilerOptions.codegen?.[2] ?? true,
     instructions286: ide().compilerOptions.codegen?.[3] ?? false,
+    stackChecking: ide().compilerOptions.runtime?.[1] ?? true,
+    debugInfo: ide().compilerOptions.debugging?.[0] ?? true,
+    localSymbols: ide().compilerOptions.debugging?.[1] ?? true,
+    numericProcessing: ide().compilerOptions.numeric?.[0] ?? false,
+    emulation: ide().compilerOptions.numeric?.[1] ?? true,
+    ...memorySizes(ide().optionDialogs['options.memory']),
     sources,
     defines: ide()
       .defines.split(/[;,\s]+/)
@@ -578,7 +586,13 @@ async function doCompile(
     return;
   }
 
-  ide().setLastCompile({ file: buf.name, lines, ok: true, message: 'Compile successful' });
+  ide().setLastCompile({
+    file: buf.name,
+    lines,
+    ok: true,
+    message: 'Compile successful',
+    ...(result.bytecode ? { memory: result.bytecode.memorySizes } : {}),
+  });
   useCompilerStore.getState().setMessages([`Compiling ${buf.name}`, 'Compile successful']);
   dlg().open(
     D.compilingDialog(buf.name, ide().destination, lines, 'Compile successful:', 'Press any key'),
@@ -594,6 +608,18 @@ async function doCompile(
 }
 
 const asBools = (v: unknown): boolean[] => (Array.isArray(v) ? (v as boolean[]) : []);
+/** The Memory sizes dialog's values, as a {$M} directive takes them; values
+ * Turbo Pascal would refuse leave the defaults. */
+function memorySizes(values: DialogValues | undefined): { memorySizes?: MemorySizes } {
+  if (!values) return {};
+  const field = (key: string) => String(values[key] ?? '').trim();
+  try {
+    const sizes = memorySizesDirective(`$M ${field('stack')},${field('low')},${field('high')}`);
+    return sizes ? { memorySizes: sizes } : {};
+  } catch {
+    return {};
+  }
+}
 
 const displayDebugValue = formatDebugValue;
 
@@ -1138,7 +1164,12 @@ export function runCommand(id: string): void {
       const last = ide().lastCompile;
       const buf = d.activeBuffer();
       dlg().open(
-        D.informationDialog(buf?.name ?? 'NONAME00.PAS', last?.lines ?? 0, last?.ok !== false)
+        D.informationDialog(
+          buf?.name ?? 'NONAME00.PAS',
+          last?.lines ?? 0,
+          last?.ok !== false,
+          last?.memory
+        )
       );
       return;
     }

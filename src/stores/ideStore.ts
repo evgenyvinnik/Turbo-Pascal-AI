@@ -1,3 +1,4 @@
+import type { MemorySizes } from '@compiler/directives';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { DialogValues } from './dialogStore';
@@ -34,7 +35,14 @@ interface IdeState {
   tools: ToolSettings[];
   programParameters: string;
   defines: string;
-  lastCompile: { file: string; lines: number; ok: boolean; message: string } | null;
+  lastCompile: {
+    file: string;
+    lines: number;
+    ok: boolean;
+    message: string;
+    /** The program's stack and heap limits, as {$M} or the options gave them. */
+    memory?: MemorySizes;
+  } | null;
 }
 
 interface IdeActions {

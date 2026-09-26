@@ -3,7 +3,13 @@
  * Parses token stream into Abstract Syntax Tree (AST)
  */
 
-import { applyCompilerSwitches, DEFAULT_SWITCHES, type CompilerSwitches } from '../directives';
+import {
+  applyCompilerSwitches,
+  DEFAULT_SWITCHES,
+  memorySizesDirective,
+  type CompilerSwitches,
+  type MemorySizes,
+} from '../directives';
 import { Lexer, Token } from '../lexer';
 import { PascalError } from '../errors';
 import { TokenType } from '../types';
@@ -22,7 +28,10 @@ import {
   type VariantCase,
 } from './Node';
 
-export type ParserOptions = Partial<CompilerSwitches>;
+export type ParserOptions = Partial<CompilerSwitches> & {
+  /** The Memory sizes the program has unless its {$M} gives others. */
+  memorySizes?: MemorySizes;
+};
 
 /**
  * Parser class that implements a recursive descent parser for Pascal
@@ -32,6 +41,8 @@ export class Parser {
   private interfaceDeclarations = false;
   private ioChecking = true;
   private overflowChecking = false;
+  /** The program's {$M stack, low, high}, once one is read. */
+  private memorySizes: MemorySizes | undefined;
   /** Within a typed constant's value, parentheses may hold an array or record. */
   private aggregateConstants = false;
   private lastCompoundEndLine = 1;
@@ -47,7 +58,9 @@ export class Parser {
    * @param lexer - The lexer to read tokens from
    */
   constructor(lexer: Lexer, options: ParserOptions = {}) {
-    this.switches = { ...DEFAULT_SWITCHES, ...options };
+    const { memorySizes, ...switches } = options;
+    this.switches = { ...DEFAULT_SWITCHES, ...switches };
+    this.memorySizes = memorySizes;
     this.ioChecking = options.ioChecking ?? true;
     this.overflowChecking = options.overflowChecking ?? false;
     this.lexer = lexer;
@@ -78,6 +91,7 @@ export class Parser {
   /** Parse a separately compiled unit; interface declarations are signatures. */
   parseUnit(): UnitNode {
     const line = this.lineNumber;
+    const globalSwitches = { ...this.switches };
     this.expectReservedWord('unit');
     const name = this.expectIdentifier();
     this.expectSymbol(';');
@@ -103,6 +117,7 @@ export class Parser {
       interfaceSection,
       implementationSection,
       lineNumber: line,
+      globalSwitches,
       initialization: {
         type: NodeType.BLOCK,
         declarations: [],
@@ -135,6 +150,8 @@ export class Parser {
   private skipComments(): void {
     while (this.currentToken.isComment()) {
       applyCompilerSwitches(this.currentToken.value, this.switches);
+      const sizes = memorySizesDirective(this.currentToken.value, this.currentToken.lineNumber);
+      if (sizes) this.memorySizes = sizes;
       this.ioChecking = this.switches.ioChecking;
       this.overflowChecking = this.switches.overflowChecking;
       this.currentToken = this.lexer.next();
@@ -217,6 +234,7 @@ export class Parser {
    */
   private parseProgram(): ProgramNode {
     const line = this.lineNumber;
+    const globalSwitches = { ...this.switches };
 
     let name = '';
     if (this.isReservedWord('program')) {
@@ -249,6 +267,8 @@ export class Parser {
       uses,
       block,
       lineNumber: line,
+      globalSwitches,
+      ...(this.memorySizes ? { memorySizes: this.memorySizes } : {}),
     };
   }
 

@@ -34,8 +34,10 @@ export const HEAP_END_SEGMENT = 0xa000;
 const HEAP_START = HEAP_SEGMENT * 16;
 /** How many bytes the heap holds. */
 export const HEAP_BYTES = (HEAP_END_SEGMENT - HEAP_SEGMENT) * 16;
-/** Where SP starts, at the top of the stack segment. */
-export const STACK_TOP = 0xfff0;
+/** Where SP starts: the top of the stack segment, as large as {$M} makes it. */
+export function stackTop(bytecode: Bytecode): number {
+  return bytecode.memorySizes.stack & ~1;
+}
 /* Addresses are numbers in ranges that stay below 2^31, so the store and the
  * stack hold only small integers, which JavaScript engines keep fast:
  *   cells             from 0
@@ -459,7 +461,7 @@ export class AddressSpace {
   /** SPtr: the offset of the stack's top, below the innermost frame. */
   stackPointer(): number {
     const innermost = this.frame(() => true);
-    return innermost ? innermost.linear - STACK_SEGMENT * 16 : STACK_TOP;
+    return innermost ? innermost.linear - STACK_SEGMENT * 16 : stackTop(this.host.bytecode);
   }
 
   /** A pointer's bytes: its segment and offset. */

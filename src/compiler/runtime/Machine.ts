@@ -32,7 +32,7 @@ import {
   MAX_CELLS,
   PORT_BASE,
   STACK_SEGMENT,
-  STACK_TOP,
+  stackTop,
   VIEW_BASE,
 } from './AddressSpace';
 import { Heap, type BlockType } from './Heap';
@@ -229,7 +229,7 @@ export class Machine {
     this.heap = new Heap(
       this.config.stackSize,
       totalSize,
-      Math.min(HEAP_BYTES, this.config.heapSize),
+      Math.min(HEAP_BYTES, this.config.heapSize, bytecode.memorySizes.heapMax),
       () => true
     );
     this.globalBase = bytecode.typedConstants.length;
@@ -296,7 +296,7 @@ export class Machine {
       frame: () => ({ base: this.mp, top: this.sp }),
       caller: (base) => Number(this.dstore[base + 2] ?? 0),
       routine: (base) => Number(this.dstore[base + 3] ?? 0),
-      frameLinear: (base) => this.frameLinear[base] ?? STACK_SEGMENT * 16 + STACK_TOP,
+      frameLinear: (base) => this.frameLinear[base] ?? STACK_SEGMENT * 16 + stackTop(bytecode),
       stringCharacter: (reference) => this.stringCharacter(reference),
     });
     this.startHeapVariables();
@@ -423,7 +423,10 @@ export class Machine {
       // number as the exit code, and a halt with its own.
       const code = describePascalDiagnostic(error, 'runtime').exitCode ?? 255;
       if (error instanceof PascalError) {
-        if (error.lineNumber < 1) Object.assign(error, { lineNumber: this.getSourceLine() });
+        // Code compiled {$D-} has no lines: the error is found by address alone.
+        if (this.bytecode.lineless[Math.max(0, this.pc - 1)])
+          Object.assign(error, { lineNumber: -1 });
+        else if (error.lineNumber < 1) Object.assign(error, { lineNumber: this.getSourceLine() });
         if (!('sourceFile' in error) && this.getSourceFile())
           Object.assign(error, { sourceFile: this.getSourceFile() });
       }
@@ -2083,8 +2086,15 @@ export class Machine {
   private placeFrame(routine: number): void {
     const caller = Number(this.dstore[this.mp + 2] ?? 0);
     const below =
-      caller > this.globalBase ? (this.frameLinear[caller] ?? 0) : STACK_SEGMENT * 16 + STACK_TOP;
-    this.frameLinear[this.mp] = below - (this.bytecode.frames[routine]?.bytes ?? 0);
+      caller > this.globalBase
+        ? (this.frameLinear[caller] ?? 0)
+        : STACK_SEGMENT * 16 + stackTop(this.bytecode);
+    const frame = this.bytecode.frames[routine];
+    const linear = below - (frame?.bytes ?? 0);
+    // {$S+}: a frame that would reach below the stack segment is error 202,
+    // before the routine runs.
+    if (frame?.stackCheck && linear < STACK_SEGMENT * 16) throw new PascalError('Stack overflow');
+    this.frameLinear[this.mp] = linear;
   }
   /** HeapOrg and HeapEnd bound the heap, which grows down from HeapOrg;
    * HeapPtr follows its top. */

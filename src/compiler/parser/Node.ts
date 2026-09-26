@@ -1,3 +1,4 @@
+import type { CompilerSwitches, MemorySizes } from '../directives';
 /**
  * Node types for Pascal AST
  */
@@ -98,6 +99,10 @@ export interface ProgramNode extends Node {
   name: string;
   uses?: string[] | undefined;
   block: BlockNode;
+  /** The switches as the program starts, which its global ones keep. */
+  globalSwitches?: CompilerSwitches;
+  /** The sizes a {$M} directive gives. */
+  memorySizes?: MemorySizes;
 }
 
 /**
@@ -111,6 +116,8 @@ export interface UnitNode extends Node {
   interfaceUses: string[];
   implementationUses: string[];
   initialization: BlockNode;
+  /** The switches as the unit starts, which its global ones keep. */
+  globalSwitches?: CompilerSwitches;
 }
 
 /**

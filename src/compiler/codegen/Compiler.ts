@@ -3,6 +3,7 @@ import { Parser } from '../parser/Parser';
 import { Lexer, Stream } from '../lexer';
 import type { UnitNode } from '../parser/Node';
 import { PascalError } from '../errors/PascalError';
+import type { CompilerSwitches } from '../directives';
 import {
   NodeType,
   type Node,
@@ -263,6 +264,9 @@ interface Scope {
   level: number;
   /** On a module's outermost scope: the module is compiled for the 8087. */
   coprocessor?: boolean;
+  /** On a module's outermost scope: its switches as it starts, which the
+   * global ones, $D and $L, keep for all of it. */
+  module?: CompilerSwitches;
   /** Value open array parameters, which the routine copies when it starts. */
   openCopies?: Variable[];
   symbols: Map<string, Symbol>;
@@ -460,6 +464,8 @@ export class Compiler {
     this.scope = this.newScope(null, program.name);
     this.scope.nextOffset = this.globalOffset;
     this.scope.coprocessor = this.usesCoprocessor(root);
+    if (program.globalSwitches) this.scope.module = program.globalSwitches;
+    if (program.memorySizes) this.bytecode.memorySizes = program.memorySizes;
     this.addBuiltins();
     const programScope = this.scope;
     this.importUnits(program.uses ?? [], root);
@@ -563,6 +569,7 @@ export class Compiler {
     this.units.set(key, unit);
     this.scope = scope;
     scope.coprocessor = this.usesCoprocessor(unitNode);
+    if (unitNode.globalSwitches) scope.module = unitNode.globalSwitches;
     this.addBuiltins();
     this.importUnits(unitNode.interfaceUses, unitNode);
     scope.nextOffset = this.globalOffset;
@@ -672,7 +679,10 @@ export class Compiler {
   private emit(opcode: Opcode, p = 0, q = 0): number {
     const address = this.bytecode.getNextAddress();
     this.bytecode.add(opcode, p, q);
-    this.bytecode.sourceLines[address] = this.line;
+    // Under {$D-} a module keeps no line numbers: the debugger cannot stop in
+    // it, and a run-time error there is found by address alone.
+    if (this.moduleSwitches()?.debugInfo === false) this.bytecode.lineless[address] = true;
+    else this.bytecode.sourceLines[address] = this.line;
     if (this.sourceFile) this.bytecode.sourceFiles[address] = this.sourceFile;
     if (opcode === Opcode.CSP) this.bytecode.ioChecks[address] = this.ioChecking;
     return address;
@@ -1000,6 +1010,11 @@ export class Compiler {
     return type.kind === 'real' && type.byteSize !== 6;
   }
   /** Whether the current module is compiled for the 8087 ({$N+}). */
+  /** The global switches of the module a scope lies in. */
+  private moduleSwitches(scope: Scope = this.scope): CompilerSwitches | undefined {
+    for (let at: Scope | null = scope; at; at = at.parent) if (at.module) return at.module;
+    return undefined;
+  }
   private coprocessorMode(): boolean {
     let scope = this.scope;
     while (scope.parent) scope = scope.parent;
@@ -2069,7 +2084,10 @@ export class Compiler {
     const frame = this.frame(routine, parameters);
     // A routine's variables must fit a segment too.
     if (frame.bytes > 65536) this.fail(declaration, 'Too many variables');
-    this.bytecode.frames[routine.address] = frame;
+    // Under {$S+} the routine checks, as it is entered, that its frame fits
+    // the stack that remains.
+    this.bytecode.frames[routine.address] =
+      declaration.stackChecking === false ? frame : { ...frame, stackCheck: true };
     for (const patch of routine.patches) this.patch(patch, routine.address);
     if (declaration.interrupt)
       this.bytecode.interruptHandlers[routine.proceduralId] = {
@@ -2173,6 +2191,8 @@ export class Compiler {
     this.recordDebugScope(this.scope, entry, this.bytecode.getNextAddress(), this.scope.nextOffset);
   }
   private recordDebugScope(scope: Scope, start: number, end: number, frameSize: number): void {
+    // Under {$L-} a module's routines keep no names for their locals.
+    const hidden = scope.level > 0 && this.moduleSwitches(scope)?.localSymbols === false;
     this.bytecode.debugScopes.push({
       id: scope.id,
       parentId: scope.parent?.id ?? null,
@@ -2182,7 +2202,7 @@ export class Compiler {
       end,
       frameSize,
       variables: [...scope.symbols.values()]
-        .filter((symbol): symbol is Variable => symbol.kind === 'variable')
+        .filter((symbol): symbol is Variable => !hidden && symbol.kind === 'variable')
         .map((variable) => ({
           name: variable.name,
           offset: variable.offset,
@@ -2192,7 +2212,7 @@ export class Compiler {
           type: this.debugType(variable.type),
         })),
       constants: [...scope.symbols.entries()]
-        .filter((entry): entry is [string, Constant] => entry[1].kind === 'constant')
+        .filter((entry): entry is [string, Constant] => !hidden && entry[1].kind === 'constant')
         .map(([name, value]) => ({ name, value: value.value, type: this.debugType(value.type) })),
     });
   }

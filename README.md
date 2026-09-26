@@ -293,8 +293,19 @@ which ports 3C7h to 3C9h read and set.
 
 ### Compiler switches and includes
 
-The P-machine implements `$A`, `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$G`, `$N`,
-`$T` and `$X`, with Turbo Pascal defaults (`A+ B- R- V+ P- I+ Q- F- G- N- T- X+`).
+The P-machine implements `$A`, `$B`, `$D`, `$E`, `$F`, `$G`, `$I`, `$L`, `$N`, `$O`,
+`$P`, `$Q`, `$R`, `$S`, `$T`, `$V`, `$X` and `$Y`, and `$M`, with Turbo Pascal
+defaults (`A+ B- D+ E+ F- G- I+ L+ N- O- P- Q- R- S+ T- V+ X+ Y+`,
+`$M 16384,0,655360`). `$S+` (Stack checking) makes each routine check, as it is
+entered, that its frame fits the stack, which is error 202 otherwise; `$M`
+sets that stack's size, where `SPtr` starts, and the heap's high limit, which
+`MemAvail` reports, up to the 384K the heap has. Under `$D-` (Debug
+information) a module keeps no line numbers: the debugger cannot stop in it,
+and a run-time error there is found by address alone; under `$L-` (Local
+symbols) its routines' locals are hidden from Watches. `$D`, `$L` and `$Y` are
+global switches, set before the program or unit heading. `$E` changes nothing
+on this PC, which has an 8087, and `$Y` only what the absent Browser would
+show.
 `$A+` (the Word align data option) starts globals and typed constants larger
 than a byte at even offsets in the data segment. `$G+` (the 286 instructions
 option) lets the built-in assembler take 80286 opcodes, which under `$G-` are

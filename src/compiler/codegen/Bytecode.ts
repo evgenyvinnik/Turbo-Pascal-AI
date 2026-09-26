@@ -9,6 +9,7 @@ import { inst, Opcode } from '../types';
 import type { AsmBlock } from '../asm/types';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { Float80 } from './float80';
+import { DEFAULT_MEMORY_SIZES, type MemorySizes } from '../directives';
 
 /** How a type's cells lie in its bytes: one cell, an array of elements that
  * are `cells` cells and `bytes` bytes each, or a record's fields, each at a
@@ -119,6 +120,8 @@ export interface SegmentLayout {
    * stores that go through their bytes. */
   variantCells: [number, number][];
   bytes: number;
+  /** A routine's frame under {$S+}: its entry checks that the stack has room. */
+  stackCheck?: boolean;
 }
 export const EMPTY_SEGMENT: SegmentLayout = {
   layout: [],
@@ -254,6 +257,10 @@ export class Bytecode {
 
   /** Source line for each instruction, used to report runtime errors. */
   public sourceLines: Record<number, number> = {};
+  /** Instructions of modules compiled {$D-}, which have no line to report. */
+  public lineless: Record<number, true> = {};
+  /** The program's {$M stack, low heap, high heap}. */
+  public memorySizes: MemorySizes = { ...DEFAULT_MEMORY_SIZES };
   public sourceFiles: Record<number, string> = {};
   public sources: Record<string, string> = {};
   public statementLines: Record<number, number> = {};
