@@ -24,7 +24,7 @@ import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
 import { VariantRuntime } from './Variants';
 import type { MemoryAccess } from './FileRuntime';
-import { AddressSpace, HEAP_BYTES, LINEAR_BASE, MAX_CELLS, PORT_BASE, STACK_SEGMENT, STACK_TOP, VIEW_BASE } from './AddressSpace';
+import { AddressSpace, FAR_BASE, HEAP_BYTES, LINEAR_BASE, MAX_CELLS, PORT_BASE, STACK_SEGMENT, STACK_TOP, VIEW_BASE } from './AddressSpace';
 import { Heap, type BlockType } from './Heap';
 import { LowMemory, Ports } from './LowMemory';
 
@@ -1766,7 +1766,7 @@ export class Machine {
       this.space.poke(address, value);
       return;
     }
-    if (address >= PORT_BASE) {
+    if (address >= PORT_BASE && address < FAR_BASE) {
       const port = address - PORT_BASE;
       this.ports.write(port & 0xffff, Number(value), port >= 0x10000 ? 2 : 1);
       return;
@@ -1887,7 +1887,7 @@ export class Machine {
   peek(address: number): StackValue {
     if (address < this.dstore.length) return this.dstore[address] ?? 0;
     if (address >= VIEW_BASE) return this.space.peek(address) ?? 0;
-    if (address >= PORT_BASE) {
+    if (address >= PORT_BASE && address < FAR_BASE) {
       const port = address - PORT_BASE;
       return this.ports.read(port & 0xffff, port >= 0x10000 ? 2 : 1);
     }
