@@ -76,6 +76,9 @@ const FPC_ONLY_SYNTAX: readonly (readonly [RegExp, string])[] = [
   [/=\s*type\s+[a-z_]/i, 'declares a distinct type alias (T = type X)'],
   [/\/\//, 'uses // comments'],
   [/;\s*(?:cdecl|stdcall|safecall|cppdecl|mwpascal|softfloat|local)\s*;/i, 'uses a Free Pascal procedure directive'],
+  // Turbo Pascal's assembler takes Intel syntax. Free Pascal reads AT&T only
+  // on x86, so such a test fails in different places on other CPUs.
+  [/\basm\b[\s\S]*?%[a-z]{2,3}\b/i, 'uses AT&T assembler syntax'],
 ];
 /** Program text without strings or brace comments, keeping `//`. */
 const withoutBraces = (source: string) =>
