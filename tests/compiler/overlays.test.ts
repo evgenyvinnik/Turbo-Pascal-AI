@@ -300,3 +300,29 @@ describe('Structure sizes', () => {
     );
   });
 });
+
+describe('Run-time errors past a variable', () => {
+  const exitCode = (source: string) => {
+    const machine = new Machine(compile(source), { maxInstructions: 2_000_000 });
+    expect(() => {
+      machine.run();
+    }).toThrow();
+    return machine.getExitCode();
+  };
+
+  it('end the program with Range check error, 201, as Turbo Pascal numbers it', () => {
+    expect(
+      exitCode(
+        'program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; WriteLn(pl^) end.'
+      )
+    ).toBe(201);
+  });
+
+  it('reach an exit procedure as ExitCode 201', () => {
+    expect(
+      output(`program T; var w, x: Word; pl: ^LongInt; old: Pointer;
+      procedure Done; far; begin ExitProc := old; WriteLn('ExitCode ', ExitCode, ' ', ErrorAddr <> nil); ErrorAddr := nil end;
+      begin old := ExitProc; ExitProc := @Done; w := 1; pl := @w; WriteLn(pl^) end.`)
+    ).toEqual(['ExitCode 201 TRUE']);
+  });
+});

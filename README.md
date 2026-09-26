@@ -417,8 +417,15 @@ rounded to Real48 outside 8087 code. Debugger
 expressions take what Turbo Pascal 7's do: data, operators, the functions
 allowed in constant declarations, and `Mem`, `MemW` and `MemL`; as there, they
 do not call the program's routines. Help is newly authored, and recognized diagnostics use
-Borland numbers while preserving explanatory detail; implementation-specific
-errors remain explicitly unnumbered.
+Borland numbers while preserving explanatory detail. Every run-time error has
+one, ending the program with it as the exit code: where Turbo Pascal's
+real-mode library has no check, the closest one, such as 201 for reading or
+writing past a variable through a pointer, 5 for a file DOS would refuse, and
+216, Borland Pascal's general protection fault, for an address or instruction
+that real mode would run into as stray memory. Graph routines before
+`InitGraph` stop with `BGI Error: Graphics not initialized (use InitGraph)` and
+exit code 1, and the IDE's instruction and output limits stop a program as
+Ctrl+Break does, with exit code 255.
 
 ## Testing
 

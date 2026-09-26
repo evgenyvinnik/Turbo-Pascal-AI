@@ -829,7 +829,8 @@ export class RuntimeServices {
             } as Record<number, string>
           )[a] ?? `Graphics error ${String(a)}`,
       };
-    if (!g.initialized) throw new PascalError('Graphics not initialized');
+    if (!g.initialized)
+      throw new PascalError('BGI Error: Graphics not initialized (use InitGraph)');
     switch (index) {
       case 203:
         return { result: g.mode };

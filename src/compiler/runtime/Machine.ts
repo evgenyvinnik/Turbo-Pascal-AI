@@ -420,8 +420,8 @@ export class Machine {
       this.execute(opcode as Opcode, p, q);
     } catch (error) {
       // As in Turbo Pascal, a run-time error ends the program with its error
-      // number as the exit code. One with no Borland number exits with 255.
-      const code = describePascalDiagnostic(error, 'runtime').code ?? 255;
+      // number as the exit code, and a halt with its own.
+      const code = describePascalDiagnostic(error, 'runtime').exitCode ?? 255;
       if (error instanceof PascalError) {
         if (error.lineNumber < 1) Object.assign(error, { lineNumber: this.getSourceLine() });
         if (!('sourceFile' in error) && this.getSourceFile())
