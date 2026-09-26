@@ -21,7 +21,8 @@
     "fidelity:fetch": "bun tests/e2e/fidelity/fetch.ts",
     "fidelity:report": "bun tests/e2e/fidelity/report.ts",
     "fpc-suite:fetch": "bun tests/fpc-suite/fetch.ts",
-    "test:fpc-suite": "bun tests/fpc-suite/run.ts"
+    "test:fpc-suite": "bun tests/fpc-suite/run.ts",
+    "test:fpc-suite:update": "FPC_SUITE_UPDATE=1 bun tests/fpc-suite/run.ts"
   },
   "dependencies": {
     "@stylexjs/stylex": "^0.10.0",

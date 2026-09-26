@@ -1331,7 +1331,19 @@ export class Parser {
       );
     }
 
-    // Handle array access, field access, pointer dereference
+    return this.parseQualifiers(node, line, switches, ioChecking, overflowChecking);
+  }
+
+  /** Indexes, fields, dereferences and calls after a variable reference's
+   * start. */
+  private parseQualifiers(
+    start: Node,
+    line: number,
+    switches: CompilerSwitches,
+    ioChecking: boolean,
+    overflowChecking: boolean
+  ): Node {
+    let node = start;
     for (;;) {
       if (this.isSymbol('[')) {
         this.advance();
@@ -1543,12 +1555,20 @@ export class Parser {
       return this.node(NodeType.NUMBER, { value, isReal, ...(isReal ? { text } : {}) }, line);
     }
 
-    // String literal
-    if (this.currentToken.isString()) {
-      let value = this.currentToken.value;
-      this.advance();
-      while (this.currentToken.isString()) {
-        value += this.currentToken.value;
+    // String literal: quoted text, #N and ^X control characters, written
+    // without separators. Where a value is expected, ^ is not a pointer's.
+    if (this.currentToken.isString() || this.isSymbol('^')) {
+      let value = '';
+      for (;;) {
+        if (this.currentToken.isString()) value += this.currentToken.value;
+        else if (this.isSymbol('^')) {
+          const control = this.lexer.readControlCharacter();
+          if (control === undefined) {
+            if (value) break;
+            throw new PascalError("Unexpected token in expression: '^'", this.lineNumber);
+          }
+          value += control;
+        } else break;
         this.advance();
       }
       return this.node(NodeType.STRING, { value }, line);
@@ -1586,12 +1606,16 @@ export class Parser {
       return this.node(NodeType.ADDRESS_OF, { operand, typedPointer: this.switches.typedPointers }, line);
     }
 
-    // Parenthesized expression
+    // Parenthesized expression. One that computes a pointer starts a
+    // variable reference when a qualifier follows: (@F)^, or under {$X+}
+    // (P + 1)[I].
     if (this.isSymbol('(')) {
       this.advance();
       if (this.aggregateConstants) return this.parseAggregateConstant(line);
       const expr = this.parseExpression();
       this.expectSymbol(')');
+      if (this.isSymbol('^') || (this.isSymbol('[') && this.switches.extendedSyntax))
+        return this.parseQualifiers(expr, line, { ...this.switches }, this.ioChecking, this.overflowChecking);
       return expr;
     }
 

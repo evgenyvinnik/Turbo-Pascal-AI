@@ -429,7 +429,7 @@ export const STRING_BUILTINS: BuiltinDef[] = [
     returnType: TypeKind.STRING,
     params: [],
     variadic: true,
-    minArgs: 2,
+    minArgs: 1,
     description: 'Concatenate multiple strings',
     procedureIndex: BuiltinProcedure.CONCAT,
   },

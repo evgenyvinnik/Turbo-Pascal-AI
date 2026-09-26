@@ -56,11 +56,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends fpc
           echo "Free Pascal $(fpc -iV)"
       - run: bun run test:reference
+      # Free Pascal's own tests: fails when a test in tests/fpc-suite/baseline.json stops passing.
+      - run: bun run fpc-suite:fetch
+      - run: bun run test:fpc-suite
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: pascal-reference
-          path: artifacts/verification/pascal-reference.json
+          path: |
+            artifacts/verification/pascal-reference.json
+            artifacts/verification/fpc-suite.json
           if-no-files-found: ignore
           retention-days: 14
 

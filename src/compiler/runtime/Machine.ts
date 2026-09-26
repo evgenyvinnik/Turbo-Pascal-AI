@@ -1159,6 +1159,35 @@ export class Machine {
       this.push(this.stringCharacterAddress(Number(args[0]), Number(args[1]), Number(args[2])));
       return;
     }
+    if (procedureIndex === (InternalProcedure.POINTER_BITS as number)) {
+      this.push(this.space.pointerBits(args[0] ?? 0));
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.C_STRING as number)) {
+      const address = Number(args[0]);
+      let text = '';
+      // A nil PChar reads as empty, as the Strings unit reads one.
+      for (let at = address; address !== 0 && text.length < 65535; at++) {
+        const char = this.characterAt(at);
+        if (char === '\0') break;
+        text += char;
+      }
+      this.push(text);
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.PACKED_STRING as number)) {
+      const address = Number(args[0]);
+      let text = '';
+      for (let at = 0; at < Number(args[1]); at++) text += this.characterAt(address + at);
+      this.push(text);
+      return;
+    }
+    if (procedureIndex === (InternalProcedure.STORE_C_STRING as number)) {
+      const text = String(args[0] ?? '').slice(0, Math.max(0, Number(args[2]))), address = Number(args[1]);
+      for (let at = 0; at < text.length; at++) this.poke(address + at, text[at]!);
+      this.poke(address + text.length, '\0');
+      return;
+    }
     if (procedureIndex === (InternalProcedure.COPY_TO_HEAP as number)) {
       const source = Number(args[0]), words = Number(args[1]);
       const copy = this.allocate(words, []);
@@ -1848,6 +1877,13 @@ export class Machine {
    * Get the value at a stack address
    * @param address - The stack address
    */
+  /** The character a Char cell or a byte of memory holds. */
+  private characterAt(address: number): string {
+    this.checkAddress(address);
+    const value = this.peek(address);
+    if (typeof value === 'string') return value.charAt(0) || '\0';
+    return String.fromCharCode(Number(value ?? 0) & 0xff);
+  }
   peek(address: number): StackValue {
     if (address < this.dstore.length) return this.dstore[address] ?? 0;
     if (address >= VIEW_BASE) return this.space.peek(address) ?? 0;

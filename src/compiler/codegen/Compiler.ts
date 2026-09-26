@@ -155,6 +155,13 @@ interface Variable {
   absolute?: number;
 }
 /** One scalar cell of a typed constant's initial value. */
+/** A zero-based array of Char that Read fills: its address, the string read
+ * and how many characters it takes. */
+interface NullTerminatedInput {
+  array: Variable;
+  text: Variable;
+  length: number;
+}
 interface StaticStore {
   offset: number;
   type: PascalType;
@@ -162,6 +169,9 @@ interface StaticStore {
   /** After the stores: a variant part of the record at `offset` follows the
    * case given. */
   sync?: { part: number; case: number };
+  /** Leaves the value on the stack when the program starts, for one known
+   * only then, such as a variable's offset in the data segment. */
+  compute?: () => void;
 }
 /** A record's field. One in a variant case lists the cases it is in, the
  * innermost first; a store into it brings those parts up to date. */
@@ -800,7 +810,11 @@ export class Compiler {
         const name = call.name.toLowerCase();
         if (this.lookupRoutine(call.name)) return false;
         const symbol = this.lookup(call.name);
-        if (symbol?.kind === 'type') return call.arguments.every((argument) => this.constantExpression(argument));
+        // A typecast to or from a pointer, as PRec(nil) or LongInt(nil), is a
+        // value but not a constant.
+        if (symbol?.kind === 'type')
+          return symbol.type.kind !== 'pointer' &&
+            call.arguments.every((argument) => this.constantExpression(argument) && this.expressionType(argument).kind !== 'pointer');
         if (symbol) return false;
         if (['sizeof', 'high', 'low'].includes(name)) {
           const argument = call.arguments[0];
@@ -1738,7 +1752,8 @@ export class Compiler {
             this.emit(Opcode.CSP, 3, InternalProcedure.VARIANT_SYNC);
             continue;
           }
-          this.literal(store.value, store.type);
+          if (store.compute) store.compute();
+          else this.literal(store.value, store.type);
           this.emit(Opcode.STI, this.typeCode(store.type));
         }
       }
@@ -1956,12 +1971,15 @@ export class Compiler {
       const element = type.element,
         count = (type.high ?? 0) - (type.low ?? 0) + 1;
       if (element.kind === 'char' && node.type !== NodeType.ARRAY_CONSTANT && count > 1) {
-        // An array of Char takes a string of exactly its length.
+        // An array of Char takes a string of exactly its length; under {$X+}
+        // a zero-based one takes a shorter string, and nulls after it.
         const text = this.constant(node);
-        if (!this.text(text.type) || String(text.value).length !== count)
+        const length = String(text.value).length;
+        const shorter = node.extendedSyntax !== false && type.low === 0 && length < count;
+        if (!this.text(text.type) || (length !== count && !shorter))
           this.fail(node, `String constant of length ${String(count)} expected`);
         for (let index = 0; index < count; index++) {
-          const value = String(text.value).charAt(index);
+          const value = String(text.value).charAt(index) || '\0';
           stores.push({ offset: offset + index * element.size, type: element, value });
         }
         return;
@@ -2024,11 +2042,17 @@ export class Compiler {
     if (type.kind === 'pointer' && node.type !== NodeType.NIL) {
       const text = this.charPointer(type) ? this.textConstant(node) : undefined;
       if (text === undefined) {
-        stores.push({ offset, type, value: this.staticAddress(node) });
+        stores.push({ offset, type, value: this.staticAddress(node, type) });
         return;
       }
       const block = this.staticText(text, node);
       stores.push(...block.stores, { offset, type, value: block.offset });
+      return;
+    }
+    const part = this.staticSegmentPart(node);
+    if (part) {
+      this.requireType(node, type, WORD);
+      stores.push({ offset, type, value: 0, compute: part });
       return;
     }
     const constant = this.constant(node);
@@ -2067,6 +2091,55 @@ export class Compiler {
     const value = this.constant(node);
     const text = this.text(value.type) || value.type.kind === 'char' ? String(value.value) : undefined;
     return text?.length === type.size ? text : undefined;
+  }
+  /** A packed string type, array[M..N] of Char with M < N: as a value it is
+   * the string of its N characters. */
+  private packedString(type: PascalType): boolean {
+    return type.kind === 'array' && !type.openArray && type.element?.kind === 'char' && type.size >= 2;
+  }
+  /** Under {$X+}, a zero-based array of Char, which holds a null-terminated string. */
+  private zeroBasedChars(type: PascalType, node: Node): boolean {
+    return node.extendedSyntax !== false && this.packedString(type) && type.low === 0;
+  }
+  /** With a packed string's address on the stack, its N characters as a string. */
+  private packedValue(type: PascalType): PascalType {
+    this.literal(type.size, INTEGER);
+    this.emit(Opcode.CSP, 2, InternalProcedure.PACKED_STRING);
+    return STRING;
+  }
+  /** Under {$X+}, a PChar or a zero-based array of Char where the standard
+   * procedures take text: the characters up to its null. Leaves them on the
+   * stack when the node is one. */
+  private emitNullTerminated(node: Node): boolean {
+    if (node.extendedSyntax === false) return false;
+    const type = this.expressionType(node);
+    if (this.charPointer(type)) this.expression(node);
+    else if (this.zeroBasedChars(type, node)) this.address(node);
+    else return false;
+    this.emit(Opcode.CSP, 1, InternalProcedure.C_STRING);
+    return true;
+  }
+  /** Under {$X+} Read fills a zero-based array of Char, array[0..N], with up
+   * to N characters and a null. The line is read as a string, whose address
+   * this leaves on the stack; storeNullTerminated then copies it. */
+  private nullTerminatedInput(node: Node, type: PascalType): NullTerminatedInput {
+    this.requireWritable(node);
+    // The array is found before the input arrives, which can change its index.
+    const array = this.temp(POINTER);
+    this.addressVariable(array);
+    this.address(node);
+    this.emit(Opcode.STI, TypeCode.A);
+    const text = this.temp(STRING);
+    this.addressVariable(text);
+    return { array, text, length: type.size - 1 };
+  }
+  private storeNullTerminated(arrays: NullTerminatedInput[]): void {
+    for (const { array, text, length } of arrays) {
+      this.loadVariable(text);
+      this.loadVariable(array);
+      this.literal(length, INTEGER);
+      this.emit(Opcode.CSP, 3, InternalProcedure.STORE_C_STRING);
+    }
   }
   /** Under {$X+} a zero-based array of Char stands for a PChar to its first
    * character. Leaves that address on the stack when the node is one. */
@@ -2121,15 +2194,37 @@ export class Compiler {
   /** A pointer typed constant's value: the address of a global variable, a
    * typed constant, or a part of one, which is fixed when the program starts
    * since the program's frame begins at address 0. */
-  private staticAddress(node: Node): number {
+  private staticAddress(node: Node, type?: PascalType): number {
     if (node.type === NodeType.CALL) {
       // A typecast such as PString(@S) keeps the address.
       const { name, arguments: [operand, ...rest] } = node as CallNode;
       if (operand && !rest.length && this.lookup(name)?.kind === 'type')
         return this.staticAddress(operand);
     }
+    // Under {$X+} a PChar takes a zero-based array of Char, as its address.
+    if (type && this.charPointer(type) && node.extendedSyntax !== false && node.type !== NodeType.ADDRESS_OF) {
+      const location = this.staticLocation(node);
+      if (!this.zeroBasedChars(location.type, node)) this.fail(node, 'Type mismatch: expected pointer');
+      return location.offset;
+    }
     if (node.type !== NodeType.ADDRESS_OF) this.fail(node, 'Constant expression expected');
+    // @ of a procedure or function is its address, as @P gives it at run time.
+    const routine = this.routineAddress(node.operand as Node);
+    if (routine) return routine.proceduralId;
     return this.staticLocation(node.operand as Node).offset;
+  }
+  /** Ofs(X) or Seg(X) of a global variable or typed constant, or a part of
+   * one, in a typed constant: code that leaves it on the stack. */
+  private staticSegmentPart(node: Node): (() => void) | undefined {
+    if (node.type !== NodeType.CALL) return undefined;
+    const { name, arguments: [operand, ...rest] } = node as CallNode;
+    const part = name.toLowerCase();
+    if ((part !== 'ofs' && part !== 'seg') || !operand || rest.length || this.lookup(name)) return undefined;
+    const location = this.staticLocation(operand);
+    return () => {
+      this.emit(Opcode.LDA, 0, location.offset);
+      this.emit(Opcode.CSP, 1, part === 'ofs' ? BuiltinProcedure.OFS : BuiltinProcedure.SEG);
+    };
   }
   private staticLocation(node: Node): { offset: number; type: PascalType } {
     if (node.type === NodeType.IDENTIFIER) {
@@ -2719,8 +2814,16 @@ export class Compiler {
         if (['=', '<>', '<', '>', '<=', '>=', 'in'].includes(operator)) return BOOLEAN;
         const left = this.expressionType(binary.left),
           right = this.expressionType(binary.right);
-        if (operator === '+' && this.text(left) && this.text(right)) return STRING;
+        if (this.pcharOperands(binary, operator, left, right)) {
+          const leftPChar = !(left.kind === 'integer');
+          if (operator === '-' && leftPChar && right.kind !== 'integer') return WORD;
+          return { ...POINTER, base: CHAR };
+        }
+        const text = (type: PascalType) => this.text(type) || this.packedString(type);
+        if (operator === '+' && text(left) && text(right)) return STRING;
         if (operator === '-' && this.charPointer(left) && this.charPointer(right)) return WORD;
+        if (binary.extendedSyntax !== false && (operator === '+' || operator === '-') && this.charPointer(left)) return left;
+        if (binary.extendedSyntax !== false && operator === '+' && left.kind === 'integer' && this.charPointer(right)) return right;
         if (operator === '/' || left.kind === 'real' || right.kind === 'real')
           return this.coprocessorArithmetic(left, right) ? this.coprocessorResult(left, right) : REAL;
         if (left.kind === 'integer' && right.kind === 'integer')
@@ -2761,6 +2864,14 @@ export class Compiler {
       case NodeType.SET_LITERAL:
         return this.setLiteral(node);
       case NodeType.ADDRESS_OF: {
+        // @T(nil)^.Field is the pointer 0000:Offset.
+        const nilOffset = this.nilOffset(node.operand as Node);
+        if (nilOffset !== undefined) {
+          this.literal(0, WORD);
+          this.literal(nilOffset, WORD);
+          this.emit(Opcode.CSP, 2, BuiltinProcedure.PTR);
+          return node.typedPointer === true ? { ...POINTER, base: this.expressionType(node.operand as Node) } : POINTER;
+        }
         // @P of a procedure is a value ExitProc and procedural calls can use.
         const routine = this.routineAddress(node.operand as Node);
         if (routine) {
@@ -2785,6 +2896,7 @@ export class Compiler {
       case NodeType.POINTER_DEREF: {
         if (this.untypedPointer(this.expressionType(node.pointer as Node))) this.fail(node, 'Typed pointer required');
         const type = this.address(node);
+        if (this.packedString(type)) return this.packedValue(type);
         if (this.aggregate(type))
           this.fail(node, 'Aggregate pointer value requires an assignment or matching parameter');
         this.emit(Opcode.LDI, this.typeCode(type));
@@ -2806,6 +2918,7 @@ export class Compiler {
         }
         if (symbol?.kind === 'variable') {
           if (symbol.type.procedureSignature) return this.proceduralCall({ ...node, type: NodeType.CALL, name: String(node.name), arguments: [] }, true, { node, type: symbol.type });
+          if (this.packedString(symbol.type)) return this.packedValue(this.address(node));
           if (this.aggregate(symbol.type))
             this.fail(node, 'Array or record value requires an assignment or matching parameter');
           this.loadVariable(symbol);
@@ -2853,6 +2966,7 @@ export class Compiler {
           return CHAR;
         }
         const type = this.address(node);
+        if (this.packedString(type)) return this.packedValue(type);
         if (this.aggregate(type))
           this.fail(node, 'Array or record value requires an assignment or matching parameter');
         this.emit(Opcode.LDI, this.typeCode(type));
@@ -2865,6 +2979,7 @@ export class Compiler {
         if (this.expressionType(access.record).object?.methods.has(access.field.toLowerCase()))
           return this.call({ ...node, type: NodeType.CALL, name: access.field, receiver: access.record, arguments: [] }, true);
         const type = this.address(node);
+        if (this.packedString(type)) return this.packedValue(type);
         if (this.aggregate(type))
           this.fail(node, 'Array or record value requires an assignment or matching parameter');
         this.emit(Opcode.LDI, this.typeCode(type));
@@ -2917,9 +3032,29 @@ export class Compiler {
       this.exactContext = saved;
     }
   }
+  /** Under {$X+}, whether a zero-based array of Char is an operand of PChar
+   * arithmetic, P + I, I + P, P - I or P - Q, or is compared with a PChar. */
+  private pcharOperands(node: BinaryOpNode, operator: string, left: PascalType, right: PascalType): boolean {
+    if (node.extendedSyntax === false) return false;
+    const leftArray = this.zeroBasedChars(left, node.left), rightArray = this.zeroBasedChars(right, node.right);
+    if (!leftArray && !rightArray) return false;
+    const leftPChar = leftArray || this.charPointer(left), rightPChar = rightArray || this.charPointer(right);
+    const count = (type: PascalType) => type.kind === 'integer' && !type.enumeration;
+    if (operator === '+') return (leftPChar && count(right)) || (count(left) && rightPChar);
+    if (operator === '-') return leftPChar && (count(right) || rightPChar);
+    // Two arrays compare as packed strings.
+    return ['=', '<>', '<', '>', '<=', '>='].includes(operator) && (this.charPointer(left) || this.charPointer(right)) && leftPChar && rightPChar;
+  }
+  private pcharOperand(node: Node): PascalType {
+    return this.emitCharArrayPointer(node) ? { ...POINTER, base: CHAR } : this.expression(node);
+  }
   private binaryOperation(node: BinaryOpNode): PascalType {
     const operation = node.operator.toLowerCase();
-    if (!node.completeBooleanEvaluation && (operation === 'and' || operation === 'or') && this.expressionType(node.left).kind === 'boolean') {
+    const leftType = this.expressionType(node.left), rightType = this.expressionType(node.right);
+    // Two packed strings compare as strings only when they are as long.
+    if (['=', '<>', '<', '>', '<=', '>='].includes(operation) && this.packedString(leftType) && this.packedString(rightType) &&
+      leftType.size !== rightType.size) this.fail(node, 'Type mismatch');
+    if (!node.completeBooleanEvaluation && (operation === 'and' || operation === 'or') && leftType.kind === 'boolean') {
       this.requireType(node.right, BOOLEAN, this.expressionType(node.right));
       this.expression(node.left);
       const branch = this.emit(Opcode.FJP);
@@ -2930,17 +3065,24 @@ export class Compiler {
       this.patch(end);
       return BOOLEAN;
     }
-    const left = this.expression(node.left),
-      right = this.expression(node.right),
-      operator = node.operator.toLowerCase();
+    const operator = node.operator.toLowerCase();
+    // A zero-based array of Char there is a PChar to its first character.
+    const pchars = this.pcharOperands(node, operator, leftType, rightType);
+    const left = pchars ? this.pcharOperand(node.left) : this.expression(node.left),
+      right = pchars ? this.pcharOperand(node.right) : this.expression(node.right);
     this.line = node.lineNumber ?? this.line;
     // {$X+} moves a PChar by a count, or measures the distance between two.
-    if (node.extendedSyntax !== false && (operator === '+' || operator === '-') && this.charPointer(left)) {
-      if (right.kind === 'integer' && !right.enumeration) {
+    if (node.extendedSyntax !== false && (operator === '+' || operator === '-')) {
+      const count = (type: PascalType) => type.kind === 'integer' && !type.enumeration;
+      if (this.charPointer(left) && count(right)) {
         this.emit(operator === '+' ? Opcode.ADI : Opcode.SBI);
         return left;
       }
-      if (operator === '-' && this.charPointer(right)) {
+      if (operator === '+' && count(left) && this.charPointer(right)) {
+        this.emit(Opcode.ADI);
+        return right;
+      }
+      if (operator === '-' && this.charPointer(left) && this.charPointer(right)) {
         this.emit(Opcode.SBI);
         return WORD;
       }
@@ -3171,16 +3313,6 @@ export class Compiler {
       this.emit(Opcode.ADI);
       return field.type;
     }
-    const cast = this.untypedCast(node);
-    if (cast) {
-      this.castAddress(cast);
-      return cast.type;
-    }
-    const variableCast = this.variableCast(node);
-    if (variableCast) {
-      this.castView(variableCast);
-      return variableCast.type;
-    }
     const record = this.fileRecordCast(node);
     if (record) {
       // FileRec(F) and TextRec(F): a record of the file's state, as DOS and
@@ -3192,6 +3324,16 @@ export class Compiler {
       this.emit(Opcode.CSP, 3, 333);
       this.addressVariable(temp);
       return record.type;
+    }
+    const cast = this.untypedCast(node);
+    if (cast) {
+      this.castAddress(cast);
+      return cast.type;
+    }
+    const variableCast = this.variableCast(node);
+    if (variableCast) {
+      this.castView(variableCast);
+      return variableCast.type;
     }
     this.fail(node, 'Variable required');
   }
@@ -3420,6 +3562,37 @@ export class Compiler {
   private resultVariable(): Variable | undefined {
     for (const symbol of this.scope.symbols.values()) if (symbol.kind === 'variable' && symbol.result) return symbol;
     return undefined;
+  }
+  /** A variable reference within T(nil)^, as PRec(nil)^.Field: its byte
+   * offset, which Ofs and @ give without reading memory. Undefined for any
+   * other reference. */
+  private nilOffset(node: Node): number | undefined {
+    if (node.type === NodeType.FIELD_ACCESS) {
+      const access = node as FieldAccessNode;
+      const base = this.nilOffset(access.record);
+      if (base === undefined) return undefined;
+      const type = this.expressionType(access.record);
+      const field = type.kind === 'record' ? type.fields?.get(access.field.toLowerCase()) : undefined;
+      return field ? base + (field.byteOffset ?? this.byteOffset(type, field.offset)) : undefined;
+    }
+    if (node.type === NodeType.ARRAY_ACCESS) {
+      const access = node as ArrayAccessNode;
+      let offset = this.nilOffset(access.array);
+      let type = this.expressionType(access.array);
+      for (const index of access.indices) {
+        if (offset === undefined || type.kind !== 'array' || !type.element || !this.constantExpression(index)) return undefined;
+        offset += (this.ordinalValue(this.constant(index).value) - (type.low ?? 0)) * type.element.byteSize;
+        type = type.element;
+      }
+      return offset;
+    }
+    if (node.type !== NodeType.POINTER_DEREF) return undefined;
+    const pointer = node.pointer as Node;
+    if (pointer.type !== NodeType.CALL) return undefined;
+    const [value, ...rest] = (pointer as CallNode).arguments;
+    const cast = this.lookup((pointer as CallNode).name);
+    const zero = value?.type === NodeType.NIL || (value?.type === NodeType.NUMBER && Number(value.value) === 0);
+    return cast?.kind === 'type' && cast.type.kind === 'pointer' && zero && !rest.length ? 0 : undefined;
   }
   /** The byte offset of a cell within a type, in Turbo Pascal's layout. */
   private byteOffset(type: PascalType, cellOffset: number): number {
@@ -3750,13 +3923,16 @@ export class Compiler {
     if (JSON.stringify(this.binaryLayout(base)) === JSON.stringify(this.binaryLayout(source))) return undefined;
     return { type: base, operand, source };
   }
-  /** FileRec(F) or TextRec(F) of a file variable. */
+  /** FileRec(F) or TextRec(F) of a file variable, or of (@F)^, which is F
+   * with its type set aside. */
   private fileRecordCast(node: Node): { type: PascalType; operand: Node } | undefined {
     if (node.type !== NodeType.CALL) return undefined;
-    const { name, arguments: [operand, ...rest] } = node as CallNode;
+    const { name, arguments: [argument, ...rest] } = node as CallNode;
     const target = this.lookup(name);
-    if (!operand || rest.length || target?.kind !== 'type') return undefined;
+    if (!argument || rest.length || target?.kind !== 'type') return undefined;
     if (target.type !== this.unitType('dos', 'FileRec') && target.type !== this.unitType('dos', 'TextRec')) return undefined;
+    const pointer = argument.type === NodeType.POINTER_DEREF ? (argument.pointer as Node) : undefined;
+    const operand = pointer?.type === NodeType.ADDRESS_OF ? (pointer.operand as Node) : argument;
     return this.expressionType(operand).kind === 'file' ? { type: target.type, operand } : undefined;
   }
   /** A typecast T(x) of an untyped parameter x, which gives it a type. */
@@ -3953,7 +4129,9 @@ export class Compiler {
       const source = this.expression(node.arguments[0]!);
       // A pointer typecast keeps the address and changes what it points to.
       if (target.kind === 'pointer' && source.kind === 'pointer') return target;
-      if (!this.ordinal(target) || !this.ordinal(source))
+      // LongInt(@Buffer): a pointer's segment and offset, as a number.
+      if (source.kind === 'pointer' && this.ordinal(target)) this.emit(Opcode.CSP, 1, InternalProcedure.POINTER_BITS);
+      else if (!this.ordinal(target) || !this.ordinal(source))
         this.fail(node, 'Ordinal typecast required');
       const bits = target.byteSize * 8,
         signed = (target.low ?? 0) < 0;
@@ -4021,6 +4199,12 @@ export class Compiler {
       this.fail(node, 'Procedure cannot be used as an expression');
     if (!expression && builtin.isFunction)
       return this.discardResult(node, this.builtinReturn(builtin, args), () => this.builtin(node, builtin, true));
+    // Ofs and Seg of a field of T(nil)^ are the field's offset and 0.
+    const nilOffset = (name === 'ofs' || name === 'seg') && args.length === 1 ? this.nilOffset(args[0]!) : undefined;
+    if (nilOffset !== undefined) {
+      this.literal(name === 'ofs' ? nilOffset : 0, WORD);
+      return WORD;
+    }
     if (name === 'new' || name === 'dispose') {
       if (args.length < 1 || args.length > 2) this.fail(node, `Wrong number of arguments for "${node.name}"`);
       let pointerNode = args[0]!;
@@ -4261,7 +4445,8 @@ export class Compiler {
       if (type.kind !== 'file') this.fail(args[0]!, 'File variable required');
       let count = 1;
       for (const arg of args.slice(1)) {
-        this.expression(arg);
+        // A file name may be a PChar or a zero-based array of Char under {$X+}.
+        if (!((name === 'assign' || name === 'rename') && this.emitNullTerminated(arg))) this.expression(arg);
         count++;
       }
       if (name === 'assign') {
@@ -4288,8 +4473,14 @@ export class Compiler {
     }
     if (name === 'read' || name === 'readln') {
       const checked: { argument: Node; type: PascalType; address: Variable }[] = [];
+      const arrays: NullTerminatedInput[] = [];
       for (const arg of args) {
         const type = this.expressionType(arg);
+        if (this.zeroBasedChars(type, arg)) {
+          arrays.push(this.nullTerminatedInput(arg, type));
+          this.literal(TypeCode.S, INTEGER);
+          continue;
+        }
         if (this.aggregate(type) || type.kind === 'pointer')
           this.fail(arg, 'Read requires a scalar or string variable');
         this.requireWritable(arg);
@@ -4318,6 +4509,7 @@ export class Compiler {
         this.checkRange(type, argument);
         this.emit(Opcode.STI, this.typeCode(type));
       }
+      this.storeNullTerminated(arrays);
       this.bytecode.ioErrorTargets[readCall] = this.bytecode.getNextAddress();
       return VOID;
     }
@@ -4750,12 +4942,20 @@ export class Compiler {
         this.fail(value, 'Str requires a numeric argument');
       this.outputArgument(args[0]!);
       this.requireWritable(args[1]!);
+      const target = this.expressionType(args[1]!);
+      // Under {$X+} Str fills a zero-based array of Char, then a null.
+      if (this.zeroBasedChars(target, args[1]!)) {
+        this.address(args[1]!);
+        this.literal(target.size - 1, INTEGER);
+        this.emit(Opcode.CSP, 3, InternalProcedure.STORE_C_STRING);
+        return VOID;
+      }
       const type = this.address(args[1]!);
       this.requireType(args[1]!, STRING, type);
       this.stringCapacity(type);
       this.emit(Opcode.CSP, 3, builtin.procedureIndex);
     } else {
-      this.requireType(args[0]!, STRING, this.expression(args[0]!));
+      if (!this.emitNullTerminated(args[0]!)) this.requireType(args[0]!, STRING, this.expression(args[0]!));
       this.requireWritable(args[1]!);
       this.requireWritable(args[2]!);
       const type = this.address(args[1]!);
@@ -4818,7 +5018,14 @@ export class Compiler {
       this.emit(Opcode.CSP, args.length + 1, name === 'write' ? 70 : 71);
     } else {
       const targets: { pointer: Variable; type: PascalType; node: Node }[] = [];
+      const arrays: NullTerminatedInput[] = [];
       for (const arg of args) {
+        const array = this.expressionType(arg);
+        if (this.zeroBasedChars(array, arg)) {
+          arrays.push(this.nullTerminatedInput(arg, array));
+          this.literal(TypeCode.S, INTEGER);
+          continue;
+        }
         this.requireWritable(arg);
         const pointer = this.temp(POINTER);
         this.addressVariable(pointer);
@@ -4832,6 +5039,7 @@ export class Compiler {
       }
       const readCall = this.emit(Opcode.CSP, args.length * 2 + 1, name === 'read' ? 72 : 73);
       for (const target of targets) this.validateInput(target.pointer, target.type, target.node);
+      this.storeNullTerminated(arrays);
       this.bytecode.ioErrorTargets[readCall] = this.bytecode.getNextAddress();
     }
     return VOID;
@@ -4841,8 +5049,9 @@ export class Compiler {
     // Formatting is a parser node only within Write/WriteLn arguments.
     const formatted = (node.type as string) === 'formattedArgument';
     const value = formatted ? (node.value as Node) : node;
-    // Written as text, a real shows all of Extended's digits.
-    const type = this.inExactContext(this.coprocessorMode(), () => this.expression(value));
+    // Written as text, a real shows all of Extended's digits. Under {$X+} a
+    // PChar and a zero-based array of Char are written up to their null.
+    const type = this.emitNullTerminated(value) ? STRING : this.inExactContext(this.coprocessorMode(), () => this.expression(value));
     if (this.aggregate(type) || ['pointer', 'file', 'set'].includes(type.kind))
       this.fail(node, 'Write requires a scalar or string value');
     // Under {$N+} every real is written by the 8087 routine, as Extended.

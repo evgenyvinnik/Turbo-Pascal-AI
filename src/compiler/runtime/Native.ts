@@ -50,6 +50,18 @@ export enum InternalProcedure {
   /** Port[P] and PortW[P]: an address that reads and writes an I/O port,
    * from the port and how many bytes it moves. */
   PORT = 911,
+  /** The characters from an address up to a null: a PChar, or under {$X+} a
+   * zero-based array of Char, as the text it holds. */
+  C_STRING = 912,
+  /** The characters of a packed string type, array[M..N] of Char, from its
+   * address and N: a string of all of them. */
+  PACKED_STRING = 913,
+  /** Stores text in a zero-based array of Char, then a null: the text, the
+   * array's address and the most characters it takes. */
+  STORE_C_STRING = 914,
+  /** A pointer value as the 32 bits of its segment and offset, for a value
+   * typecast such as LongInt(@Buffer). */
+  POINTER_BITS = 915,
 }
 
 /**
