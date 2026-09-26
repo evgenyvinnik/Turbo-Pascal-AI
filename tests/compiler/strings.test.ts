@@ -123,6 +123,17 @@ describe('address expressions in typed constants', () => {
       /Address of a global variable expected/
     );
   });
+
+  it('take the address of a character of a global string or string typed constant', () => {
+    expect(
+      execute(`program T; const s: string = 'test'; pc: PChar = @s[1]; pd: PChar = PChar(@s[3]);
+      var g: string[10]; const pg: ^Char = @g[2];
+      begin g := 'hello'; WriteLn(pc[0], pc[1], ' ', pd^, ' ', pg^); s[1] := 'b'; WriteLn(pc^) end.`)
+    ).toEqual(['te s e', 'b']);
+    expect(() => compile(`program T; const s: string[4] = 'test'; pc: PChar = @s[9]; begin end.`)).toThrow(
+      /Constant out of range/
+    );
+  });
 });
 
 describe('variable references from pointer expressions', () => {
