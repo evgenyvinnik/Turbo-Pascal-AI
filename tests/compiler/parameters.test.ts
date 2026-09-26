@@ -34,6 +34,16 @@ describe('Parameter forms', () => {
     rejected('Change(n)', 'procedure Change(var x); begin end;');
   });
 
+  it('keeps the fields WITH gives of a const record parameter from changing', () => {
+    const source = (body: string) => `program T; type PR = ^R; I = record n: Integer end;
+      R = record q: PR; ofs: LongInt; a: array[1..2] of Byte; inner: I end;
+      procedure P(const r: R); var x: LongInt; begin ${body} end;
+      var v, w: R; begin v.q := @w; v.ofs := 4; P(v); WriteLn(w.ofs) end.`;
+    for (const body of ['with r do ofs := ofs + 1', 'with r do Inc(a[1])', 'with r do with inner do n := 1', 'with r do ReadLn(ofs)'])
+      expect(() => compile(source(body))).toThrow(/Constant parameter "r" cannot be modified/);
+    expect(execute(source('with r do begin x := ofs + 1; WriteLn(x) end; with r.q^ do ofs := 9'))).toEqual(['5', '9']);
+  });
+
   it('lets a const pointer parameter write through the pointer', () => {
     expect(
       execute(`program T; type PInt = ^Integer; var v: Integer;

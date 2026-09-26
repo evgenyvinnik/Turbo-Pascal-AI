@@ -146,8 +146,10 @@ interface Variable {
   containerType?: PascalType;
   /** A typed constant: program-lifetime storage, whatever scope names it. */
   static?: boolean;
-  /** A `const` parameter. */
+  /** A `const` parameter, or a field WITH gives of one. */
   readOnly?: boolean;
+  /** For a field WITH gives of a const parameter: the parameter's name. */
+  constantName?: string;
   /** Declared under $A+: a variable larger than a byte starts on an even
    * address. */
   aligned?: boolean;
@@ -225,7 +227,9 @@ interface Scope {
   name: string;
   /** `uses` are the goto statements that jump to the label. */
   labels: Map<string, { node: Node; address?: number; patches: number[]; uses: Node[] }>;
-  withRecords: { pointer: Variable; type: PascalType }[];
+  /** `constant` names the const parameter a record lies in, whose fields
+   * WITH gives cannot be changed either. */
+  withRecords: { pointer: Variable; type: PascalType; constant?: string }[];
   parent: Scope | null;
   level: number;
   /** On a module's outermost scope: the module is compiled for the 8087. */
@@ -635,6 +639,7 @@ export class Compiler {
           container: record.pointer,
           containerType: record.type,
           ...(field.variants ? { variants: field.variants } : {}),
+          ...(record.constant === undefined ? {} : { readOnly: true, constantName: record.constant }),
         };
     }
     const [qualifier, member] = name.toLowerCase().split('.');
@@ -2042,7 +2047,9 @@ export class Compiler {
     if (type.kind === 'pointer' && node.type !== NodeType.NIL) {
       const text = this.charPointer(type) ? this.textConstant(node) : undefined;
       if (text === undefined) {
-        stores.push({ offset, type, value: this.staticAddress(node, type) });
+        const character = this.staticStringCharacter(node);
+        if (character) stores.push({ offset, type, value: 0, compute: character });
+        else stores.push({ offset, type, value: this.staticAddress(node, type) });
         return;
       }
       const block = this.staticText(text, node);
@@ -2213,6 +2220,31 @@ export class Compiler {
     if (routine) return routine.proceduralId;
     return this.staticLocation(node.operand as Node).offset;
   }
+  /** @S[I] of a global string or string typed constant, in a typed constant:
+   * code that leaves the character's address on the stack when the program
+   * starts, since a string's characters have no address until then. */
+  private staticStringCharacter(node: Node): (() => void) | undefined {
+    while (node.type === NodeType.CALL) {
+      const { name, arguments: [operand, ...rest] } = node as CallNode;
+      if (!operand || rest.length || this.lookup(name)?.kind !== 'type') return undefined;
+      node = operand;
+    }
+    if (node.type !== NodeType.ADDRESS_OF) return undefined;
+    const access = node.operand as Node;
+    if (access.type !== NodeType.ARRAY_ACCESS) return undefined;
+    const { array, indices: [index, ...more] } = access as ArrayAccessNode;
+    if (!index || more.length || this.expressionType(array).kind !== 'string') return undefined;
+    const location = this.staticLocation(array);
+    if (!this.constantExpression(index)) this.fail(index, 'Constant expression expected');
+    const position = this.ordinalValue(this.constant(index).value);
+    if (position < 0 || position > (location.type.capacity ?? 255)) this.fail(index, 'Constant out of range');
+    return () => {
+      this.emit(Opcode.LDA, 0, location.offset);
+      this.literal(position, INTEGER);
+      this.stringCapacity(location.type);
+      this.emit(Opcode.CSP, 3, InternalProcedure.STRING_CHARACTER_ADDRESS);
+    };
+  }
   /** Ofs(X) or Seg(X) of a global variable or typed constant, or a part of
    * one, in a typed constant: code that leaves it on the stack. */
   private staticSegmentPart(node: Node): (() => void) | undefined {
@@ -2307,7 +2339,8 @@ export class Compiler {
           const type = this.address(record);
           if (type.kind !== 'record') this.fail(record, 'WITH requires a record');
           this.emit(Opcode.STI, TypeCode.A);
-          this.scope.withRecords.push({ pointer, type });
+          const constant = this.constantRoot(record);
+          this.scope.withRecords.push({ pointer, type, ...(constant === undefined ? {} : { constant }) });
         }
         if (node.body) this.statement(node.body as Node);
         this.scope.withRecords.length = count;
@@ -3943,18 +3976,25 @@ export class Compiler {
     if (!operand || rest.length || target?.kind !== 'type') return undefined;
     return this.expressionType(operand).kind === 'untyped' ? { type: target.type, operand } : undefined;
   }
-  /** A const parameter cannot be assigned, or passed where it could change.
-   * Writing through a pointer it holds is allowed. */
+  /** A const parameter cannot be assigned, or passed where it could change,
+   * nor can a part of one, or a field WITH gives of one. Writing through a
+   * pointer it holds is allowed. */
   private requireWritable(node: Node): void {
+    const constant = this.constantRoot(node);
+    if (constant !== undefined) this.fail(node, `Constant parameter "${constant}" cannot be modified`);
+  }
+  /** The const parameter a variable reference lies in, if it lies in one. */
+  private constantRoot(node: Node): string | undefined {
     node = this.qualified(node);
     if (node.type === NodeType.IDENTIFIER) {
       const symbol = this.lookup(String(node.name));
-      if (symbol?.kind === 'variable' && symbol.readOnly)
-        this.fail(node, `Constant parameter "${String(node.name)}" cannot be modified`);
-    } else if (node.type === NodeType.ARRAY_ACCESS) this.requireWritable((node as ArrayAccessNode).array);
-    else if (node.type === NodeType.FIELD_ACCESS) this.requireWritable((node as FieldAccessNode).record);
-    else if (node.type === NodeType.CALL && (node as CallNode).arguments.length === 1)
-      this.requireWritable((node as CallNode).arguments[0]!);
+      if (symbol?.kind !== 'variable' || !symbol.readOnly) return undefined;
+      return symbol.constantName ?? String(node.name);
+    }
+    if (node.type === NodeType.ARRAY_ACCESS) return this.constantRoot((node as ArrayAccessNode).array);
+    if (node.type === NodeType.FIELD_ACCESS) return this.constantRoot((node as FieldAccessNode).record);
+    if (node.type === NodeType.CALL && (node as CallNode).arguments.length === 1) return this.constantRoot((node as CallNode).arguments[0]!);
+    return undefined;
   }
 
   private proceduralValue(node: Node): PascalType {
