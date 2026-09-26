@@ -307,6 +307,22 @@ test.describe('compiler', () => {
     expect(screen).toMatch(/division by zero/i);
   });
 
+  test('the timer interrupt ticks while Program input waits for a line', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.typeSource(
+      'program Clock; uses Dos; var Ticks: Word; Old: Pointer; S: string;\nprocedure Tick; interrupt; begin Inc(Ticks) end;\nbegin\n  GetIntVec($1C, Old); SetIntVec($1C, @Tick); Ticks := 0;\n  ReadLn(S); SetIntVec($1C, Old); WriteLn(S, Ticks >= 10);\nend.'
+    );
+    await ide.press('Control+F9');
+    await ide.waitForDialog('Compiling');
+    await ide.press('Enter');
+    await ide.waitForDialog('Program input');
+    // Eighteen ticks a second, while the dialog asks.
+    await page.waitForTimeout(1_000);
+    await ide.type('ticked ');
+    await ide.press('Enter');
+    await ide.waitForText('ticked TRUE');
+  });
+
   test('an infinite loop yields to the UI and can be reset', async ({ page }) => {
     const ide = await Ide.open(page);
     await ide.typeSource(

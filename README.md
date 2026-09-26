@@ -374,7 +374,8 @@ An `interrupt` procedure, of `Word` register parameters from `Flags` to `BP`
 (or only the last of them), installed with `SetIntVec`, handles `INT` from
 assembly, getting the registers and giving back what it changes; interrupts
 08h and 1Ch tick 18.2 times a second, while the program runs and while it
-waits in `ReadKey`, `Read` or `Delay`, and 09h comes with each key. Data
+waits in `ReadKey`, `Read` or `Delay`, on the program screen or in the
+Program input box, and 09h comes with each key. Data
 directives, calls to Pascal routines from assembly, BCD and 386 instructions
 are beyond it: such a program opens the native compiler instead.
 

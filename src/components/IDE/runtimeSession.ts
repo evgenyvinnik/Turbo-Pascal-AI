@@ -345,6 +345,30 @@ function fail(session: Session, error: unknown): void {
     );
 }
 
+/** While the Program input dialog waits for a line, run the program's
+ * timer interrupt procedure at each tick, as the PC's timer does. Giving the
+ * line, or stopping, schedules the program in place of this. */
+function tickWhileAsking(session: Session): void {
+  const tick = session.machine.nextTimerTick();
+  if (tick === undefined) return;
+  if (session.timer !== null) clearTimeout(session.timer);
+  session.timer = setTimeout(
+    () => {
+      session.timer = null;
+      if (current !== session) return;
+      try {
+        session.debugger.runSlice(5_000);
+        publish(session);
+        if (session.debugger.isPaused()) paused(session);
+        else if (session.machine.getState() === MachineState.WAITING) tickWhileAsking(session);
+      } catch (error) {
+        fail(session, error);
+      }
+    },
+    Math.max(1, tick - Date.now())
+  );
+}
+
 /** Run the program's next slice after `delay`, in place of any pending. */
 function schedule(session: Session, delay = 0): void {
   if (session.timer !== null) clearTimeout(session.timer);
@@ -374,6 +398,8 @@ function schedule(session: Session, delay = 0): void {
           if (tick !== undefined) schedule(session, Math.max(1, tick - Date.now()));
           return;
         }
+        // The timer interrupt procedure runs on while the dialog asks.
+        tickWhileAsking(session);
         useDialogStore
           .getState()
           .open(inputDialog(session.machine.getOutput()), {}, (result, values) => {
