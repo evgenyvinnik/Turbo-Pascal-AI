@@ -38,10 +38,7 @@ export async function readFile(path: string): Promise<FileRecord | undefined> {
 /**
  * Update the content of an existing file
  */
-export async function updateFile(
-  path: string,
-  content: string
-): Promise<FileRecord | undefined> {
+export async function updateFile(path: string, content: string): Promise<FileRecord | undefined> {
   const file = await db.files.get(path);
   if (!file) {
     return undefined;
@@ -78,10 +75,7 @@ export async function deleteFile(path: string): Promise<void> {
 /**
  * Create a new directory in the database
  */
-export async function createDirectory(
-  path: string,
-  name: string
-): Promise<DirectoryRecord> {
+export async function createDirectory(path: string, name: string): Promise<DirectoryRecord> {
   const now = Date.now();
   const parentPath = path.substring(0, path.lastIndexOf('/')) || null;
 
@@ -115,14 +109,9 @@ export async function deleteDirectory(path: string): Promise<void> {
 /**
  * List all files and directories in a given parent path
  */
-export async function listDirectory(
-  parentPath: string
-): Promise<FileSystemNode[]> {
+export async function listDirectory(parentPath: string): Promise<FileSystemNode[]> {
   const files = await db.files.where('parentPath').equals(parentPath).toArray();
-  const directories = await db.directories
-    .where('parentPath')
-    .equals(parentPath)
-    .toArray();
+  const directories = await db.directories.where('parentPath').equals(parentPath).toArray();
 
   return [...directories, ...files].sort((a, b) => {
     // Directories first, then files
@@ -137,10 +126,7 @@ export async function listDirectory(
 /**
  * Move a file or directory to a new location
  */
-export async function moveNode(
-  sourcePath: string,
-  destPath: string
-): Promise<void> {
+export async function moveNode(sourcePath: string, destPath: string): Promise<void> {
   // Check if source is a file
   const file = await db.files.get(sourcePath);
   if (file) {
@@ -182,14 +168,8 @@ export async function moveNode(
     const newName = destPath.substring(destPath.lastIndexOf('/') + 1);
 
     // Get all items that need to be moved (files and subdirectories)
-    const filesToMove = await db.files
-      .where('parentPath')
-      .startsWith(sourcePath)
-      .toArray();
-    const dirsToMove = await db.directories
-      .where('parentPath')
-      .startsWith(sourcePath)
-      .toArray();
+    const filesToMove = await db.files.where('parentPath').startsWith(sourcePath).toArray();
+    const dirsToMove = await db.directories.where('parentPath').startsWith(sourcePath).toArray();
 
     // Update all files
     for (const f of filesToMove) {
@@ -216,9 +196,7 @@ export async function moveNode(
     // Update all subdirectories
     for (const d of dirsToMove) {
       const newDirPath = d.path.replace(sourcePath, destPath);
-      const newDirParentPath = d.parentPath
-        ? d.parentPath.replace(sourcePath, destPath)
-        : null;
+      const newDirParentPath = d.parentPath ? d.parentPath.replace(sourcePath, destPath) : null;
       await db.directories.delete(d.path);
       await db.directories.put({
         ...d,
@@ -243,10 +221,7 @@ export async function moveNode(
 /**
  * Rename a file or directory
  */
-export async function renameNode(
-  path: string,
-  newName: string
-): Promise<void> {
+export async function renameNode(path: string, newName: string): Promise<void> {
   const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
   const newPath = parentPath === '/' ? `/${newName}` : `${parentPath}/${newName}`;
 
@@ -268,11 +243,7 @@ export async function pathExists(path: string): Promise<boolean> {
  * Get recent files ordered by access time
  */
 export async function getRecentFiles(limit: number = 10): Promise<FileRecord[]> {
-  const recentRecords = await db.recentFiles
-    .orderBy('accessedAt')
-    .reverse()
-    .limit(limit)
-    .toArray();
+  const recentRecords = await db.recentFiles.orderBy('accessedAt').reverse().limit(limit).toArray();
 
   const files: FileRecord[] = [];
   for (const record of recentRecords) {
@@ -300,9 +271,7 @@ export async function addToRecentFiles(path: string): Promise<void> {
  */
 export async function searchFiles(pattern: string): Promise<FileRecord[]> {
   const lowerPattern = pattern.toLowerCase();
-  return db.files
-    .filter((file) => file.name.toLowerCase().includes(lowerPattern))
-    .toArray();
+  return db.files.filter((file) => file.name.toLowerCase().includes(lowerPattern)).toArray();
 }
 
 /**

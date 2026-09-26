@@ -36,9 +36,9 @@ export enum GraphicsDriver {
  * Graphics mode constants for VGA
  */
 export enum GraphicsMode {
-  VGALo = 0,    // 640x200, 16 colors
-  VGAMed = 1,   // 640x350, 16 colors
-  VGAHi = 2,    // 640x480, 16 colors
+  VGALo = 0, // 640x200, 16 colors
+  VGAMed = 1, // 640x350, 16 colors
+  VGAHi = 2, // 640x480, 16 colors
 }
 
 /**
@@ -323,9 +323,7 @@ export const GRAPH_INIT_PROCS: BuiltinDef[] = [
     name: 'GraphErrorMsg',
     isFunction: true,
     returnType: TypeKind.STRING,
-    params: [
-      { name: 'ErrorCode', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'ErrorCode', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Return an error message string for a graphics error code',
     procedureIndex: GraphProcedure.GRAPHERRORMSG,
   },
@@ -338,9 +336,7 @@ export const GRAPH_COLOR_PROCS: BuiltinDef[] = [
   {
     name: 'SetColor',
     isFunction: false,
-    params: [
-      { name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Set the current drawing color',
     procedureIndex: GraphProcedure.SETCOLOR,
   },
@@ -355,9 +351,7 @@ export const GRAPH_COLOR_PROCS: BuiltinDef[] = [
   {
     name: 'SetBkColor',
     isFunction: false,
-    params: [
-      { name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Set the background color',
     procedureIndex: GraphProcedure.SETBKCOLOR,
   },
@@ -619,9 +613,7 @@ export const GRAPH_TEXT_PROCS: BuiltinDef[] = [
   {
     name: 'OutText',
     isFunction: false,
-    params: [
-      { name: 'TextString', type: TypeKind.STRING, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'TextString', type: TypeKind.STRING, mode: ParamMode.VALUE }],
     description: 'Output text at the current position',
     procedureIndex: GraphProcedure.OUTTEXT,
   },
@@ -673,9 +665,7 @@ export const GRAPH_TEXT_PROCS: BuiltinDef[] = [
     name: 'TextWidth',
     isFunction: true,
     returnType: TypeKind.INTEGER,
-    params: [
-      { name: 'TextString', type: TypeKind.STRING, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'TextString', type: TypeKind.STRING, mode: ParamMode.VALUE }],
     description: 'Return the width of a text string in pixels',
     procedureIndex: GraphProcedure.TEXTWIDTH,
   },
@@ -683,9 +673,7 @@ export const GRAPH_TEXT_PROCS: BuiltinDef[] = [
     name: 'TextHeight',
     isFunction: true,
     returnType: TypeKind.INTEGER,
-    params: [
-      { name: 'TextString', type: TypeKind.STRING, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'TextString', type: TypeKind.STRING, mode: ParamMode.VALUE }],
     description: 'Return the height of a text string in pixels',
     procedureIndex: GraphProcedure.TEXTHEIGHT,
   },

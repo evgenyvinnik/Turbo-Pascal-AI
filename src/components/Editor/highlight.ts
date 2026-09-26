@@ -7,7 +7,7 @@ const RESERVED = new Set(
     'initialization inline interface interrupt label library mod near nil not object of or ' +
     'packed private procedure program public record repeat set shl shr string then to type unit ' +
     'until uses var virtual while with xor finalization'
-  ).split(' '),
+  ).split(' ')
 );
 
 export const isReserved = (word: string): boolean => RESERVED.has(word.toLowerCase());

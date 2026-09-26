@@ -1,15 +1,21 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
 
-test('file picker displays both columns, scrolls by columns, and opens the clicked file', async ({ page }) => {
+test('file picker displays both columns, scrolls by columns, and opens the clicked file', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await page.evaluate(() => {
     const transfer = new DataTransfer();
     for (let index = 0; index < 21; index += 1) {
       const name = `A${String(index).padStart(2, '0')}`;
-      transfer.items.add(new File([`program ${name};\nbegin WriteLn(${String(index)}) end.`], `${name}.PAS`));
+      transfer.items.add(
+        new File([`program ${name};\nbegin WriteLn(${String(index)}) end.`], `${name}.PAS`)
+      );
     }
-    document.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    document.dispatchEvent(
+      new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
+    );
   });
   await expect(ide.row(1)).toContainText('A20.PAS');
   await ide.press('F3');

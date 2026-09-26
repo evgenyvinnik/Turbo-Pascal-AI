@@ -59,16 +59,14 @@ export function openLocalMenu(col?: number, row?: number): void {
   const window = useDesktopStore.getState().activeWindow();
   if (window?.kind !== 'edit') return;
   useMenuStore.getState().close();
-  usePopupStore
-    .getState()
-    .show({
-      kind: 'local',
-      rect: {
-        x: Math.max(0, Math.min(45, col ?? window.rect.x + 1)),
-        y: Math.max(1, Math.min(8, row ?? window.rect.y + 1)),
-        w: 33,
-        h: 16,
-      },
-      selected: 0,
-    });
+  usePopupStore.getState().show({
+    kind: 'local',
+    rect: {
+      x: Math.max(0, Math.min(45, col ?? window.rect.x + 1)),
+      y: Math.max(1, Math.min(8, row ?? window.rect.y + 1)),
+      w: 33,
+      h: 16,
+    },
+    selected: 0,
+  });
 }

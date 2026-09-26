@@ -20,14 +20,26 @@ afterEach(() => vi.unstubAllGlobals());
 describe('atomic browser file imports', () => {
   it('commits DOS replacements and deletions together at full capacity', async () => {
     const disk = await diskWith({ 'OLD.BIN': 'a'.repeat(8 * 1024 * 1024 - 1), 'KEPT.BIN': 'b' });
-    disk.applyProgramFileChanges(new Map([['KEPT.BIN', 'expanded'], ['OLD.BIN', null]]));
+    disk.applyProgramFileChanges(
+      new Map([
+        ['KEPT.BIN', 'expanded'],
+        ['OLD.BIN', null],
+      ])
+    );
     expect(disk.programDisk.snapshot()).toEqual({ 'KEPT.BIN': 'expanded' });
     expect(JSON.parse(disk.values.get(diskKey)!)).toEqual({ 'KEPT.BIN': 'expanded' });
   });
 
   it('keeps all DOS changes uncommitted when browser storage rejects them', async () => {
     const disk = await diskWith({ 'KEPT.BIN': '\0ÿ', 'OLD.TXT': 'old' }, true);
-    expect(() => { disk.applyProgramFileChanges(new Map([['NEW.BIN', 'new'], ['OLD.TXT', null]])); }).toThrow(/Browser storage/);
+    expect(() => {
+      disk.applyProgramFileChanges(
+        new Map([
+          ['NEW.BIN', 'new'],
+          ['OLD.TXT', null],
+        ])
+      );
+    }).toThrow(/Browser storage/);
     expect(disk.programDisk.snapshot()).toEqual({ 'KEPT.BIN': '\0ÿ', 'OLD.TXT': 'old' });
   });
   it('preserves the disk when browser persistence rejects a complete batch', async () => {

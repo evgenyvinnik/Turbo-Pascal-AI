@@ -6,8 +6,24 @@ import type { TPWindow } from '@stores/desktopStore';
 import { helpEmphasis, isReferenceHelp, helpCaretColumn } from '@components/IDE/helpNavigation';
 import { C } from '@/tui/palette';
 
-const LEFT = ['Built-in Assembler', 'Command Line', 'Debugging', 'Directives', 'Error Messages', 'ObjectBrowser', 'ObjectWindows'];
-const RIGHT = ['Reserved Words', 'Sample Programs', 'Start-Up Options', 'Turbo Vision', 'Units', 'Glossary', 'Windows API'];
+const LEFT = [
+  'Built-in Assembler',
+  'Command Line',
+  'Debugging',
+  'Directives',
+  'Error Messages',
+  'ObjectBrowser',
+  'ObjectWindows',
+];
+const RIGHT = [
+  'Reserved Words',
+  'Sample Programs',
+  'Start-Up Options',
+  'Turbo Vision',
+  'Units',
+  'Glossary',
+  'Windows API',
+];
 
 /**
  * The "PASCAL HELP CONTENTS" page: a framed index with a shadow, drawn at the
@@ -43,7 +59,10 @@ function paintContents(scr: Screen, cx: number, cy: number): void {
   scr.put(divider, bottom, '╧', line);
 
   scr.vLine(right + 1, cy + 1, bottom - cy, ' ', TP.helpShadow);
-  scr.hLine(left + 1, bottom + 1, right - left + 1, '▀', { fg: TP.helpShadow.fg, bg: TP.helpText.bg });
+  scr.hLine(left + 1, bottom + 1, right - left + 1, '▀', {
+    fg: TP.helpShadow.fg,
+    bg: TP.helpText.bg,
+  });
 
   const text = TP.helpText;
   scr.write(cx + 4, cy + 1, 'How to Use Help', text);
@@ -59,7 +78,7 @@ export function paintHelpWindow(
   win: TPWindow,
   active: boolean,
   topic: string,
-  lines: string[],
+  lines: string[]
 ): { col: number; row: number; fat: false } | null {
   paintFrame(scr, {
     rect: win.rect,
@@ -80,18 +99,49 @@ export function paintHelpWindow(
     paintContents(scr, client.x, client.y);
   } else {
     const inset = isReferenceHelp(topic) ? 0 : 1;
-    paintHelpText(scr, client.x + inset, client.y, client.w - inset, client.h, lines, topic, win.scroll);
+    paintHelpText(
+      scr,
+      client.x + inset,
+      client.y,
+      client.w - inset,
+      client.h,
+      lines,
+      topic,
+      win.scroll
+    );
   }
-  return active ? { col: client.x + (isReferenceHelp(topic) ? 0 : 1) + helpCaretColumn(topic, win.selected), row: client.y + Math.max(0, Math.min(client.h - 1, win.selected - win.scroll)), fat: false } : null;
+  return active
+    ? {
+        col: client.x + (isReferenceHelp(topic) ? 0 : 1) + helpCaretColumn(topic, win.selected),
+        row: client.y + Math.max(0, Math.min(client.h - 1, win.selected - win.scroll)),
+        fat: false,
+      }
+    : null;
 }
 
 /** Ordinary prose is black; yellow and white spans identify Help keywords. */
-export function paintHelpText(scr: Screen, x: number, y: number, width: number, height: number, lines: string[], topic: string, scroll: number): void {
+export function paintHelpText(
+  scr: Screen,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  lines: string[],
+  topic: string,
+  scroll: number
+): void {
   const body = { fg: C.Black, bg: C.Cyan };
   scr.fill({ x, y, w: width, h: height }, ' ', body);
-  lines.slice(scroll, scroll + height).forEach((line, row) => scr.write(x, y + row, line.slice(0, width), body));
+  lines
+    .slice(scroll, scroll + height)
+    .forEach((line, row) => scr.write(x, y + row, line.slice(0, width), body));
   for (const [row, col, length, color] of helpEmphasis(topic)) {
     if (row < scroll || row >= scroll + height || col >= width) continue;
-    scr.write(x + col, y + row - scroll, (lines[row] ?? '').slice(col, Math.min(width, col + length)), { fg: color, bg: C.Cyan });
+    scr.write(
+      x + col,
+      y + row - scroll,
+      (lines[row] ?? '').slice(col, Math.min(width, col + length)),
+      { fg: color, bg: C.Cyan }
+    );
   }
 }

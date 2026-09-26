@@ -11,11 +11,4 @@ export {
   type Symbol as TokenSymbol,
 } from './token.types';
 
-export {
-  Opcode,
-  Register,
-  TypeCode,
-  MARK_SIZE,
-  opcodeToName,
-  inst,
-} from './inst';
+export { Opcode, Register, TypeCode, MARK_SIZE, opcodeToName, inst } from './inst';

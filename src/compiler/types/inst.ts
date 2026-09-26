@@ -355,7 +355,9 @@ export const inst = {
    */
   getOperand2(instruction: number): number {
     // Most instructions fit 31 bits, where a shift is quicker than division.
-    return instruction < 0x80000000 ? instruction >>> OPERAND2_SHIFT : Math.floor(instruction / OPERAND2_SCALE);
+    return instruction < 0x80000000
+      ? instruction >>> OPERAND2_SHIFT
+      : Math.floor(instruction / OPERAND2_SCALE);
   },
 
   /**

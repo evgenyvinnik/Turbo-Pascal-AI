@@ -14,15 +14,23 @@ async function readWorkspace(page: Page): Promise<SavedWorkspace | null> {
   return page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB request failed'));
+      };
     });
     try {
       if (!database.objectStoreNames.contains('workspaces')) return null;
       const read = database.transaction('workspaces').objectStore('workspaces').get('active');
       return await new Promise<SavedWorkspace | null>((resolve, reject) => {
-        read.onsuccess = () => { resolve((read.result as SavedWorkspace | undefined) ?? null); };
-        read.onerror = () => { reject(read.error ?? new Error('IndexedDB request failed')); };
+        read.onsuccess = () => {
+          resolve((read.result as SavedWorkspace | undefined) ?? null);
+        };
+        read.onerror = () => {
+          reject(read.error ?? new Error('IndexedDB request failed'));
+        };
       });
     } finally {
       database.close();
@@ -34,14 +42,24 @@ async function recoveryWorkspaces(page: Page): Promise<SavedWorkspace[]> {
   return page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB request failed'));
+      };
     });
     try {
       const read = database.transaction('workspaces').objectStore('workspaces').getAll();
       return await new Promise<SavedWorkspace[]>((resolve, reject) => {
-        read.onsuccess = () => { resolve((read.result as SavedWorkspace[]).filter((record) => record.id.startsWith('recovery:'))); };
-        read.onerror = () => { reject(read.error ?? new Error('IndexedDB request failed')); };
+        read.onsuccess = () => {
+          resolve(
+            (read.result as SavedWorkspace[]).filter((record) => record.id.startsWith('recovery:'))
+          );
+        };
+        read.onerror = () => {
+          reject(read.error ?? new Error('IndexedDB request failed'));
+        };
       });
     } finally {
       database.close();
@@ -50,9 +68,12 @@ async function recoveryWorkspaces(page: Page): Promise<SavedWorkspace[]> {
 }
 
 async function fixturePage(page: Page): Promise<void> {
-  await page.route('**/__persistence_test_host__', (route) => route.fulfill({
-    contentType: 'text/html', body: '<!doctype html><title>Persistence fixture</title>',
-  }));
+  await page.route('**/__persistence_test_host__', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><title>Persistence fixture</title>',
+    })
+  );
   await page.goto('./__persistence_test_host__');
 }
 
@@ -60,15 +81,23 @@ async function replaceStoredWorkspace(page: Page, record: SavedWorkspace): Promi
   await page.evaluate(async (value) => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB request failed'));
+      };
     });
     try {
       const transaction = database.transaction('workspaces', 'readwrite');
       transaction.objectStore('workspaces').put(value);
       await new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => { resolve(); };
-        transaction.onabort = () => { reject(transaction.error ?? new Error('IndexedDB transaction failed')); };
+        transaction.oncomplete = () => {
+          resolve();
+        };
+        transaction.onabort = () => {
+          reject(transaction.error ?? new Error('IndexedDB transaction failed'));
+        };
       });
     } finally {
       database.close();
@@ -78,10 +107,12 @@ async function replaceStoredWorkspace(page: Page, record: SavedWorkspace): Promi
 
 async function savedWorkspace(page: Page, text?: string): Promise<SavedWorkspace> {
   await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-status', 'saved');
-  await expect.poll(async () => {
-    const saved = await readWorkspace(page);
-    return saved !== null && (text === undefined || JSON.stringify(saved.payload).includes(text));
-  }).toBe(true);
+  await expect
+    .poll(async () => {
+      const saved = await readWorkspace(page);
+      return saved !== null && (text === undefined || JSON.stringify(saved.payload).includes(text));
+    })
+    .toBe(true);
   const saved = await readWorkspace(page);
   if (!saved) throw new Error('No committed workspace');
   return saved;
@@ -90,7 +121,10 @@ async function savedWorkspace(page: Page, text?: string): Promise<SavedWorkspace
 async function reloadIde(page: Page): Promise<Ide> {
   await page.reload();
   await expect(page.locator('[data-testid="tp-screen"] [data-row="0"]')).toContainText('File');
-  await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-workspace-ready', 'true');
+  await expect(page.getByTestId('workspace-status')).toHaveAttribute(
+    'data-workspace-ready',
+    'true'
+  );
   await page.addStyleTag({ content: '*{animation:none !important}' });
   return new Ide(page);
 }
@@ -107,10 +141,15 @@ async function editCommand(ide: Ide, accelerator: string): Promise<void> {
   await ide.chooseItem(accelerator);
 }
 
-test('adding workspace persistence preserves files, settings and sessions in an older database', async ({ page }) => {
-  await page.route('**/__persistence_test_host__', (route) => route.fulfill({
-    contentType: 'text/html', body: '<!doctype html><title>Persistence fixture</title>',
-  }));
+test('adding workspace persistence preserves files, settings and sessions in an older database', async ({
+  page,
+}) => {
+  await page.route('**/__persistence_test_host__', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><title>Persistence fixture</title>',
+    })
+  );
   await page.goto('./__persistence_test_host__');
   await page.evaluate(async () => {
     // Dexie represents version 1 as native IndexedDB version 10.
@@ -126,21 +165,38 @@ test('adding workspace persistence preserves files, settings and sessions in an 
         ['breakpoints', 'id', ['filePath']],
       ] as const;
       for (const [name, keyPath, indexes] of tables) {
-        const table = database.createObjectStore(name, { keyPath, autoIncrement: name === 'sessions' });
+        const table = database.createObjectStore(name, {
+          keyPath,
+          autoIncrement: name === 'sessions',
+        });
         for (const index of indexes) table.createIndex(index, index);
       }
     };
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB request failed'));
+      };
     });
     const transaction = database.transaction(['files', 'settings', 'sessions'], 'readwrite');
-    transaction.objectStore('files').put({ path: '/KEPT.PAS', name: 'KEPT.PAS', content: 'program Kept;begin end.' });
-    transaction.objectStore('settings').put({ category: 'editor', data: { tabSize: 6 }, updatedAt: 123 });
-    transaction.objectStore('sessions').put({ id: 1, name: 'Existing session', openFiles: ['/KEPT.PAS'], updatedAt: 123 });
+    transaction
+      .objectStore('files')
+      .put({ path: '/KEPT.PAS', name: 'KEPT.PAS', content: 'program Kept;begin end.' });
+    transaction
+      .objectStore('settings')
+      .put({ category: 'editor', data: { tabSize: 6 }, updatedAt: 123 });
+    transaction
+      .objectStore('sessions')
+      .put({ id: 1, name: 'Existing session', openFiles: ['/KEPT.PAS'], updatedAt: 123 });
     await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => { resolve(); };
-      transaction.onabort = () => { reject(transaction.error ?? new Error('IndexedDB transaction failed')); };
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onabort = () => {
+        reject(transaction.error ?? new Error('IndexedDB transaction failed'));
+      };
     });
     database.close();
   });
@@ -151,19 +207,31 @@ test('adding workspace persistence preserves files, settings and sessions in an 
   const preserved = await page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB request failed'));
+      };
     });
     try {
       const transaction = database.transaction(['files', 'settings', 'sessions']);
       const read = (table: string, key: IDBValidKey): Promise<unknown> => {
         const entry = transaction.objectStore(table).get(key);
         return new Promise((resolve, reject) => {
-          entry.onsuccess = () => { resolve(entry.result as unknown); };
-          entry.onerror = () => { reject(entry.error ?? new Error('IndexedDB request failed')); };
+          entry.onsuccess = () => {
+            resolve(entry.result as unknown);
+          };
+          entry.onerror = () => {
+            reject(entry.error ?? new Error('IndexedDB request failed'));
+          };
         });
       };
-      return await Promise.all([read('files', '/KEPT.PAS'), read('settings', 'editor'), read('sessions', 1)]);
+      return await Promise.all([
+        read('files', '/KEPT.PAS'),
+        read('settings', 'editor'),
+        read('sessions', 1),
+      ]);
     } finally {
       database.close();
     }
@@ -175,12 +243,16 @@ test('adding workspace persistence preserves files, settings and sessions in an 
   ]);
 });
 
-test('reload restores unsaved files, tiled layout, selection, scroll, undo and IDE options', async ({ page }) => {
+test('reload restores unsaved files, tiled layout, selection, scroll, undo and IDE options', async ({
+  page,
+}) => {
   // Typing 32 lines through real keyboard events and checking the full roundtrip
   // can exhaust the normal setup budget in WebKit under concurrent browser load.
   test.slow();
   const ide = await Ide.open(page);
-  await ide.typeSource(Array.from({ length: 32 }, (_, index) => `Source line ${String(index + 1)}`).join('\n'));
+  await ide.typeSource(
+    Array.from({ length: 32 }, (_, index) => `Source line ${String(index + 1)}`).join('\n')
+  );
   await ide.openMenu('f');
   await ide.chooseItem('n');
   await ide.type('SECOND!');
@@ -275,7 +347,9 @@ test('closing the final window preserves an empty desktop across reload', async 
   await expect(restored.row(1)).toContainText('NONAME01.PAS');
 });
 
-test('reload keeps breakpoints and watch expressions but stops a paused program', async ({ page }) => {
+test('reload keeps breakpoints and watch expressions but stops a paused program', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource(`program PersistDebug;
 var total: Integer;
@@ -324,25 +398,38 @@ test('malformed saved data cannot crash the editor', async ({ page }) => {
   await ide.type('before corruption');
   await savedWorkspace(page, 'before corruption');
   // A plain page at the same origin prevents the live IDE from overwriting the fixture.
-  await page.route('**/__persistence_test_host__', (route) => route.fulfill({
-    contentType: 'text/html',
-    body: '<!doctype html><title>Persistence fixture</title>',
-  }));
+  await page.route('**/__persistence_test_host__', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><title>Persistence fixture</title>',
+    })
+  );
   await page.goto('./__persistence_test_host__');
   await page.evaluate(async () => {
     const request = indexedDB.open('TurboPascalIDE');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => { resolve(request.result); };
-      request.onerror = () => { reject(request.error ?? new Error('IndexedDB request failed')); };
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB request failed'));
+      };
     });
     const transaction = database.transaction('workspaces', 'readwrite');
     transaction.objectStore('workspaces').put({
-      id: 'active', schemaVersion: 1, revision: 100, updatedAt: Date.now(),
+      id: 'active',
+      schemaVersion: 1,
+      revision: 100,
+      updatedAt: Date.now(),
       payload: { desktop: { windows: [{ kind: 'edit', bufferId: 'missing' }] } },
     });
     await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => { resolve(); };
-      transaction.onabort = () => { reject(transaction.error ?? new Error('IndexedDB transaction failed')); };
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onabort = () => {
+        reject(transaction.error ?? new Error('IndexedDB transaction failed'));
+      };
     });
     database.close();
   });
@@ -369,10 +456,13 @@ test('failed IndexedDB save keeps editing intact and a later save recovers', asy
     // eslint-disable-next-line @typescript-eslint/unbound-method -- the original is restored later and always called with .call(this)
     const original = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey) {
-      if (this.name === 'workspaces') throw new DOMException('Injected disk quota failure', 'QuotaExceededError');
+      if (this.name === 'workspaces')
+        throw new DOMException('Injected disk quota failure', 'QuotaExceededError');
       return key === undefined ? original.call(this, value) : original.call(this, value, key);
     };
-    Reflect.set(window, '__restorePersistencePut', () => { IDBObjectStore.prototype.put = original; });
+    Reflect.set(window, '__restorePersistencePut', () => {
+      IDBObjectStore.prototype.put = original;
+    });
   });
   await ide.type(' work still here');
   await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-status', 'error');
@@ -390,13 +480,16 @@ test('failed IndexedDB save keeps editing intact and a later save recovers', asy
 });
 
 for (const futurePart of ['envelope', 'payload'] as const) {
-  test(`a future ${futurePart} version is preserved and cannot be overwritten by an older editor`, async ({ page }) => {
+  test(`a future ${futurePart} version is preserved and cannot be overwritten by an older editor`, async ({
+    page,
+  }) => {
     const ide = await Ide.open(page);
     await ide.type('Future workspace content');
     const current = await savedWorkspace(page, 'Future workspace content');
-    const future: SavedWorkspace = futurePart === 'envelope'
-      ? { ...current, schemaVersion: 2 }
-      : { ...current, payload: { ...(current.payload as Record<string, unknown>), version: 2 } };
+    const future: SavedWorkspace =
+      futurePart === 'envelope'
+        ? { ...current, schemaVersion: 2 }
+        : { ...current, payload: { ...(current.payload as Record<string, unknown>), version: 2 } };
     await fixturePage(page);
     await replaceStoredWorkspace(page, future);
     await page.goto('./');
@@ -413,7 +506,9 @@ for (const futurePart of ['envelope', 'payload'] as const) {
   });
 }
 
-test('a failed initial read blocks editing until retry restores the durable workspace', async ({ page }) => {
+test('a failed initial read blocks editing until retry restores the durable workspace', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('Read retry preserves source');
   const durable = await savedWorkspace(page, 'Read retry preserves source');
@@ -421,10 +516,13 @@ test('a failed initial read blocks editing until retry restores the durable work
     // eslint-disable-next-line @typescript-eslint/unbound-method -- the original is restored later and always called with .call(this)
     const original = IDBObjectStore.prototype.get;
     IDBObjectStore.prototype.get = function (key: IDBValidKey | IDBKeyRange) {
-      if (this.name === 'workspaces') throw new DOMException('Injected temporary read failure', 'UnknownError');
+      if (this.name === 'workspaces')
+        throw new DOMException('Injected temporary read failure', 'UnknownError');
       return original.call(this, key);
     };
-    Reflect.set(window, '__restorePersistenceGet', () => { IDBObjectStore.prototype.get = original; });
+    Reflect.set(window, '__restorePersistenceGet', () => {
+      IDBObjectStore.prototype.get = original;
+    });
   });
   await page.reload();
   const state = page.getByTestId('workspace-status');
@@ -443,7 +541,10 @@ test('a failed initial read blocks editing until retry restores the durable work
   expect(await savedWorkspace(page, 'Read retry preserves source')).toEqual(durable);
 });
 
-test('two tabs preserve both versions when the older tab explicitly resolves a save conflict', async ({ page, context }) => {
+test('two tabs preserve both versions when the older tab explicitly resolves a save conflict', async ({
+  page,
+  context,
+}) => {
   const first = await Ide.open(page);
   await first.type('Shared source');
   const initial = await savedWorkspace(page, 'Shared source');

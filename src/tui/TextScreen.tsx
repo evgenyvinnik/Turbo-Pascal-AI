@@ -119,7 +119,9 @@ export function TextScreen({
     update();
     const ro = new ResizeObserver(update);
     ro.observe(host);
-    return () => { ro.disconnect(); };
+    return () => {
+      ro.disconnect();
+    };
   }, [screen.cols, screen.rows]);
 
   const cellW = CELL_W * scale;
@@ -139,7 +141,7 @@ export function TextScreen({
         row: Math.max(0, Math.min(screen.rows - 1, row)),
       };
     },
-    [cellW, cellH, screen.cols, screen.rows],
+    [cellW, cellH, screen.cols, screen.rows]
   );
 
   const wrap = useCallback(
@@ -156,7 +158,7 @@ export function TextScreen({
         alt: ev.altKey,
       });
     },
-    [toCell],
+    [toCell]
   );
 
   useEffect(() => {
@@ -181,7 +183,9 @@ export function TextScreen({
       onMouseMove={wrap(onCellMove)}
       onMouseUp={wrap(onCellUp)}
       onDoubleClick={wrap(onCellDoubleClick)}
-      onContextMenu={(event) => { event.preventDefault(); }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+      }}
       onWheel={(ev) => {
         if (!onWheel) return;
         const { col, row } = toCell(ev.clientX, ev.clientY);

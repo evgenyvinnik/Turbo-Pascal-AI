@@ -11,10 +11,7 @@ export interface SessionInput {
 /**
  * Save a new session or update an existing one
  */
-export async function saveSession(
-  session: SessionInput,
-  id?: number
-): Promise<SessionRecord> {
+export async function saveSession(session: SessionInput, id?: number): Promise<SessionRecord> {
   const now = Date.now();
 
   if (id !== undefined) {
@@ -48,23 +45,15 @@ export async function saveSession(
 /**
  * Load a session by ID
  */
-export async function loadSession(
-  id: number
-): Promise<SessionRecord | undefined> {
+export async function loadSession(id: number): Promise<SessionRecord | undefined> {
   return db.sessions.get(id);
 }
 
 /**
  * Get recent sessions ordered by last update time
  */
-export async function getRecentSessions(
-  limit: number = 10
-): Promise<SessionRecord[]> {
-  return db.sessions
-    .orderBy('updatedAt')
-    .reverse()
-    .limit(limit)
-    .toArray();
+export async function getRecentSessions(limit: number = 10): Promise<SessionRecord[]> {
+  return db.sessions.orderBy('updatedAt').reverse().limit(limit).toArray();
 }
 
 /**
@@ -91,9 +80,7 @@ export async function getSessionCount(): Promise<number> {
 /**
  * Find sessions by name (case-insensitive partial match)
  */
-export async function findSessionsByName(
-  pattern: string
-): Promise<SessionRecord[]> {
+export async function findSessionsByName(pattern: string): Promise<SessionRecord[]> {
   const lowerPattern = pattern.toLowerCase();
   return db.sessions
     .filter((session) => session.name.toLowerCase().includes(lowerPattern))
@@ -104,11 +91,7 @@ export async function findSessionsByName(
  * Get the most recent session (for auto-restore)
  */
 export async function getMostRecentSession(): Promise<SessionRecord | undefined> {
-  const sessions = await db.sessions
-    .orderBy('updatedAt')
-    .reverse()
-    .limit(1)
-    .toArray();
+  const sessions = await db.sessions.orderBy('updatedAt').reverse().limit(1).toArray();
 
   return sessions[0];
 }
@@ -159,10 +142,7 @@ export async function touchSession(id: number): Promise<void> {
  * Delete old sessions, keeping only the most recent ones
  */
 export async function pruneOldSessions(keepCount: number = 20): Promise<number> {
-  const allSessions = await db.sessions
-    .orderBy('updatedAt')
-    .reverse()
-    .toArray();
+  const allSessions = await db.sessions.orderBy('updatedAt').reverse().toArray();
 
   if (allSessions.length <= keepCount) {
     return 0;
@@ -181,19 +161,14 @@ export async function pruneOldSessions(keepCount: number = 20): Promise<number> 
  * Check if a session name already exists
  */
 export async function sessionNameExists(name: string): Promise<boolean> {
-  const session = await db.sessions
-    .where('name')
-    .equals(name)
-    .first();
+  const session = await db.sessions.where('name').equals(name).first();
   return !!session;
 }
 
 /**
  * Generate a unique session name
  */
-export async function generateUniqueSessionName(
-  baseName: string = 'Session'
-): Promise<string> {
+export async function generateUniqueSessionName(baseName: string = 'Session'): Promise<string> {
   let counter = 1;
   let name = baseName;
 

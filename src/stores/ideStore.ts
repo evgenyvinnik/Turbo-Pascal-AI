@@ -113,55 +113,65 @@ export const useIdeStore = create<IdeState & IdeActions>()(
     defines: '',
     lastCompile: null,
 
-    setHelpTopic: (topic) =>
-      { set((s) => {
+    setHelpTopic: (topic) => {
+      set((s) => {
         s.helpTopic = topic;
-      }); },
+      });
+    },
 
-    setSearch: (patch) =>
-      { set((s) => {
+    setSearch: (patch) => {
+      set((s) => {
         Object.assign(s.search, patch);
-      }); },
+      });
+    },
 
-    toggleDestination: () =>
-      { set((s) => {
+    toggleDestination: () => {
+      set((s) => {
         s.destination = s.destination === 'Memory' ? 'Disk' : 'Memory';
-      }); },
+      });
+    },
 
-    setPrimaryFile: (file) =>
-      { set((s) => {
+    setPrimaryFile: (file) => {
+      set((s) => {
         s.primaryFile = file;
-      }); },
+      });
+    },
 
-    setDirectory: (dir) =>
-      { set((s) => {
+    setDirectory: (dir) => {
+      set((s) => {
         s.directory = dir;
-      }); },
+      });
+    },
 
-    setCompilerOptions: (values, defines) =>
-      { set((s) => {
+    setCompilerOptions: (values, defines) => {
+      set((s) => {
         s.compilerOptions = values;
         s.defines = defines;
-      }); },
+      });
+    },
 
-    setOptionDialog: (name, values) =>
-      { set((s) => {
+    setOptionDialog: (name, values) => {
+      set((s) => {
         s.optionDialogs[name] = values;
-      }); },
+      });
+    },
 
-    setTools: (tools) =>
-      { set((s) => {
+    setTools: (tools) => {
+      set((s) => {
         s.tools = tools;
-      }); },
+      });
+    },
 
-    setProgramParameters: (params) =>
-      { set((s) => {
+    setProgramParameters: (params) => {
+      set((s) => {
         s.programParameters = params;
-      }); },
+      });
+    },
 
-    setLastCompile: (info) =>
-      { set((s) => {
+    setLastCompile: (info) => {
+      set((s) => {
         s.lastCompile = info;
-      }); },
-  })),
+      });
+    },
+  }))
 );

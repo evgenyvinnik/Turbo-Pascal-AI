@@ -16,10 +16,16 @@ import type { Float80 } from './float80';
 export type ViewShape =
   | { kind: 'cell'; cell: BinaryCell }
   | { kind: 'array'; count: number; cells: number; bytes: number; element: ViewShape }
-  | { kind: 'record'; fields: { offset: number; cells: number; byte: number; bytes?: number; shape: ViewShape }[] };
+  | {
+      kind: 'record';
+      fields: { offset: number; cells: number; byte: number; bytes?: number; shape: ViewShape }[];
+    };
 
 /** The cell at a cell offset in a shape, and the byte it starts at. */
-export function shapeCell(shape: ViewShape, offset: number): { byte: number; cell: BinaryCell } | undefined {
+export function shapeCell(
+  shape: ViewShape,
+  offset: number
+): { byte: number; cell: BinaryCell } | undefined {
   if (shape.kind === 'cell') return offset === 0 ? { byte: 0, cell: shape.cell } : undefined;
   if (shape.kind === 'array') {
     const index = Math.floor(offset / shape.cells);
@@ -39,13 +45,16 @@ const sortedFields = new WeakMap<RecordShape, RecordShape['fields']>();
  * order of their cells. */
 function fieldAt(shape: RecordShape, offset: number): RecordShape['fields'][number] | undefined {
   if (shape.fields.length <= 8)
-    return shape.fields.find((field) => offset >= field.offset && offset < field.offset + field.cells);
+    return shape.fields.find(
+      (field) => offset >= field.offset && offset < field.offset + field.cells
+    );
   let fields = sortedFields.get(shape);
   if (!fields) {
     fields = shape.fields.filter((field) => field.cells > 0).sort((a, b) => a.offset - b.offset);
     sortedFields.set(shape, fields);
   }
-  let low = 0, high = fields.length - 1;
+  let low = 0,
+    high = fields.length - 1;
   while (low < high) {
     const middle = (low + high + 1) >> 1;
     if (fields[middle]!.offset <= offset) low = middle;
@@ -59,7 +68,10 @@ function fieldAt(shape: RecordShape, offset: number): RecordShape['fields'][numb
 export function shapeBytes(shape: ViewShape): number {
   if (shape.kind === 'cell') return shape.cell.bytes;
   if (shape.kind === 'array') return shape.count * shape.bytes;
-  return shape.fields.reduce((size, field) => Math.max(size, field.byte + (field.bytes ?? shapeBytes(field.shape))), 0);
+  return shape.fields.reduce(
+    (size, field) => Math.max(size, field.byte + (field.bytes ?? shapeBytes(field.shape))),
+    0
+  );
 }
 
 /** How many cells a shape spans. */
@@ -82,7 +94,12 @@ export function sameShape(shape: ViewShape, offset: number, target: ViewShape): 
     if (!found || found.byte - first.byte !== wanted.byte) return false;
     const a = found.cell,
       b = wanted.cell;
-    if (a.kind !== b.kind || a.bytes !== b.bytes || Boolean(a.signed) !== Boolean(b.signed) || (a.setByteOffset ?? 0) !== (b.setByteOffset ?? 0))
+    if (
+      a.kind !== b.kind ||
+      a.bytes !== b.bytes ||
+      Boolean(a.signed) !== Boolean(b.signed) ||
+      (a.setByteOffset ?? 0) !== (b.setByteOffset ?? 0)
+    )
       return false;
   }
   return true;
@@ -103,7 +120,13 @@ export interface SegmentLayout {
   variantCells: [number, number][];
   bytes: number;
 }
-export const EMPTY_SEGMENT: SegmentLayout = { layout: [], shape: { kind: 'record', fields: [] }, refresh: -1, variantCells: [], bytes: 0 };
+export const EMPTY_SEGMENT: SegmentLayout = {
+  layout: [],
+  shape: { kind: 'record', fields: [] },
+  refresh: -1,
+  variantCells: [],
+  bytes: 0,
+};
 
 /** A variant part of a record: its cases, each in cells of its own, and its
  * shadow, the part's bytes as Turbo Pascal stores them. Offsets are cells

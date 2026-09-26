@@ -5,12 +5,23 @@ import { Screen } from '@/tui/Screen';
 import { TextScreen, type CellEvent } from '@/tui/TextScreen';
 import { isMenuItemDisabled, isSeparator, menuBarPositions } from '@components/MenuBar/menuDefs';
 import { DosWorkspace } from '@components/DosWorkspace/DosWorkspace';
-import { menuBarHit, popupRect, popupScrollOffset, submenuRect } from '@components/MenuBar/paintMenuBar';
+import {
+  menuBarHit,
+  popupRect,
+  popupScrollOffset,
+  submenuRect,
+} from '@components/MenuBar/paintMenuBar';
 import { clientRect } from '@components/Window/paintWindow';
 import { GraphicsCanvas } from '@components/GraphicsCanvas';
 import { paintScreen } from './paintScreen';
 import { helpLines, runCommand } from './commands';
-import { handleDialogKey, handleEditorKey, handleMenuKey, commandForShortcut, shortcutKey } from './useKeyboard';
+import {
+  handleDialogKey,
+  handleEditorKey,
+  handleMenuKey,
+  commandForShortcut,
+  shortcutKey,
+} from './useKeyboard';
 import { useDesktopStore, type TPWindow } from '@stores/desktopStore';
 import { useMenuStore } from '@stores/menuStore';
 import { focusedControl, useDialogStore } from '@stores/dialogStore';
@@ -27,7 +38,11 @@ import { handleProgramScreenKey } from './runtimeSession';
 import { formatDebugValue } from '@compiler/runtime/SourceDebugger';
 import { followHelpLine, getHelpLines, isReferenceHelp, navigateHelp } from './helpNavigation';
 import { useWorkspaceStore } from '@stores/workspaceStore';
-import { dismissWorkspaceNotice, initializeWorkspace, retryWorkspace } from './workspacePersistence';
+import {
+  dismissWorkspaceNotice,
+  initializeWorkspace,
+  retryWorkspace,
+} from './workspacePersistence';
 
 const styles = stylex.create({
   root: {
@@ -68,7 +83,8 @@ export function IDE() {
   const programOutput = useCompilerStore((s) => s.programOutput);
   const runtimeStatus = useCompilerStore((s) => s.runtimeStatus);
   const hasBytecode = useCompilerStore((s) => Boolean(s.result?.bytecode));
-  const runtimeActive = runtimeStatus === 'running' || runtimeStatus === 'waiting' || runtimeStatus === 'paused';
+  const runtimeActive =
+    runtimeStatus === 'running' || runtimeStatus === 'waiting' || runtimeStatus === 'paused';
   const compileMessages = useCompilerStore((s) => s.messages);
   const watches = useDebugStore((s) => s.watches);
   const callStack = useDebugStore((s) => s.callStack);
@@ -92,16 +108,25 @@ export function IDE() {
       messages: compileMessages,
       help: helpLines(helpTopic),
       helpTopic,
-      registers: [...(['pc', 'sp', 'mp', 'np', 'ep'] as const).map((name) => `${name.toUpperCase()} ${registers[name].toString(16).toUpperCase().padStart(4, '0')}`), '', 'P-machine'],
+      registers: [
+        ...(['pc', 'sp', 'mp', 'np', 'ep'] as const).map(
+          (name) =>
+            `${name.toUpperCase()} ${registers[name].toString(16).toUpperCase().padStart(4, '0')}`
+        ),
+        '',
+        'P-machine',
+      ],
     }),
-    [programOutput, watches, callStack, compileMessages, helpTopic, registers],
+    [programOutput, watches, callStack, compileMessages, helpTopic, registers]
   );
 
   const hint = useMemo(() => {
-    if (workspace.conflict) return 'Other tab changed. Ctrl+Shift+S keeps this tab; backs up other.';
-    if (workspace.status === 'error') return workspace.ready
-      ? 'Workspace not saved. Ctrl+Shift+S retries.'
-      : 'Workspace could not be opened. Ctrl+Shift+S retries.';
+    if (workspace.conflict)
+      return 'Other tab changed. Ctrl+Shift+S keeps this tab; backs up other.';
+    if (workspace.status === 'error')
+      return workspace.ready
+        ? 'Workspace not saved. Ctrl+Shift+S retries.'
+        : 'Workspace could not be opened. Ctrl+Shift+S retries.';
     if (!workspace.ready) return 'Restoring workspace...';
     if (workspace.notice) return workspace.notice;
     if (popup?.kind === 'local') {
@@ -112,7 +137,8 @@ export function IDE() {
     if (top) {
       if (top.def.id === 'compiling' || top.def.id === 'program-arguments') return null;
       const c = focusedControl(top);
-      if (c?.kind === 'checks' || c?.kind === 'radios') return c.items[top.clusterRow]?.hint ?? c.hint;
+      if (c?.kind === 'checks' || c?.kind === 'radios')
+        return c.items[top.clusterRow]?.hint ?? c.hint;
       return c && 'hint' in c ? c.hint : 'Close this dialog box';
     }
     if (menu.open) {
@@ -124,7 +150,16 @@ export function IDE() {
       }
     }
     return null;
-  }, [dialogs, menu, popup, configuredTools, workspace.ready, workspace.status, workspace.notice, workspace.conflict]);
+  }, [
+    dialogs,
+    menu,
+    popup,
+    configuredTools,
+    workspace.ready,
+    workspace.status,
+    workspace.notice,
+    workspace.conflict,
+  ]);
 
   const painted = paintScreen({
     windows,
@@ -164,18 +199,36 @@ export function IDE() {
         retryWorkspace();
         return;
       }
-      if (!useWorkspaceStore.getState().ready) { e.preventDefault(); return; }
+      if (!useWorkspaceStore.getState().ready) {
+        e.preventDefault();
+        return;
+      }
       if (useWorkspaceStore.getState().notice) dismissWorkspaceNotice();
       if (shortcutKey(e) === 'ctrl+F2') {
         e.preventDefault();
         runCommand('run.reset');
         return;
       }
-      if (handleProgramScreenKey(e)) { e.preventDefault(); return; }
-      if (handlePopupKey(e)) { e.preventDefault(); return; }
+      if (handleProgramScreenKey(e)) {
+        e.preventDefault();
+        return;
+      }
+      if (handlePopupKey(e)) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'F1' && !useDialogStore.getState().top()?.def.anyKey) {
         e.preventDefault();
-        const command = e.shiftKey ? 'help.index' : e.altKey ? 'help.previous' : e.ctrlKey ? 'help.topic' : useDialogStore.getState().top()?.def.id === 'context-help' || useDesktopStore.getState().activeWindow()?.kind === 'help' ? 'help.using' : 'help.context';
+        const command = e.shiftKey
+          ? 'help.index'
+          : e.altKey
+            ? 'help.previous'
+            : e.ctrlKey
+              ? 'help.topic'
+              : useDialogStore.getState().top()?.def.id === 'context-help' ||
+                  useDesktopStore.getState().activeWindow()?.kind === 'help'
+                ? 'help.using'
+                : 'help.context';
         runCommand(command);
         return;
       }
@@ -210,8 +263,15 @@ export function IDE() {
         const help = desktop.activeWindow();
         if (!help) return;
         const lines = getHelpLines(useIdeStore.getState().helpTopic);
-        if (navigateHelp(e.key === 'Tab' && e.shiftKey ? 'Shift+Tab' : e.key, pageSize)) { e.preventDefault(); return; }
-        if (e.key === 'Enter') { e.preventDefault(); followHelpLine(lines[help.selected] ?? '', help.selected); return; }
+        if (navigateHelp(e.key === 'Tab' && e.shiftKey ? 'Shift+Tab' : e.key, pageSize)) {
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          followHelpLine(lines[help.selected] ?? '', help.selected);
+          return;
+        }
       }
 
       const combo = shortcutKey(e);
@@ -234,16 +294,34 @@ export function IDE() {
 
       const desktop = useDesktopStore.getState();
       const output = desktop.activeWindow();
-      if (output?.kind === 'messages' && e.key === 'Enter') { e.preventDefault(); runCommand('tools.gotosource'); return; }
-      if (output?.kind === 'callstack' && e.key === 'Enter') { e.preventDefault(); runCommand('debug.gotosource'); return; }
+      if (output?.kind === 'messages' && e.key === 'Enter') {
+        e.preventDefault();
+        runCommand('tools.gotosource');
+        return;
+      }
+      if (output?.kind === 'callstack' && e.key === 'Enter') {
+        e.preventDefault();
+        runCommand('debug.gotosource');
+        return;
+      }
       if (output?.kind === 'watches' && e.key === 'Delete') {
         const watch = useDebugStore.getState().watches[output.selected];
         if (watch) useDebugStore.getState().removeWatch(watch.id);
-        e.preventDefault(); return;
+        e.preventDefault();
+        return;
       }
-      if ((output?.kind === 'callstack' || output?.kind === 'watches' || output?.kind === 'messages') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-        desktop.setToolSelection(output.id, Math.max(0, output.selected + (e.key === 'ArrowDown' ? 1 : -1)));
-        e.preventDefault(); return;
+      if (
+        (output?.kind === 'callstack' ||
+          output?.kind === 'watches' ||
+          output?.kind === 'messages') &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+      ) {
+        desktop.setToolSelection(
+          output.id,
+          Math.max(0, output.selected + (e.key === 'ArrowDown' ? 1 : -1))
+        );
+        e.preventDefault();
+        return;
       }
       if (output?.kind === 'output') {
         const maxScroll = Math.max(0, useCompilerStore.getState().programOutput.length - pageSize);
@@ -258,25 +336,35 @@ export function IDE() {
         const offset = offsets[e.key];
         if (offset !== undefined) {
           e.preventDefault();
-          desktop.scrollTool(output.id, Math.min(maxScroll, Math.max(0, output.scroll + offset)) - output.scroll);
+          desktop.scrollTool(
+            output.id,
+            Math.min(maxScroll, Math.max(0, output.scroll + offset)) - output.scroll
+          );
           return;
         }
       }
 
       if (handleEditorKey(e, pageSize, pageCols)) e.preventDefault();
     },
-    [pageSize, pageCols],
+    [pageSize, pageCols]
   );
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown);
-    return () => { window.removeEventListener('keydown', onKeyDown); };
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [onKeyDown]);
 
   const onCellDown = useCallback(
     (e: CellEvent) => {
       if (!useWorkspaceStore.getState().ready) return;
-      if (useWorkspaceStore.getState().status === 'error' && !useWorkspaceStore.getState().conflict && e.row === 24 && e.col >= 11) {
+      if (
+        useWorkspaceStore.getState().status === 'error' &&
+        !useWorkspaceStore.getState().conflict &&
+        e.row === 24 &&
+        e.col >= 11
+      ) {
         retryWorkspace();
         return;
       }
@@ -347,9 +435,25 @@ export function IDE() {
         const parent = items[menuStore.itemIndex];
         if (menuStore.subOpen && parent && !isSeparator(parent) && parent.submenu) {
           const subBox = submenuRect(parent.submenu, box, menuStore.itemIndex);
-          if (e.col >= subBox.x && e.col < subBox.x + subBox.w && e.row > subBox.y && e.row < subBox.y + subBox.h - 1) {
+          if (
+            e.col >= subBox.x &&
+            e.col < subBox.x + subBox.w &&
+            e.row > subBox.y &&
+            e.row < subBox.y + subBox.h - 1
+          ) {
             const node = parent.submenu[e.row - subBox.y - 1];
-            if (node && !isMenuItemDisabled(node, { buffer: d.activeBuffer(), clipboard: d.clipboard, runtimeActive, hasBytecode, hasMessages: useCompilerStore.getState().messages.some((message) => /\(\d+\):/.test(message)) })) {
+            if (
+              node &&
+              !isMenuItemDisabled(node, {
+                buffer: d.activeBuffer(),
+                clipboard: d.clipboard,
+                runtimeActive,
+                hasBytecode,
+                hasMessages: useCompilerStore
+                  .getState()
+                  .messages.some((message) => /\(\d+\):/.test(message)),
+              })
+            ) {
               menuStore.close();
               runCommand(node.id);
             }
@@ -359,9 +463,22 @@ export function IDE() {
         const inside =
           e.col >= box.x && e.col < box.x + box.w && e.row > box.y && e.row < box.y + box.h - 1;
         if (inside) {
-          const index = e.row - box.y - 1 + popupScrollOffset(items, menuStore.itemIndex, box.h - 2);
+          const index =
+            e.row - box.y - 1 + popupScrollOffset(items, menuStore.itemIndex, box.h - 2);
           const node = items[index];
-          if (node && !isSeparator(node) && !isMenuItemDisabled(node, { buffer: d.activeBuffer(), clipboard: d.clipboard, runtimeActive, hasBytecode, hasMessages: useCompilerStore.getState().messages.some((message) => /\(\d+\):/.test(message)) })) {
+          if (
+            node &&
+            !isSeparator(node) &&
+            !isMenuItemDisabled(node, {
+              buffer: d.activeBuffer(),
+              clipboard: d.clipboard,
+              runtimeActive,
+              hasBytecode,
+              hasMessages: useCompilerStore
+                .getState()
+                .messages.some((message) => /\(\d+\):/.test(message)),
+            })
+          ) {
             if (node.submenu) {
               menuStore.setItem(index);
               menuStore.openSub();
@@ -389,7 +506,10 @@ export function IDE() {
       const win = [...windows].reverse().find((w) => contains(w, e.col, e.row));
       if (!win) return;
       if (win.id !== activeId) d.focusWindow(win.id);
-      if (e.button === 2 && win.kind === 'edit') { openLocalMenu(e.col, e.row); return; }
+      if (e.button === 2 && win.kind === 'edit') {
+        openLocalMenu(e.col, e.row);
+        return;
+      }
 
       const r = win.rect;
       if (e.row === r.y) {
@@ -426,14 +546,19 @@ export function IDE() {
             line: buf.scroll.line + (e.row - client.y),
             col: buf.scroll.col + (e.col - client.x),
           },
-          e.shift,
+          e.shift
         );
         return;
       }
       d.setToolSelection(win.id, win.scroll + (e.row - client.y));
-      if (win.kind === 'help') followHelpLine(getHelpLines(useIdeStore.getState().helpTopic)[win.scroll + e.row - client.y] ?? '', win.scroll + e.row - client.y, e.col - client.x - (isReferenceHelp(useIdeStore.getState().helpTopic) ? 0 : 1));
+      if (win.kind === 'help')
+        followHelpLine(
+          getHelpLines(useIdeStore.getState().helpTopic)[win.scroll + e.row - client.y] ?? '',
+          win.scroll + e.row - client.y,
+          e.col - client.x - (isReferenceHelp(useIdeStore.getState().helpTopic) ? 0 : 1)
+        );
     },
-    [painted.dialogHits, painted.statusHits, windows, activeId, runtimeActive, hasBytecode],
+    [painted.dialogHits, painted.statusHits, windows, activeId, runtimeActive, hasBytecode]
   );
 
   const onCellMove = useCallback((e: CellEvent) => {
@@ -479,20 +604,34 @@ export function IDE() {
   }, []);
 
   return (
-    <div {...stylex.props(styles.root)} data-testid="workspace-status" data-status={workspace.status}
-      data-workspace-ready={workspace.ready} data-workspace-error={workspace.error ?? undefined}>
-      {programTextVisible ? <ProgramTextScreen /> : <TextScreen
-        screen={painted.screen}
-        cursor={
-          painted.cursor
-            ? { col: painted.cursor.col, row: painted.cursor.row, visible: true, fat: painted.cursor.fat }
-            : null
-        }
-        onCellDown={onCellDown}
-        onCellMove={onCellMove}
-        onCellUp={onCellUp}
-        onWheel={onWheel}
-      />}
+    <div
+      {...stylex.props(styles.root)}
+      data-testid="workspace-status"
+      data-status={workspace.status}
+      data-workspace-ready={workspace.ready}
+      data-workspace-error={workspace.error ?? undefined}
+    >
+      {programTextVisible ? (
+        <ProgramTextScreen />
+      ) : (
+        <TextScreen
+          screen={painted.screen}
+          cursor={
+            painted.cursor
+              ? {
+                  col: painted.cursor.col,
+                  row: painted.cursor.row,
+                  visible: true,
+                  fat: painted.cursor.fat,
+                }
+              : null
+          }
+          onCellDown={onCellDown}
+          onCellMove={onCellMove}
+          onCellUp={onCellUp}
+          onWheel={onWheel}
+        />
+      )}
       <GraphicsCanvas />
       <DosWorkspace />
       {workspace.ready && <ProgramFileDrop />}

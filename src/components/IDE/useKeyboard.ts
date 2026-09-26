@@ -43,7 +43,8 @@ export const SHORTCUTS: Record<string, string> = {
   'alt+0': 'window.list',
 };
 
-export const commandForShortcut = (key: string): string | undefined => configuredToolShortcut(key, useIdeStore.getState().tools) ?? SHORTCUTS[key];
+export const commandForShortcut = (key: string): string | undefined =>
+  configuredToolShortcut(key, useIdeStore.getState().tools) ?? SHORTCUTS[key];
 
 export const shortcutKey = (e: KeyboardEvent): string => {
   const mods = `${e.altKey ? 'alt+' : ''}${e.ctrlKey || e.metaKey ? 'ctrl+' : ''}${e.shiftKey ? 'shift+' : ''}`;
@@ -58,7 +59,14 @@ export function handleMenuKey(e: KeyboardEvent): boolean {
   if (!menu) return false;
   const desktop = useDesktopStore.getState();
   const runtimeStatus = useCompilerStore.getState().runtimeStatus;
-  const context = { buffer: desktop.activeBuffer(), clipboard: desktop.clipboard, runtimeActive: runtimeStatus === 'running' || runtimeStatus === 'waiting' || runtimeStatus === 'paused', hasBytecode: Boolean(useCompilerStore.getState().result?.bytecode), hasMessages: useCompilerStore.getState().messages.some((message) => /\(\d+\):/.test(message)) };
+  const context = {
+    buffer: desktop.activeBuffer(),
+    clipboard: desktop.clipboard,
+    runtimeActive:
+      runtimeStatus === 'running' || runtimeStatus === 'waiting' || runtimeStatus === 'paused',
+    hasBytecode: Boolean(useCompilerStore.getState().result?.bytecode),
+    hasMessages: useCompilerStore.getState().messages.some((message) => /\(\d+\):/.test(message)),
+  };
 
   switch (e.key) {
     case 'Escape':
@@ -139,8 +147,13 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
     const hotkey = e.key.toLowerCase();
     for (const caption of top.def.controls) {
       if (caption.kind !== 'label' || Screen.hotKey(caption.text) !== hotkey) continue;
-      const index = controls.findIndex((candidate) => 'id' in candidate && candidate.id === caption.for);
-      if (index >= 0) { store.setFocus(index); return true; }
+      const index = controls.findIndex(
+        (candidate) => 'id' in candidate && candidate.id === caption.for
+      );
+      if (index >= 0) {
+        store.setFocus(index);
+        return true;
+      }
     }
     for (const [index, candidate] of controls.entries()) {
       if (candidate.kind !== 'checks' && candidate.kind !== 'radios') continue;
@@ -159,10 +172,32 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
   }
 
   if (control?.kind === 'help') {
-    if (e.key === 'Enter') { followModalHelp(); return true; }
-    const offsets: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: control.h - 2, PageUp: 2 - control.h, Home: -100_000, End: 100_000 };
+    if (e.key === 'Enter') {
+      followModalHelp();
+      return true;
+    }
+    const offsets: Record<string, number> = {
+      ArrowDown: 1,
+      ArrowUp: -1,
+      PageDown: control.h - 2,
+      PageUp: 2 - control.h,
+      Home: -100_000,
+      End: 100_000,
+    };
     const offset = offsets[e.key];
-    if (offset !== undefined) { store.setValue(control.id, Math.max(0, Math.min(Math.max(0, control.lines.length - (control.h - 2)), Number(top.values[control.id] ?? 0) + offset))); return true; }
+    if (offset !== undefined) {
+      store.setValue(
+        control.id,
+        Math.max(
+          0,
+          Math.min(
+            Math.max(0, control.lines.length - (control.h - 2)),
+            Number(top.values[control.id] ?? 0) + offset
+          )
+        )
+      );
+      return true;
+    }
   }
 
   if (control?.kind === 'input' && e.key === 'ArrowDown' && openInputHistory(control)) return true;
@@ -190,7 +225,9 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
   if (control?.kind === 'input') {
     const value = String(top.values[control.id] ?? '');
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      const next = top.selectAll ? e.key : value.slice(0, top.caret) + e.key + value.slice(top.caret);
+      const next = top.selectAll
+        ? e.key
+        : value.slice(0, top.caret) + e.key + value.slice(top.caret);
       store.setValue(control.id, next);
       store.setCaret(top.selectAll ? 1 : top.caret + 1);
       return true;
@@ -206,7 +243,10 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
       return true;
     }
     if (e.key === 'Delete') {
-      store.setValue(control.id, top.selectAll ? '' : value.slice(0, top.caret) + value.slice(top.caret + 1));
+      store.setValue(
+        control.id,
+        top.selectAll ? '' : value.slice(0, top.caret) + value.slice(top.caret + 1)
+      );
       store.setCaret(top.selectAll ? 0 : top.caret);
       return true;
     }
@@ -254,10 +294,22 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
     if (control.scroll === 'h' && control.divider !== undefined) {
       const rows = Math.max(1, control.h - 1);
       const selected = Number(top.values[control.id] ?? 0);
-      const offsets: Record<string, number> = { ArrowLeft: -rows, ArrowRight: rows, ArrowUp: -1, ArrowDown: 1, PageUp: -rows * 2, PageDown: rows * 2, Home: -selected, End: control.items.length - 1 - selected };
+      const offsets: Record<string, number> = {
+        ArrowLeft: -rows,
+        ArrowRight: rows,
+        ArrowUp: -1,
+        ArrowDown: 1,
+        PageUp: -rows * 2,
+        PageDown: rows * 2,
+        Home: -selected,
+        End: control.items.length - 1 - selected,
+      };
       const offset = offsets[e.key];
       if (offset !== undefined) {
-        store.setValue(control.id, Math.max(0, Math.min(control.items.length - 1, selected + offset)));
+        store.setValue(
+          control.id,
+          Math.max(0, Math.min(control.items.length - 1, selected + offset))
+        );
         return true;
       }
     }
@@ -271,11 +323,19 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
   }
 
   if (control?.kind === 'swatches') {
-    const moves: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -control.cols, ArrowDown: control.cols };
+    const moves: Record<string, number> = {
+      ArrowLeft: -1,
+      ArrowRight: 1,
+      ArrowUp: -control.cols,
+      ArrowDown: control.cols,
+    };
     const delta = moves[e.key];
     if (delta !== undefined) {
       const selected = Number(top.values[control.id] ?? 0);
-      store.setValue(control.id, Math.max(0, Math.min(control.colors.length - 1, selected + delta)));
+      store.setValue(
+        control.id,
+        Math.max(0, Math.min(control.colors.length - 1, selected + delta))
+      );
       return true;
     }
   }
@@ -296,7 +356,12 @@ export function handleDialogKey(e: KeyboardEvent): boolean {
     }
   }
 
-  if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+  if (
+    e.key === 'ArrowUp' ||
+    e.key === 'ArrowDown' ||
+    e.key === 'ArrowLeft' ||
+    e.key === 'ArrowRight'
+  ) {
     store.moveFocus(e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1);
     return true;
   }
@@ -312,7 +377,9 @@ export function handleEditorKey(e: KeyboardEvent, pageSize: number, pageCols: nu
   const shift = e.shiftKey;
   const ctrl = e.ctrlKey || e.metaKey;
 
-  const after = () => { d.ensureVisible(pageSize, pageCols); };
+  const after = () => {
+    d.ensureVisible(pageSize, pageCols);
+  };
 
   switch (e.key) {
     case 'ArrowLeft':

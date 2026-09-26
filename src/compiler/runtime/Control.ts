@@ -52,10 +52,7 @@ export enum ExecutionEvent {
 /**
  * Event listener callback type
  */
-export type ExecutionListener = (
-  event: ExecutionEvent,
-  data?: ExecutionEventData
-) => void;
+export type ExecutionListener = (event: ExecutionEvent, data?: ExecutionEventData) => void;
 
 /**
  * Data associated with execution events
@@ -130,7 +127,10 @@ export class ExecutionController {
    * Start or resume execution
    */
   run(): void {
-    if (this.machine.getState() === MachineState.STOPPED || this.machine.getState() === MachineState.ERROR) {
+    if (
+      this.machine.getState() === MachineState.STOPPED ||
+      this.machine.getState() === MachineState.ERROR
+    ) {
       this.reset();
     }
 
@@ -480,7 +480,12 @@ export class ExecutionController {
         if (!canContinue) {
           if (this.machine.getState() === MachineState.SLEEPING) return;
           this.stopRunLoop();
-          this.emit(this.machine.getState() === MachineState.WAITING ? ExecutionEvent.INPUT : ExecutionEvent.STOP, this.getEventData());
+          this.emit(
+            this.machine.getState() === MachineState.WAITING
+              ? ExecutionEvent.INPUT
+              : ExecutionEvent.STOP,
+            this.getEventData()
+          );
           return;
         }
       }
@@ -540,10 +545,7 @@ export class ExecutionController {
  * @param bytecode - The bytecode to execute
  * @param config - Optional machine configuration
  */
-export function createController(
-  bytecode: Bytecode,
-  config?: MachineConfig
-): ExecutionController {
+export function createController(bytecode: Bytecode, config?: MachineConfig): ExecutionController {
   return new ExecutionController(bytecode, config);
 }
 

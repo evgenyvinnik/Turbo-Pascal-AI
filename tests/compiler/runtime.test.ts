@@ -5,10 +5,10 @@ import { Lexer, Stream } from '../../src/compiler/lexer';
 import { Parser } from '../../src/compiler/parser';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 
-const machineFor = (source: string) => new Machine(
-  new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse()),
-  { maxInstructions: 10_000 },
-);
+const machineFor = (source: string) =>
+  new Machine(new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse()), {
+    maxInstructions: 10_000,
+  });
 
 describe('runtime numeric boundaries', () => {
   it('distinguishes Random from Random(0) and returns integers below the bound', () => {
@@ -27,10 +27,17 @@ describe('runtime numeric boundaries', () => {
   });
 
   it('reports real arithmetic overflow at its source line', () => {
-    const machine = machineFor('program T; var x: Real;\nbegin\n  x := 1e30;\n  WriteLn(x * x)\nend.');
-    expect(() => { machine.run(); }).toThrowError(errorWith({
-      message: 'Real overflow', lineNumber: 4,
-    }));
+    const machine = machineFor(
+      'program T; var x: Real;\nbegin\n  x := 1e30;\n  WriteLn(x * x)\nend.'
+    );
+    expect(() => {
+      machine.run();
+    }).toThrowError(
+      errorWith({
+        message: 'Real overflow',
+        lineNumber: 4,
+      })
+    );
     expect(machine.getState()).toBe(MachineState.ERROR);
     expect(machine.getOutput()).toEqual([]);
   });

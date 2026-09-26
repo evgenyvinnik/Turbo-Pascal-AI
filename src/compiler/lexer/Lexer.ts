@@ -434,7 +434,8 @@ export class Lexer {
         text += take();
         for (;;) {
           const next = this.stream.peek();
-          if (next === null || next === '\n') throw new PascalError('String constant exceeds line', this.stream.getLineNumber());
+          if (next === null || next === '\n')
+            throw new PascalError('String constant exceeds line', this.stream.getLineNumber());
           text += take();
           if (next === ch) break;
         }
@@ -442,7 +443,11 @@ export class Lexer {
         let word = '';
         for (let at = 0; ; at++) {
           const next = at === 0 ? ch : this.peekAhead(at);
-          if (next === null || !(this.isIdentifierChar(next) || (next === '@' && /^@*$/.test(word)))) break;
+          if (
+            next === null ||
+            !(this.isIdentifierChar(next) || (next === '@' && /^@*$/.test(word)))
+          )
+            break;
           word += next;
         }
         if (word.toLowerCase() === 'end') break;

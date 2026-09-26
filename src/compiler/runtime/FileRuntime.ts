@@ -51,7 +51,8 @@ export class FileRuntime {
   constructor(
     private memory: MemoryAccess,
     readonly disk: VirtualFileSystem,
-    private layoutOf: (value: StackValue | undefined) => BinaryCell[] = (value) => JSON.parse(String(value ?? '[]')) as BinaryCell[]
+    private layoutOf: (value: StackValue | undefined) => BinaryCell[] = (value) =>
+      JSON.parse(String(value ?? '[]')) as BinaryCell[]
   ) {
     // Every run starts in the root directory, whatever the last one left.
     disk.changeDirectory('\\');
@@ -68,14 +69,26 @@ export class FileRuntime {
   }
   /** What FileRec and TextRec show of a file variable: its DOS handle, its
    * mode, its record size and the name it was assigned. */
-  fileRecord(address: number): { handle: number; mode: FileHandle['mode'] | 'none'; recordSize: number; name: string; text: boolean } {
+  fileRecord(address: number): {
+    handle: number;
+    mode: FileHandle['mode'] | 'none';
+    recordSize: number;
+    name: string;
+    text: boolean;
+  } {
     const id = Number(this.memory.read(address));
     const file = this.handles.get(id);
     if (!file) return { handle: 0, mode: 'none', recordSize: 128, name: '', text: false };
     // DOS gives the standard input and output handles 0 and 1, and files
     // handles from 5.
     const handle = id === CONSOLE_OUTPUT ? 1 : file.console ? 0 : id + 1;
-    return { handle, mode: file.mode, recordSize: file.recordSize, name: file.given ?? '', text: file.words === 0 };
+    return {
+      handle,
+      mode: file.mode,
+      recordSize: file.recordSize,
+      name: file.given ?? '',
+      text: file.words === 0,
+    };
   }
   /** The name a file variable was assigned, and whether it is open. */
   fileName(address: number): { name: string; open: boolean } | undefined {
@@ -119,23 +132,23 @@ export class FileRuntime {
         ? 2
         : message.startsWith('File access denied')
           ? 5
-        : message === 'Invalid file name' || message.startsWith('Path not found')
-          ? 3
-          : message === 'File is not assigned'
-            ? 102
-            : message === 'File is not open'
-              ? 103
-              : message === 'File is not open for reading'
-                ? 104
-                : message === 'File is not open for writing'
-                  ? 105
-                  : message.startsWith('Invalid number') ||
-                      message.startsWith('Invalid boolean') ||
-                      message === 'Real overflow'
-                    ? 106
-                    : message === 'Read past end of file'
-                      ? 100
-                      : 101;
+          : message === 'Invalid file name' || message.startsWith('Path not found')
+            ? 3
+            : message === 'File is not assigned'
+              ? 102
+              : message === 'File is not open'
+                ? 103
+                : message === 'File is not open for reading'
+                  ? 104
+                  : message === 'File is not open for writing'
+                    ? 105
+                    : message.startsWith('Invalid number') ||
+                        message.startsWith('Invalid boolean') ||
+                        message === 'Real overflow'
+                      ? 106
+                      : message === 'Read past end of file'
+                        ? 100
+                        : 101;
     if (checked) throw error;
     return this.lastError;
   }
@@ -151,8 +164,8 @@ export class FileRuntime {
     }
     if (
       ![
-        25, 26, 46, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 82,
-        97, 98, 99, 108, 109, 116, 460, 463, 464, 465,
+        25, 26, 46, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 82, 97,
+        98, 99, 108, 109, 116, 460, 463, 464, 465,
       ].includes(index)
     )
       return undefined;
@@ -215,9 +228,9 @@ export class FileRuntime {
       return {};
     }
     if (
-      ![25, 26, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 97, 98].includes(
-        index
-      )
+      ![
+        25, 26, 47, 48, 49, 50, 66, 67, 68, 69, 70, 71, 72, 73, 74, 76, 78, 79, 80, 81, 97, 98,
+      ].includes(index)
     )
       return undefined;
     const file = this.handle(address);
@@ -375,8 +388,13 @@ export class FileRuntime {
         if (!typed || values.length !== file.words)
           throw new PascalError('Typed file record size mismatch');
         const data = encodeBinary(
-          { read: (offset) => values[offset] ?? 0, write: () => undefined,
-            ...(this.memory.pointerBits ? { pointerBits: this.memory.pointerBits.bind(this.memory) } : {}) },
+          {
+            read: (offset) => values[offset] ?? 0,
+            write: () => undefined,
+            ...(this.memory.pointerBits
+              ? { pointerBits: this.memory.pointerBits.bind(this.memory) }
+              : {}),
+          },
           0,
           file.layout
         );
@@ -416,7 +434,9 @@ export class FileRuntime {
         const count = Number(args[2]),
           resultAddress = Number(args[3]),
           layout = this.layoutOf(args[4]);
-        const bufferSize = this.memory.reach?.(Number(args[1]), layout) ?? layout.reduce((total, cell) => total + cell.bytes, 0);
+        const bufferSize =
+          this.memory.reach?.(Number(args[1]), layout) ??
+          layout.reduce((total, cell) => total + cell.bytes, 0);
         const size = count * file.recordSize;
         if (!Number.isInteger(count) || count < 0 || size > bufferSize)
           throw new PascalError('Block I/O exceeds buffer size');
@@ -436,7 +456,9 @@ export class FileRuntime {
           else decodeBinary(this.memory, Number(args[1]), layout, data);
         } else {
           if (position > content.length) throw new PascalError('Invalid file position');
-          const data = this.memory.bytesAt?.(Number(args[1]), layout, size) ?? encodeBinary(this.memory, Number(args[1]), layout).subarray(0, size);
+          const data =
+            this.memory.bytesAt?.(Number(args[1]), layout, size) ??
+            encodeBinary(this.memory, Number(args[1]), layout).subarray(0, size);
           let text = '';
           for (let i = 0; i < data.length; i++) text += String.fromCharCode(data[i]!);
           this.disk.write(

@@ -424,7 +424,8 @@ errors remain explicitly unnumbered.
 
 ```bash
 bun run typecheck       # TypeScript, including the tests
-bun run lint            # ESLint
+bun run format:check    # Prettier, over src and tests (`bun run format` fixes)
+bun run lint            # ESLint: no errors, and no more warnings than its cap
 bun run test -- --run   # Vitest unit tests once (plain `bun run test` watches)
 bun run test:reference  # Independent Free Pascal comparison (requires fpc)
 bun run fpc-suite:fetch # Download Free Pascal's own test suite (pinned release)
@@ -517,8 +518,12 @@ Contributions are welcome.
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run `bun run typecheck`, `bun run lint` and `bun run test -- --run`, and
-   `bun run test:reference` if you change the compiler
+4. Run `bun run format`, `bun run typecheck`, `bun run lint` and
+   `bun run test -- --run`, and `bun run test:reference` if you change the
+   compiler. CI rejects unformatted code and any rise in lint warnings; when
+   you remove warnings, lower the `--max-warnings` cap in `package.json` to
+   match. `git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the
+   formatting-only commits from `git blame`.
 5. Submit a pull request
 
 ## License

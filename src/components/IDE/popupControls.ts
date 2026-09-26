@@ -29,22 +29,20 @@ export function openInputHistory(control?: InputControl): boolean {
   const entries = history.length ? history : value ? [value] : [];
   if (!entries.length) return true;
   useDialogStore.getState().setFocus(dialogFocusables(dialog.def).indexOf(target));
-  usePopupStore
-    .getState()
-    .show({
-      kind: 'history',
-      entries: [...entries],
-      selected: 0,
-      horizontal: 0,
-      dialogId: dialog.def.id,
-      controlId: target.id,
-      rect: {
-        x: Math.max(0, dialog.def.rect.x + target.x - 1),
-        y: Math.min(16, dialog.def.rect.y + target.y - 1),
-        w: Math.min(60, target.w + 2),
-        h: 8,
-      },
-    });
+  usePopupStore.getState().show({
+    kind: 'history',
+    entries: [...entries],
+    selected: 0,
+    horizontal: 0,
+    dialogId: dialog.def.id,
+    controlId: target.id,
+    rect: {
+      x: Math.max(0, dialog.def.rect.x + target.x - 1),
+      y: Math.min(16, dialog.def.rect.y + target.y - 1),
+      w: Math.min(60, target.w + 2),
+      h: 8,
+    },
+  });
   return true;
 }
 

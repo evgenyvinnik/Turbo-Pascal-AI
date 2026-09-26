@@ -11,13 +11,22 @@ export function loadDosEmulator(): Promise<Emulators> {
     script.src = `${assetRoot}emulators/emulators.js`;
     script.onload = () => {
       const emulators = (globalThis as typeof globalThis & { emulators?: Emulators }).emulators;
-      if (!emulators) { reject(new Error('DOS emulator failed to initialize.')); return; }
+      if (!emulators) {
+        reject(new Error('DOS emulator failed to initialize.'));
+        return;
+      }
       emulators.pathPrefix = `${assetRoot}emulators/`;
       resolve(emulators);
     };
-    script.onerror = () => { script.remove(); reject(new Error('Could not load the local DOS emulator.')); };
+    script.onerror = () => {
+      script.remove();
+      reject(new Error('Could not load the local DOS emulator.'));
+    };
     document.head.append(script);
-  }).catch((error: unknown) => { loading = null; throw error; });
+  }).catch((error: unknown) => {
+    loading = null;
+    throw error;
+  });
   return loading;
 }
 
@@ -53,10 +62,22 @@ export const DOS_EXIT_SIGNAL = '__TURBO_PASCAL_DOS_EXIT__';
  * longer be read. The user works in a child shell instead, so EXIT returns
  * here with DOS still running, and the signal line tells the IDE to leave. */
 export function dosShell(command = ''): string {
-  return [...(command ? [`call ${command}`] : []), ':shell', 'command', `echo ${DOS_EXIT_SIGNAL}`, 'goto shell', ''].join('\n');
+  return [
+    ...(command ? [`call ${command}`] : []),
+    ':shell',
+    'command',
+    `echo ${DOS_EXIT_SIGNAL}`,
+    'goto shell',
+    '',
+  ].join('\n');
 }
 
-export async function startDosRuntime(files: DosFiles, command = '', nativePascal = false, toolFiles: DosFiles = {}): Promise<CommandInterface> {
+export async function startDosRuntime(
+  files: DosFiles,
+  command = '',
+  nativePascal = false,
+  toolFiles: DosFiles = {}
+): Promise<CommandInterface> {
   if (/[\r\n\0]/.test(command)) throw new Error('DOS tool command must be a single line.');
   const emulators = await loadDosEmulator();
   const debugResponse = await fetch(`${assetRoot}tools/DEBUG.COM`);
@@ -71,9 +92,24 @@ export async function startDosRuntime(files: DosFiles, command = '', nativePasca
     init.push(new Uint8Array(await native.arrayBuffer()));
   }
   init.push(
-    ...Object.entries(toolFiles).map(([path, contents]) => ({ path: `__TPTOOLS/${dosPath(path)}`, contents: stringToBytes(contents) })),
-    ...Object.entries(files).map(([path, contents]) => ({ path: `USER/${dosPath(path)}`, contents: stringToBytes(contents) })),
-    { dosboxConf: (nativePascal ? DOS_STARTUP.replace('cputype=386', 'cputype=pentium').replace('cycles=max', 'cycles=fixed 25000') : DOS_STARTUP) + dosShell(command), jsdosConf: { version: emulators.version } },
+    ...Object.entries(toolFiles).map(([path, contents]) => ({
+      path: `__TPTOOLS/${dosPath(path)}`,
+      contents: stringToBytes(contents),
+    })),
+    ...Object.entries(files).map(([path, contents]) => ({
+      path: `USER/${dosPath(path)}`,
+      contents: stringToBytes(contents),
+    })),
+    {
+      dosboxConf:
+        (nativePascal
+          ? DOS_STARTUP.replace('cputype=386', 'cputype=pentium').replace(
+              'cycles=max',
+              'cycles=fixed 25000'
+            )
+          : DOS_STARTUP) + dosShell(command),
+      jsdosConf: { version: emulators.version },
+    }
   );
   return nativePascal ? emulators.dosboxXWorker(init) : emulators.dosboxWorker(init);
 }
@@ -96,14 +132,45 @@ export async function readDosFiles(ci: CommandInterface): Promise<DosFiles> {
 }
 
 const specialKeys: Record<string, number> = {
-  Escape: 256, Enter: 257, Tab: 258, Backspace: 259, Insert: 260, Delete: 261,
-  ArrowRight: 262, ArrowLeft: 263, ArrowDown: 264, ArrowUp: 265,
-  PageUp: 266, PageDown: 267, Home: 268, End: 269, CapsLock: 280,
-  ScrollLock: 281, NumLock: 282, PrintScreen: 283, Pause: 284,
-  ShiftLeft: 340, ControlLeft: 341, AltLeft: 342, MetaLeft: 343,
-  ShiftRight: 344, ControlRight: 345, AltRight: 346, MetaRight: 347,
-  Space: 32, Quote: 39, Comma: 44, Minus: 45, Period: 46, Slash: 47,
-  Semicolon: 59, Equal: 61, BracketLeft: 91, Backslash: 92, BracketRight: 93, Backquote: 96,
+  Escape: 256,
+  Enter: 257,
+  Tab: 258,
+  Backspace: 259,
+  Insert: 260,
+  Delete: 261,
+  ArrowRight: 262,
+  ArrowLeft: 263,
+  ArrowDown: 264,
+  ArrowUp: 265,
+  PageUp: 266,
+  PageDown: 267,
+  Home: 268,
+  End: 269,
+  CapsLock: 280,
+  ScrollLock: 281,
+  NumLock: 282,
+  PrintScreen: 283,
+  Pause: 284,
+  ShiftLeft: 340,
+  ControlLeft: 341,
+  AltLeft: 342,
+  MetaLeft: 343,
+  ShiftRight: 344,
+  ControlRight: 345,
+  AltRight: 346,
+  MetaRight: 347,
+  Space: 32,
+  Quote: 39,
+  Comma: 44,
+  Minus: 45,
+  Period: 46,
+  Slash: 47,
+  Semicolon: 59,
+  Equal: 61,
+  BracketLeft: 91,
+  Backslash: 92,
+  BracketRight: 93,
+  Backquote: 96,
 };
 export function dosKeyCode(code: string): number | null {
   if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3);
@@ -117,7 +184,7 @@ export function dosKeyCode(code: string): number | null {
 /** Keystrokes go through DOSBox's keyboard controller, including its line editor. */
 export async function typeDosCommand(ci: CommandInterface, command: string): Promise<void> {
   const shifted = '~!@#$%^&*()_+{}|:"<>?';
-  const plain = '`1234567890-=[]\\;\',./';
+  const plain = "`1234567890-=[]\\;',./";
   for (const character of `${command}\n`) {
     const index = shifted.indexOf(character);
     const shift = index >= 0 || /[A-Z]/.test(character);

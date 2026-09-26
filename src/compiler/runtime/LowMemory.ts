@@ -36,7 +36,7 @@ export class LowMemory {
     const screen = this.screenCell(linear);
     if (screen) {
       const { console, index, attribute } = screen;
-      return attribute ? console.attributes[index] ?? 7 : glyphCode(console.chars[index] ?? ' ');
+      return attribute ? (console.attributes[index] ?? 7) : glyphCode(console.chars[index] ?? ' ');
     }
     const bios = this.bios(linear - BIOS_DATA);
     return bios ?? this.ram.get(linear) ?? 0;
@@ -64,12 +64,15 @@ export class LowMemory {
 
   /** The dot a byte of VGA memory shows, while mode 13h is on. */
   private dot(linear: number): number | undefined {
-    const graphics = this.host.graphics, offset = linear - VIDEO_GRAPHICS;
+    const graphics = this.host.graphics,
+      offset = linear - VIDEO_GRAPHICS;
     return graphics?.dac && offset >= 0 && offset < graphics.pixels.length ? offset : undefined;
   }
   /** The screen cell a byte of video memory shows: its character, or at an
    * odd address its attribute. */
-  private screenCell(linear: number): { console: TextConsole; index: number; attribute: boolean } | undefined {
+  private screenCell(
+    linear: number
+  ): { console: TextConsole; index: number; attribute: boolean } | undefined {
     const console = this.host.console;
     const offset = linear - VIDEO_TEXT;
     if (offset < 0 || offset >= console.cols * console.rows * 2) return undefined;
@@ -80,7 +83,8 @@ export class LowMemory {
    * screen size, the cursor, the keyboard buffer and the tick count. */
   private bios(offset: number): number | undefined {
     const console = this.host.console;
-    const word = (value: number, at: number) => (offset === at ? value & 0xff : offset === at + 1 ? (value >> 8) & 0xff : undefined);
+    const word = (value: number, at: number) =>
+      offset === at ? value & 0xff : offset === at + 1 ? (value >> 8) & 0xff : undefined;
     if (offset === 0x49) return console.lastMode & 0xff;
     if (offset === 0x4a || offset === 0x4b) return word(console.cols, 0x4a);
     if (offset === 0x50 || offset === 0x51) {
@@ -91,10 +95,15 @@ export class LowMemory {
     if (offset === 0x84) return console.rows - 1;
     // The keyboard buffer's head and tail, apart while keys wait.
     if (offset === 0x1a || offset === 0x1b) return word(0x1e, 0x1a);
-    if (offset === 0x1c || offset === 0x1d) return word(0x1e + 2 * Math.min(15, this.host.keysAvailable()), 0x1c);
+    if (offset === 0x1c || offset === 0x1d)
+      return word(0x1e + 2 * Math.min(15, this.host.keysAvailable()), 0x1c);
     if (offset >= 0x6c && offset <= 0x6f) {
       const now = this.host.now();
-      const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds() + now.getMilliseconds() / 1000;
+      const seconds =
+        now.getHours() * 3600 +
+        now.getMinutes() * 60 +
+        now.getSeconds() +
+        now.getMilliseconds() / 1000;
       const ticks = Math.floor((seconds * 1193180) / 65536);
       return (ticks >>> ((offset - 0x6c) * 8)) & 0xff;
     }
@@ -110,7 +119,9 @@ export class LowMemory {
 export class Ports {
   private toggle = 0;
   private timer = { divisor: 0, low: true, gate: 0 };
-  constructor(private host: { sound(frequency: number): void; scanCode(): number; graphics?: GraphicsRuntime }) {}
+  constructor(
+    private host: { sound(frequency: number): void; scanCode(): number; graphics?: GraphicsRuntime }
+  ) {}
 
   reset(): void {
     this.toggle = 0;
@@ -132,11 +143,15 @@ export class Ports {
       if (at >= 0x3c7 && at <= 0x3c9) this.host.graphics?.dacPort(at, byte);
       else if (at === 0x43) timer.low = true;
       else if (at === 0x42) {
-        timer.divisor = timer.low ? (timer.divisor & 0xff00) | byte : (timer.divisor & 0xff) | (byte << 8);
+        timer.divisor = timer.low
+          ? (timer.divisor & 0xff00) | byte
+          : (timer.divisor & 0xff) | (byte << 8);
         timer.low = !timer.low;
       } else if (at === 0x61) {
         timer.gate = byte;
-        this.host.sound((byte & 3) === 3 && timer.divisor ? Math.round(1193180 / timer.divisor) : 0);
+        this.host.sound(
+          (byte & 3) === 3 && timer.divisor ? Math.round(1193180 / timer.divisor) : 0
+        );
       }
     };
     one(port, value & 0xff);

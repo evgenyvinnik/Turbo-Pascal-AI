@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
 
-test('context help preserves its dialog and supports index and previous topic', async ({ page }) => {
+test('context help preserves its dialog and supports index and previous topic', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.openMenu('O');
   await ide.chooseItem('c');
@@ -48,7 +50,9 @@ test('editor context and identifier help open different real topics', async ({ p
   await ide.waitForText('Help on the Editor Options Dialog Box');
 });
 
-test('Find Procedure navigates to a declaration and Find Error resolves bytecode addresses', async ({ page }) => {
+test('Find Procedure navigates to a declaration and Find Error resolves bytecode addresses', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.openFile('SQUARE.PAS');
   await ide.press('F7');
@@ -68,7 +72,9 @@ test('Find Procedure navigates to a declaration and Find Error resolves bytecode
   await expect(ide.row(23)).toContainText('4:1');
 });
 
-test('Primary File selects the program compiled while another editor is active', async ({ page }) => {
+test('Primary File selects the program compiled while another editor is active', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.openFile('HELLO.PAS');
   await ide.openMenu('C');

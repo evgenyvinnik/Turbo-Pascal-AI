@@ -22,7 +22,9 @@ describe('System unit additions', () => {
       begin c := 1234; WriteLn(c); c := c / 3; WriteLn(c:0:1, ' ', SizeOf(c)); c := 2.5; WriteLn(c:0:0) end.`)
     ).toEqual([' 1.23400000000000E+0003', '411.0 8', '2']);
     // The 8087 rounds halves to even, and faults outside 64 bits.
-    expect([compValue(2.5), compValue(3.5), compValue(-2.5), compValue(-0.4)]).toEqual([2, 4, -2, 0]);
+    expect([compValue(2.5), compValue(3.5), compValue(-2.5), compValue(-0.4)]).toEqual([
+      2, 4, -2, 0,
+    ]);
     expect(() => compValue(2 ** 63)).toThrow(/Invalid numeric result/);
   });
 
@@ -35,21 +37,29 @@ describe('System unit additions', () => {
   });
 
   it('names the program in ParamStr(0) and has no parameters', () => {
-    expect(execute(`program Demo; begin WriteLn(ParamStr(0), ' ', ParamCount, ' [', ParamStr(1), ']') end.`)).toEqual([
-      'C:\\DEMO.EXE 0 []',
-    ]);
+    expect(
+      execute(
+        `program Demo; begin WriteLn(ParamStr(0), ' ', ParamCount, ' [', ParamStr(1), ']') end.`
+      )
+    ).toEqual(['C:\\DEMO.EXE 0 []']);
   });
 
   it('rejects what these routines cannot do', () => {
-    expect(() => compile('program T; procedure P(x: array of Byte); begin FillChar(x, 2, 0) end; begin end.')).toThrow(
-      /FillChar needs a variable whose type is known here/
+    expect(() =>
+      compile('program T; procedure P(x: array of Byte); begin FillChar(x, 2, 0) end; begin end.')
+    ).toThrow(/FillChar needs a variable whose type is known here/);
+    expect(() => compile('program T; var w: Word absolute 1 + 2; begin end.')).toThrow(
+      /Variable identifier expected/
     );
-    expect(() => compile('program T; var w: Word absolute 1 + 2; begin end.')).toThrow(/Variable identifier expected/);
     expect(() => compile('program T; const C = 1; var w: Integer absolute C; begin end.')).toThrow(
       /Variable expected: "C"/
     );
-    expect(() => compile('program T; const C = Chr(300); begin end.')).toThrow(/Constant out of range/);
-    expect(() => compile("program T; const C = Length(5); begin end.")).toThrow(/String constant expected/);
+    expect(() => compile('program T; const C = Chr(300); begin end.')).toThrow(
+      /Constant out of range/
+    );
+    expect(() => compile('program T; const C = Length(5); begin end.')).toThrow(
+      /String constant expected/
+    );
     expect(() => compile('program T; var x: Integer; const C = Ord(x); begin end.')).toThrow(
       /Constant expected/
     );
@@ -70,12 +80,14 @@ describe('System unit additions', () => {
       'program T; var b: Byte; begin b := 256 end.',
       'program T; type Small = 1..9; var s: Small; begin s := 0 end.',
       'program T; var a: array[1..3] of Integer; begin a[4] := 1 end.',
-      "program T; var s: string; c: Char; begin c := s[256] end.",
+      'program T; var s: string; c: Char; begin c := s[256] end.',
       'program T; type Color = (Red, Green); var c: Color; begin c := Pred(Red) end.',
     ])
       expect(() => compile(source), source).toThrow(/Constant out of range/);
     // A value that is not constant is still checked when it runs.
-    expect(() => compile('program T; var b: Byte; i: Integer; begin i := 256; b := i end.')).not.toThrow();
+    expect(() =>
+      compile('program T; var b: Byte; i: Integer; begin i := 256; b := i end.')
+    ).not.toThrow();
   });
 
   it('reports a constant a standard function cannot return, where it is written', () => {
@@ -122,7 +134,9 @@ describe('System unit additions', () => {
 
   it('waits for console input read through a text file variable', () => {
     const machine = new Machine(
-      compile('program T; var f: Text; n: Integer; begin Assign(f, \'\'); Reset(f); ReadLn(f, n); WriteLn(n + 1) end.')
+      compile(
+        "program T; var f: Text; n: Integer; begin Assign(f, ''); Reset(f); ReadLn(f, n); WriteLn(n + 1) end."
+      )
     );
     machine.run();
     expect(machine.getState()).toBe(MachineState.WAITING);
@@ -132,7 +146,9 @@ describe('System unit additions', () => {
   });
 
   it('starts the System variables again when the machine is reset', () => {
-    const machine = new Machine(compile('program T; begin WriteLn(FileMode, Test8087); FileMode := 0 end.'));
+    const machine = new Machine(
+      compile('program T; begin WriteLn(FileMode, Test8087); FileMode := 0 end.')
+    );
     machine.run();
     machine.reset();
     machine.run();
@@ -165,9 +181,9 @@ describe('System unit additions', () => {
     machine.run();
     expect(machine.getExitCode()).toBe(9);
     // Borland's generator: RandSeed := RandSeed * 134775813 + 1.
-    expect(execute('program T; begin RandSeed := 1; WriteLn(Random(1000), RandSeed) end.')).toEqual([
-      '31134775814',
-    ]);
+    expect(execute('program T; begin RandSeed := 1; WriteLn(Random(1000), RandSeed) end.')).toEqual(
+      ['31134775814']
+    );
   });
 
   it('keeps HeapOrg, HeapPtr and HeapEnd on the heap, which grows down', () => {
@@ -203,12 +219,17 @@ describe('System unit additions', () => {
 
   it('writes Lst to LPT1 on the drive, and only with the Printer unit', () => {
     const disk = new VirtualFileSystem();
-    const machine = new Machine(compile(`program T; uses Printer; begin WriteLn(Lst, 'page'); Write(Lst, 'end') end.`), {
-      fileSystem: disk,
-    });
+    const machine = new Machine(
+      compile(`program T; uses Printer; begin WriteLn(Lst, 'page'); Write(Lst, 'end') end.`),
+      {
+        fileSystem: disk,
+      }
+    );
     machine.run();
     expect(disk.snapshot()).toEqual({ LPT1: 'page\r\nend' });
-    expect(() => compile("program T; begin WriteLn(Lst, 'x') end.")).toThrow(/Undeclared identifier "Lst"/);
+    expect(() => compile("program T; begin WriteLn(Lst, 'x') end.")).toThrow(
+      /Undeclared identifier "Lst"/
+    );
   });
 
   it('moves a PChar and passes a zero-based Char array as one', () => {
@@ -258,8 +279,12 @@ describe('Standard units beyond System', () => {
         OvrSetBuf(8192); OvrSetRetry(100); WriteLn(OvrGetBuf, ' ', OvrGetRetry, ' ', OvrTrapCount, OvrLoadCount, OvrFileMode);
         OvrResult := ovrError; OvrClearBuf; WriteLn(OvrResult) end.`)
     ).toEqual(['TRUE 0', '8192 100 000', '0']);
-    expect(() => compile('program T; begin OvrInit(\'T.OVR\') end.')).toThrow(/Undeclared procedure or function "OvrInit"/);
-    expect(() => compile('program T; begin OvrResult := 0 end.')).toThrow(/Undeclared identifier "OvrResult"/);
+    expect(() => compile("program T; begin OvrInit('T.OVR') end.")).toThrow(
+      /Undeclared procedure or function "OvrInit"/
+    );
+    expect(() => compile('program T; begin OvrResult := 0 end.')).toThrow(
+      /Undeclared identifier "OvrResult"/
+    );
   });
 
   it('reads Turbo3 Kbd a key at a time, without echo', () => {
@@ -278,8 +303,12 @@ describe('Standard units beyond System', () => {
     machine.provideKey('q');
     machine.run();
     expect(machine.getOutput()).toEqual(['120y', 'qTRUE']);
-    expect(() => compile('program T; uses Turbo3; var n: Integer; begin Read(Kbd, n) end.')).not.toThrow();
-    const numbers = new Machine(compile('program T; uses Turbo3; var n: Integer; begin Read(Kbd, n) end.'));
+    expect(() =>
+      compile('program T; uses Turbo3; var n: Integer; begin Read(Kbd, n) end.')
+    ).not.toThrow();
+    const numbers = new Machine(
+      compile('program T; uses Turbo3; var n: Integer; begin Read(Kbd, n) end.')
+    );
     numbers.provideKey('1');
     expect(() => {
       numbers.run();
@@ -311,8 +340,16 @@ describe('Standard units beyond System', () => {
         TextMode(CO40); WriteLn(LastMode, ' ', WindMax) end.`)
     );
     machine.run();
-    expect(machine.getOutput()).toEqual(['7 0 6223 3 TRUEFALSETRUE', '30', 'x79', '513 2343', 'y1 6183']);
-    expect(() => compile('program T; begin TextAttr := 7 end.')).toThrow(/Undeclared identifier "TextAttr"/);
+    expect(machine.getOutput()).toEqual([
+      '7 0 6223 3 TRUEFALSETRUE',
+      '30',
+      'x79',
+      '513 2343',
+      'y1 6183',
+    ]);
+    expect(() => compile('program T; begin TextAttr := 7 end.')).toThrow(
+      /Undeclared identifier "TextAttr"/
+    );
   });
 
   it('qualifies names with the standard unit that declares them', () => {
@@ -322,19 +359,29 @@ describe('Standard units beyond System', () => {
         WriteLn(MemAvail < System.MemAvail div 8, ' ', System.ExitCode, ' ', Turbo3.CBreak) end.`)
     ).toEqual(['32767 4  3 3.14', 'TRUE 0 TRUE']);
     // A unit not in use names nothing, and a variable may take a unit's name.
-    expect(() => compile('program T; begin WriteLn(Crt.Yellow) end.')).toThrow(/Undeclared identifier "Crt"/);
-    expect(() => compile('program T; begin WriteLn(System.Nothing) end.')).toThrow(/Undeclared identifier "System.Nothing"/);
+    expect(() => compile('program T; begin WriteLn(Crt.Yellow) end.')).toThrow(
+      /Undeclared identifier "Crt"/
+    );
+    expect(() => compile('program T; begin WriteLn(System.Nothing) end.')).toThrow(
+      /Undeclared identifier "System.Nothing"/
+    );
     expect(
-      execute('program T; type R = record MemAvail: Integer end; var System: R; begin System.MemAvail := 4; WriteLn(System.MemAvail) end.')
+      execute(
+        'program T; type R = record MemAvail: Integer end; var System: R; begin System.MemAvail := 4; WriteLn(System.MemAvail) end.'
+      )
     ).toEqual(['4']);
     // A program may declare a System name again, as Turbo Pascal lets it.
     expect(
       execute(`program T; var Double: string[5]; procedure MaxInt; begin Write('proc ') end;
       begin Double := 'abcdefg'; MaxInt; WriteLn(Double, ' ', System.MaxInt, ' ', SizeOf(System.Double)) end.`)
     ).toEqual(['proc abcde 32767 8']);
-    expect(() => compile('program T; var x: Integer; x: Integer; begin end.')).toThrow(/Duplicate identifier "x"/);
+    expect(() => compile('program T; var x: Integer; x: Integer; begin end.')).toThrow(
+      /Duplicate identifier "x"/
+    );
     // A variable's type cannot name the variable, even where a System type
     // has that name, as Free Pascal's tbf0345 checks.
-    expect(() => compile('program T; var Word: array[1..2] of Word; begin end.')).toThrow(/Error in type definition/);
+    expect(() => compile('program T; var Word: array[1..2] of Word; begin end.')).toThrow(
+      /Error in type definition/
+    );
   });
 });

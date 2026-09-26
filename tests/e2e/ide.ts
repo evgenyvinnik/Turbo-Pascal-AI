@@ -13,7 +13,10 @@ export class Ide {
     await page.waitForSelector('[data-testid="tp-screen"] [data-row="0"]');
     await expect(ide.row(0)).toContainText('File');
     // Restored workspaces can have several windows, or an intentionally empty desktop.
-    await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-workspace-ready', 'true');
+    await expect(page.getByTestId('workspace-status')).toHaveAttribute(
+      'data-workspace-ready',
+      'true'
+    );
     // The editor blinks its caret; freeze it so snapshots are stable.
     await page.addStyleTag({ content: '*{animation:none !important}' });
     return ide;
@@ -32,7 +35,7 @@ export class Ide {
   /** The whole 80x25 screen as 25 lines of text. */
   async screenText(): Promise<string[]> {
     return this.page.$$eval('[data-row]', (rows) =>
-      rows.map((r) => r.textContent.replace(/\s+$/, '')),
+      rows.map((r) => r.textContent.replace(/\s+$/, ''))
     );
   }
 

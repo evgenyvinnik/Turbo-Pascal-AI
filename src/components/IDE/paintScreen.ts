@@ -2,10 +2,20 @@ import { Screen } from '@/tui/Screen';
 import { SHADE_LIGHT } from '@/tui/chars';
 import { TP } from '@styles/tpTheme';
 import { paintMenuBar, type MenuPaintState } from '@components/MenuBar/paintMenuBar';
-import { paintStatusHint, paintStatusKeys, type StatusHit, type StatusKey } from '@components/StatusBar/paintStatusBar';
+import {
+  paintStatusHint,
+  paintStatusKeys,
+  type StatusHit,
+  type StatusKey,
+} from '@components/StatusBar/paintStatusBar';
 import { paintEditWindow } from '@components/Editor/paintEditor';
 import { paintHelpWindow } from '@components/Help/paintHelp';
-import { BLACK_TOOL, CYAN_TOOL, paintToolWindow, type ToolRow } from '@components/Window/paintToolWindow';
+import {
+  BLACK_TOOL,
+  CYAN_TOOL,
+  paintToolWindow,
+  type ToolRow,
+} from '@components/Window/paintToolWindow';
 import { paintDialog, type DialogHit } from '@components/Dialogs/paintDialog';
 import { DESKTOP, type Buffer, type TPWindow } from '@stores/desktopStore';
 import type { OpenDialog } from '@stores/dialogStore';
@@ -133,7 +143,13 @@ export function paintScreen(input: PaintInput): PaintOutput {
     if (win.kind === 'edit') {
       const buf = win.bufferId ? input.buffers[win.bufferId] : undefined;
       if (!buf) continue;
-      const c = paintEditWindow(scr, win, buf, active, input.breakpoints?.filter((point) => point.file === buf.name).map((point) => point.line));
+      const c = paintEditWindow(
+        scr,
+        win,
+        buf,
+        active,
+        input.breakpoints?.filter((point) => point.file === buf.name).map((point) => point.line)
+      );
       if (!isFullSize(win.rect)) scr.shadow(win.rect);
       if (c && input.dialogs.length === 0 && !input.menu.open) cursor = c;
       continue;
@@ -143,7 +159,13 @@ export function paintScreen(input: PaintInput): PaintOutput {
       continue;
     }
     if (win.kind === 'help') {
-      const c = paintHelpWindow(scr, win, active, input.tools.helpTopic ?? 'contents', input.tools.help);
+      const c = paintHelpWindow(
+        scr,
+        win,
+        active,
+        input.tools.helpTopic ?? 'contents',
+        input.tools.help
+      );
       if (c && input.dialogs.length === 0 && !input.menu.open) cursor = c;
       continue;
     }
@@ -152,7 +174,13 @@ export function paintScreen(input: PaintInput): PaintOutput {
       scr.frame(win.rect, TP.toolText, false);
       scr.write(win.rect.x + 8, win.rect.y, ' CPU ', TP.toolText);
       scr.write(win.rect.x + win.rect.w - 3, win.rect.y, String(win.num), TP.toolText);
-      for (const [index, line] of (input.tools.registers ?? []).entries()) scr.write(win.rect.x + 2, win.rect.y + index + 1, line.slice(0, win.rect.w - 3), TP.toolText);
+      for (const [index, line] of (input.tools.registers ?? []).entries())
+        scr.write(
+          win.rect.x + 2,
+          win.rect.y + index + 1,
+          line.slice(0, win.rect.w - 3),
+          TP.toolText
+        );
       scr.shadow(win.rect);
       continue;
     }
@@ -181,7 +209,7 @@ export function paintScreen(input: PaintInput): PaintOutput {
     runtimeActive: input.runtimeActive ?? false,
     hasBytecode: input.hasBytecode ?? false,
     hasMessages: input.tools.messages.some((message) => /\(\d+\):/.test(message)),
-    buffer: activeWindow?.bufferId ? input.buffers[activeWindow.bufferId] ?? null : null,
+    buffer: activeWindow?.bufferId ? (input.buffers[activeWindow.bufferId] ?? null) : null,
     clipboard: input.clipboard ?? '',
   };
   paintMenuBar(scr, input.menu, menuContext);
@@ -195,13 +223,21 @@ export function paintScreen(input: PaintInput): PaintOutput {
     paintStatusHint(scr, input.hint);
   } else {
     const active = input.windows.find((w) => w.id === input.activeId);
-    const keys = active?.kind === 'edit' && input.runtimeActive
-      ? DEBUG_KEYS
-      : active?.kind === 'callstack' && !input.tools.callstack.length
-        ? CALLSTACK_KEYS.map((item) => item.command === 'debug.gotosource' ? { ...item, disabled: true } : item)
-        : active?.kind === 'messages' && /^(.+)\(\d+\):/.test(input.tools.messages[active.selected] ?? '')
-          ? MESSAGE_KEYS.map((item) => item.label === 'Go to source' ? { ...item, disabled: false, command: 'tools.gotosource' } : item)
-          : statusFor(active?.kind);
+    const keys =
+      active?.kind === 'edit' && input.runtimeActive
+        ? DEBUG_KEYS
+        : active?.kind === 'callstack' && !input.tools.callstack.length
+          ? CALLSTACK_KEYS.map((item) =>
+              item.command === 'debug.gotosource' ? { ...item, disabled: true } : item
+            )
+          : active?.kind === 'messages' &&
+              /^(.+)\(\d+\):/.test(input.tools.messages[active.selected] ?? '')
+            ? MESSAGE_KEYS.map((item) =>
+                item.label === 'Go to source'
+                  ? { ...item, disabled: false, command: 'tools.gotosource' }
+                  : item
+              )
+            : statusFor(active?.kind);
     statusHits = paintStatusKeys(scr, keys);
   }
 

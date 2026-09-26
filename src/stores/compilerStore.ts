@@ -6,7 +6,14 @@ import { NativePascalRequired, parseProject, type ProjectOptions } from '@compil
 import { NodeType, type Node } from '@compiler/parser/Node';
 
 export type CompilationStatus = 'idle' | 'lexing' | 'parsing' | 'compiling' | 'success' | 'error';
-export type RuntimeStatus = 'idle' | 'running' | 'paused' | 'waiting' | 'completed' | 'stopped' | 'error';
+export type RuntimeStatus =
+  | 'idle'
+  | 'running'
+  | 'paused'
+  | 'waiting'
+  | 'completed'
+  | 'stopped'
+  | 'error';
 
 export interface CompilationError {
   message: string;
@@ -42,7 +49,11 @@ interface CompilerState {
 }
 
 interface CompilerActions {
-  compile: (source: string, filename: string, options?: ProjectOptions) => Promise<CompilationResult>;
+  compile: (
+    source: string,
+    filename: string,
+    options?: ProjectOptions
+  ) => Promise<CompilationResult>;
   clearErrors: () => void;
   clearOutput: () => void;
   appendOutput: (line: string) => void;
@@ -128,8 +139,18 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
       } catch (error) {
         const compilationTime = Date.now() - startTime;
         if (error instanceof NativePascalRequired) {
-          const result = { bytecode: null, parseTree: null, errors: [], warnings: [], compilationTime, nativeRequired: true };
-          set(state => { state.status = 'idle'; state.result = result; });
+          const result = {
+            bytecode: null,
+            parseTree: null,
+            errors: [],
+            warnings: [],
+            compilationTime,
+            nativeRequired: true,
+          };
+          set((state) => {
+            state.status = 'idle';
+            state.result = result;
+          });
           return result;
         }
 
@@ -144,7 +165,9 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
             file: diagnostic.sourceFile ?? filename,
             severity: 'error',
           });
-          get().appendOutput(`${diagnostic.sourceFile ?? filename}(${String(diagnostic.lineNumber)}): ${formatPascalDiagnostic(diagnostic)}`);
+          get().appendOutput(
+            `${diagnostic.sourceFile ?? filename}(${String(diagnostic.lineNumber)}): ${formatPascalDiagnostic(diagnostic)}`
+          );
         } else if (error instanceof Error) {
           errors.push({
             message: error.message,
@@ -173,28 +196,32 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
       }
     },
 
-    clearErrors: () =>
-      { set((state) => {
+    clearErrors: () => {
+      set((state) => {
         if (state.result) {
           state.result.errors = [];
           state.result.warnings = [];
         }
-      }); },
+      });
+    },
 
-    clearOutput: () =>
-      { set((state) => {
+    clearOutput: () => {
+      set((state) => {
         state.outputLines = [];
-      }); },
+      });
+    },
 
-    appendOutput: (line) =>
-      { set((state) => {
+    appendOutput: (line) => {
+      set((state) => {
         state.outputLines.push(line);
-      }); },
+      });
+    },
 
-    setProgramOutput: (lines) =>
-      { set((state) => {
+    setProgramOutput: (lines) => {
+      set((state) => {
         state.programOutput = lines;
-      }); },
+      });
+    },
 
     setRuntime: (status, error = null) => {
       set((state) => {
@@ -203,14 +230,16 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
       });
     },
 
-    setMessages: (lines) =>
-      { set((state) => {
+    setMessages: (lines) => {
+      set((state) => {
         state.messages = lines;
-      }); },
+      });
+    },
 
-    setStatus: (status) =>
-      { set((state) => {
+    setStatus: (status) => {
+      set((state) => {
         state.status = status;
-      }); },
+      });
+    },
   }))
 );

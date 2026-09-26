@@ -10,17 +10,22 @@ function services() {
   const memory = new Map<number, StackValue>();
   const disk = new VirtualFileSystem();
   const sound = vi.fn();
-  const runtime = new RuntimeServices({
-    read: (address) => memory.get(address) ?? 0,
-    write: (address, value) => { memory.set(address, value); },
-    allocate: () => 1000,
-    heapAvailable: () => ({ total: 0, largest: 0 }),
-    stackPointer: () => 0,
-    heapTop: () => 0,
-    releaseHeap: () => undefined,
-    free: () => undefined,
-    sound,
-  }, disk);
+  const runtime = new RuntimeServices(
+    {
+      read: (address) => memory.get(address) ?? 0,
+      write: (address, value) => {
+        memory.set(address, value);
+      },
+      allocate: () => 1000,
+      heapAvailable: () => ({ total: 0, largest: 0 }),
+      stackPointer: () => 0,
+      heapTop: () => 0,
+      releaseHeap: () => undefined,
+      free: () => undefined,
+      sound,
+    },
+    disk
+  );
   return { runtime, memory, disk, sound };
 }
 
@@ -55,7 +60,12 @@ describe('BGI framebuffer', () => {
     graph.rectangle(10, 10, 20, 20);
     graph.fillColor = 2;
     graph.flood(15, 15, 4);
-    expect([graph.getPixel(10, 10), graph.getPixel(20, 20), graph.getPixel(15, 15), graph.getPixel(9, 9)]).toEqual([4, 4, 2, 0]);
+    expect([
+      graph.getPixel(10, 10),
+      graph.getPixel(20, 20),
+      graph.getPixel(15, 15),
+      graph.getPixel(9, 9),
+    ]).toEqual([4, 4, 2, 0]);
     expect([graph.width, graph.height]).toEqual([640, 480]);
   });
   it('uses viewport-relative coordinates and clips drawing', () => {
@@ -107,7 +117,15 @@ describe('stateful runtime services', () => {
   });
   it('seeks and reads typed records without formatting away their values', () => {
     const { runtime, memory } = services();
-    runtime.invoke(46, [10, 'values.dat', 2, JSON.stringify([{ kind: 'integer', bytes: 2, signed: true }, { kind: 'string', bytes: 6 }])]);
+    runtime.invoke(46, [
+      10,
+      'values.dat',
+      2,
+      JSON.stringify([
+        { kind: 'integer', bytes: 2, signed: true },
+        { kind: 'string', bytes: 6 },
+      ]),
+    ]);
     runtime.invoke(48, [10]);
     runtime.invoke(78, [10, 7, 'seven']);
     runtime.invoke(78, [10, 9, 'nine']);

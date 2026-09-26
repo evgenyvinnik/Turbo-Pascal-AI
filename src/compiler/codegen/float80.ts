@@ -45,12 +45,18 @@ interface Exact {
 
 /** A value's exact parts. */
 function exact(value: Real): Exact {
-  if (value instanceof Float80) return { negative: value.negative, n: value.significand, e: value.exponent };
-  if (value === 0 || !Number.isFinite(value)) return { negative: Object.is(value, -0), n: 0n, e: 0 };
+  if (value instanceof Float80)
+    return { negative: value.negative, n: value.significand, e: value.exponent };
+  if (value === 0 || !Number.isFinite(value))
+    return { negative: Object.is(value, -0), n: 0n, e: 0 };
   const bits = new DataView(Float64Array.of(value).buffer).getBigUint64(0, true);
   const biased = Number((bits >> 52n) & 0x7ffn);
   const fraction = bits & ((1n << 52n) - 1n);
-  return { negative: bits >> 63n === 1n, n: biased ? fraction | (1n << 52n) : fraction, e: (biased || 1) - 1075 };
+  return {
+    negative: bits >> 63n === 1n,
+    n: biased ? fraction | (1n << 52n) : fraction,
+    e: (biased || 1) - 1075,
+  };
 }
 
 function bitLength(value: bigint): number {
@@ -59,7 +65,13 @@ function bitLength(value: bigint): number {
 
 /** num / den × 2^e rounded to 64 significant bits, the nearest and an exact
  * half to even, as the 8087 rounds: a double where one holds it. */
-export function roundExtended(negative: boolean, num: bigint, den: bigint, e: number, line = -1): Real {
+export function roundExtended(
+  negative: boolean,
+  num: bigint,
+  den: bigint,
+  e: number,
+  line = -1
+): Real {
   if (num === 0n) return 0;
   const divide = (shift: number): [bigint, bigint, bigint] => {
     const a = shift >= 0 ? num << BigInt(shift) : num;
@@ -101,8 +113,10 @@ export function toReal(value: number | bigint): Real {
 
 /** +, -, * and / as the 8087 computes them, rounding the exact result. */
 export function extendedOperation(operator: string, a: Real, b: Real, line = -1): Real {
-  const x = exact(a), y = exact(b);
-  if (operator === '*') return roundExtended(x.negative !== y.negative, x.n * y.n, 1n, x.e + y.e, line);
+  const x = exact(a),
+    y = exact(b);
+  if (operator === '*')
+    return roundExtended(x.negative !== y.negative, x.n * y.n, 1n, x.e + y.e, line);
   if (operator === '/') {
     if (y.n === 0n) throw new PascalError('Division by zero', line);
     return roundExtended(x.negative !== y.negative, x.n, y.n, x.e - y.e, line);
@@ -116,7 +130,8 @@ export function extendedOperation(operator: string, a: Real, b: Real, line = -1)
   const base = Math.max(Math.min(x.e, y.e), top - 200);
   const scale = (term: Exact) => {
     if (term.e >= base) return term.n << BigInt(term.e - base);
-    const shift = BigInt(base - term.e), kept = term.n >> shift;
+    const shift = BigInt(base - term.e),
+      kept = term.n >> shift;
     return (term.n & ((1n << shift) - 1n)) === 0n ? kept : kept | 1n;
   };
   const sum = (x.negative ? -scale(x) : scale(x)) + (negativeY ? -scale(y) : scale(y));
@@ -126,7 +141,8 @@ export function extendedOperation(operator: string, a: Real, b: Real, line = -1)
 /** Compares two values exactly: negative, zero or positive. */
 export function compareReal(a: Real, b: Real): number {
   if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0;
-  const x = exact(a), y = exact(b);
+  const x = exact(a),
+    y = exact(b);
   const e = Math.min(x.e, y.e);
   const left = (x.negative ? -1n : 1n) * (x.n << BigInt(x.e - e));
   const right = (y.negative ? -1n : 1n) * (y.n << BigInt(y.e - e));
@@ -134,11 +150,15 @@ export function compareReal(a: Real, b: Real): number {
 }
 
 export function negateReal(value: Real): Real {
-  return value instanceof Float80 ? new Float80(!value.negative, value.significand, value.exponent) : -value;
+  return value instanceof Float80
+    ? new Float80(!value.negative, value.significand, value.exponent)
+    : -value;
 }
 
 export function absReal(value: Real): Real {
-  return value instanceof Float80 ? new Float80(false, value.significand, value.exponent) : Math.abs(value);
+  return value instanceof Float80
+    ? new Float80(false, value.significand, value.exponent)
+    : Math.abs(value);
 }
 
 /** The whole part toward zero, as an integer. */
@@ -162,7 +182,9 @@ export function intReal(value: Real): Real {
   return whole === 0n ? 0 : toReal(whole);
 }
 export function fracReal(value: Real, line = -1): Real {
-  return typeof value === 'number' ? value - Math.trunc(value) : extendedOperation('-', value, intReal(value), line);
+  return typeof value === 'number'
+    ? value - Math.trunc(value)
+    : extendedOperation('-', value, intReal(value), line);
 }
 
 /** The square root, rounded as the 8087's FSQRT is. */
@@ -170,7 +192,8 @@ export function sqrtReal(value: Real, line = -1): Real {
   const { negative, n, e: exponent } = exact(value);
   if (n === 0n) return 0;
   if (negative) throw new PascalError('Invalid floating point operation', line);
-  let m = n, e = exponent;
+  let m = n,
+    e = exponent;
   if (e % 2 !== 0) {
     m <<= 1n;
     e -= 1;
@@ -182,7 +205,9 @@ export function sqrtReal(value: Real, line = -1): Real {
   // Newton's method from above lands on the root's floor; a double's root,
   // nudged up, starts it within a few steps.
   const estimate = Math.sqrt(Number(m)) * (1 + 2 ** -40);
-  let root = Number.isFinite(estimate) ? BigInt(Math.ceil(estimate)) + 1n : 1n << BigInt(Math.ceil(bitLength(m) / 2));
+  let root = Number.isFinite(estimate)
+    ? BigInt(Math.ceil(estimate)) + 1n
+    : 1n << BigInt(Math.ceil(bitLength(m) / 2));
   for (;;) {
     const next = (root + m / root) >> 1n;
     if (next >= root) break;
@@ -201,7 +226,8 @@ export function compReal(value: Real, line = -1): Real {
   else {
     const shift = BigInt(-e);
     whole = n >> shift;
-    const rest = n - (whole << shift), half = 1n << (shift - 1n);
+    const rest = n - (whole << shift),
+      half = 1n << (shift - 1n);
     if (rest > half || (rest === half && (whole & 1n) === 1n)) whole += 1n;
   }
   if (whole >= TWO63) throw new PascalError('Invalid numeric result', line);
@@ -254,7 +280,8 @@ export function encodeExtended(value: Real): Uint8Array {
 export function decodeExtended(bytes: Uint8Array): Real {
   let significand = 0n;
   for (let i = 7; i >= 0; i--) significand = (significand << 8n) | BigInt(bytes[i] ?? 0);
-  const high = bytes[9] ?? 0, biased = (bytes[8] ?? 0) | ((high & 0x7f) << 8);
+  const high = bytes[9] ?? 0,
+    biased = (bytes[8] ?? 0) | ((high & 0x7f) << 8);
   if (significand === 0n) return 0;
   return roundExtended((high & 0x80) !== 0, significand, 1n, biased - 16383 - 63);
 }

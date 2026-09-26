@@ -29,7 +29,19 @@ export interface AsmContext {
 /** Instructions and forms the 80286 added to the 8086's: an immediate
  * PUSH, IMUL with an immediate, and a shift or rotate by a count other than
  * one, as well as these mnemonics. */
-const OPCODES_286 = new Set(['pusha', 'popa', 'enter', 'leave', 'bound', 'ins', 'insb', 'insw', 'outs', 'outsb', 'outsw']);
+const OPCODES_286 = new Set([
+  'pusha',
+  'popa',
+  'enter',
+  'leave',
+  'bound',
+  'ins',
+  'insb',
+  'insw',
+  'outs',
+  'outsb',
+  'outsw',
+]);
 const SHIFTS = new Set(['shl', 'sal', 'shr', 'sar', 'rol', 'ror', 'rcl', 'rcr']);
 function needs286(mnemonic: string, operands: Operand[]): boolean {
   if (OPCODES_286.has(mnemonic)) return true;
@@ -370,7 +382,9 @@ export function assemble(
             : {}),
           registers: registers as WordRegister[],
           displacement: value.constant,
-          ...(raw.segment && (SEGMENT_REGISTERS as readonly string[]).includes(raw.segment) ? { segment: raw.segment as SegmentRegister } : {}),
+          ...(raw.segment && (SEGMENT_REGISTERS as readonly string[]).includes(raw.segment)
+            ? { segment: raw.segment as SegmentRegister }
+            : {}),
         };
       }
       const value = evaluate(raw.expression);
@@ -398,13 +412,16 @@ export function assemble(
           variable: slot(value.variable.key, value.variable.variable),
           registers: [],
           displacement: value.constant,
-          ...(raw.segment && (SEGMENT_REGISTERS as readonly string[]).includes(raw.segment) ? { segment: raw.segment as SegmentRegister } : {}),
+          ...(raw.segment && (SEGMENT_REGISTERS as readonly string[]).includes(raw.segment)
+            ? { segment: raw.segment as SegmentRegister }
+            : {}),
         };
       }
       return { kind: 'immediate', value: value.constant };
     };
     const operands = instruction.operands.map(operand);
-    if (context.instructions286 === false && needs286(mnemonic, operands)) fail('286/287 instructions are not enabled');
+    if (context.instructions286 === false && needs286(mnemonic, operands))
+      fail('286/287 instructions are not enabled');
     if (JUMPS.has(mnemonic) && operands[0]?.kind !== 'label') {
       if (mnemonic === 'call') context.unsupported('Calls from assembler');
       fail('Label expected');

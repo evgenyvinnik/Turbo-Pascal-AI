@@ -36,9 +36,9 @@ describe('Variant records', () => {
   });
 
   it('requires tags of an ordinal type and labels that fit them', () => {
-    expect(() => compile('program T; type R = record case Real of 1: (A: Integer) end; begin end.')).toThrow(
-      /Variant tag must have an ordinal type/
-    );
+    expect(() =>
+      compile('program T; type R = record case Real of 1: (A: Integer) end; begin end.')
+    ).toThrow(/Variant tag must have an ordinal type/);
     expect(() =>
       compile("program T; type R = record case Boolean of 'x': (A: Integer) end; begin end.")
     ).toThrow(/Type mismatch/);
@@ -121,7 +121,9 @@ describe('Variant records', () => {
 describe('Range checks', () => {
   it('keeps Char and Byte stores apart on one line', () => {
     expect(
-      execute('program T; var b: array[0..3] of Byte; c: array[1..4] of Char; begin c[1] := \'Z\'; b[1] := 66; WriteLn(b[1] + 1, c[1]) end.')
+      execute(
+        "program T; var b: array[0..3] of Byte; c: array[1..4] of Char; begin c[1] := 'Z'; b[1] := 66; WriteLn(b[1] + 1, c[1]) end."
+      )
     ).toEqual(['67Z']);
   });
 });

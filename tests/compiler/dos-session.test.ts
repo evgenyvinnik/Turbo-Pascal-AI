@@ -36,17 +36,33 @@ function fakeDos(files: DosFiles): FakeDos {
     height: 400,
     exit: vi.fn(() => Promise.resolve()),
     ci: {
-      events: () => new Proxy({}, { get: (_target, name: string) => (handler: (...args: never[]) => unknown) => { on[name] = handler; } }),
+      events: () =>
+        new Proxy(
+          {},
+          {
+            get: (_target, name: string) => (handler: (...args: never[]) => unknown) => {
+              on[name] = handler;
+            },
+          }
+        ),
       width: () => fake.width,
       height: () => fake.height,
       screenshot: () => Promise.reject(new Error('No frame yet.')),
       exit: () => fake.exit(),
     } as unknown as CommandInterface,
-    stdout: (text) => { on.onStdout!(text as never); },
-    frame: (rgb, rgba) => { on.onFrame!(rgb as never, rgba as never); },
-    frameSize: (width, height) => { on.onFrameSize!(width as never, height as never); },
+    stdout: (text) => {
+      on.onStdout!(text as never);
+    },
+    frame: (rgb, rgba) => {
+      on.onFrame!(rgb as never, rgba as never);
+    },
+    frameSize: (width, height) => {
+      on.onFrameSize!(width as never, height as never);
+    },
     unload: () => on.onUnload!() as Promise<void>,
-    exited: () => { on.onExit!(); },
+    exited: () => {
+      on.onExit!();
+    },
   };
   return fake;
 }
@@ -75,7 +91,9 @@ async function load(disk: DosFiles = {}) {
   const stored = new Map([[DISK_KEY, JSON.stringify(disk)]]);
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => stored.get(key) ?? null,
-    setItem: (key: string, value: string) => { stored.set(key, value); },
+    setItem: (key: string, value: string) => {
+      stored.set(key, value);
+    },
   });
   const session = await import('../../src/services/dos/dosSession');
   const files = await import('../../src/components/IDE/programFiles');
@@ -104,7 +122,9 @@ describe('leaving the DOS workspace', () => {
     dos.drive['MADE.DAT'] = '\0ÿ';
     dos.stdout('C:\\>exit\r\n');
     dos.stdout(`${DOS_EXIT_SIGNAL}\r\n`);
-    await vi.waitFor(() => { expect(state().visible).toBe(false); });
+    await vi.waitFor(() => {
+      expect(state().visible).toBe(false);
+    });
     expect(files.programDisk.snapshot()).toEqual({ 'NOTES.TXT': 'new', 'MADE.DAT': '\0ÿ' });
     expect(saved()).toEqual({ 'NOTES.TXT': 'new', 'MADE.DAT': '\0ÿ' });
     expect(dos.exit).toHaveBeenCalledOnce();
@@ -115,7 +135,9 @@ describe('leaving the DOS workspace', () => {
     dos.stdout(DOS_EXIT_SIGNAL.slice(0, 9));
     expect(state().visible).toBe(true);
     dos.stdout(`${DOS_EXIT_SIGNAL.slice(9)}\r\n`);
-    await vi.waitFor(() => { expect(state().visible).toBe(false); });
+    await vi.waitFor(() => {
+      expect(state().visible).toBe(false);
+    });
   });
 
   it('keeps the exit signal out of the transcript the user reads', async () => {
@@ -140,7 +162,9 @@ describe('leaving the DOS workspace', () => {
     files.writeVirtualFile('A.TXT', 'browser');
     dos.drive['A.TXT'] = 'dos';
     dos.stdout(`${DOS_EXIT_SIGNAL}\r\n`);
-    await vi.waitFor(() => { expect(state().status).toBe('error'); });
+    await vi.waitFor(() => {
+      expect(state().status).toBe('error');
+    });
     expect(state().visible).toBe(true);
     expect(state().error).toMatch(/both DOS and the browser/);
     expect(files.programDisk.read('A.TXT')).toBe('browser');
@@ -151,7 +175,9 @@ describe('leaving the DOS workspace', () => {
     const { dos, state } = await launch();
     dos.stdout(`${DOS_EXIT_SIGNAL}\r\n${DOS_EXIT_SIGNAL}\r\n`);
     dos.stdout(`${DOS_EXIT_SIGNAL}\r\n`);
-    await vi.waitFor(() => { expect(state().visible).toBe(false); });
+    await vi.waitFor(() => {
+      expect(state().visible).toBe(false);
+    });
     dos.exited();
     await dos.unload();
     expect(emulator.reads).toBe(1);
@@ -169,7 +195,9 @@ describe('leaving the DOS workspace', () => {
   it('a session closed while starting never adopts its emulator', async () => {
     const { session, state } = await load();
     let started!: () => void;
-    emulator.starting = new Promise((resolve) => { started = resolve; });
+    emulator.starting = new Promise((resolve) => {
+      started = resolve;
+    });
     const opening = session.openDosSession();
     await session.discardDosSession();
     started();
@@ -182,7 +210,8 @@ describe('leaving the DOS workspace', () => {
 
 describe('DOS screen frames', () => {
   const rgba = (width: number, height: number) => new Uint8Array(width * height * 4).fill(7);
-  const paintable = (frame: Uint8ClampedArray | null, width: number, height: number) => frame !== null && frame.length === width * height * 4;
+  const paintable = (frame: Uint8ClampedArray | null, width: number, height: number) =>
+    frame !== null && frame.length === width * height * 4;
 
   it('a mode change alone leaves the last frame paintable at its own size', async () => {
     const { dos, state } = await launch();
@@ -196,10 +225,12 @@ describe('DOS screen frames', () => {
 
   it('a stale frame from the previous mode is cropped or padded to the current one', async () => {
     const { dos, state } = await launch();
-    dos.width = 320; dos.height = 200;
+    dos.width = 320;
+    dos.height = 200;
     dos.frame(null, rgba(640, 400));
     expect(paintable(state().frame, 320, 200)).toBe(true);
-    dos.width = 800; dos.height = 600;
+    dos.width = 800;
+    dos.height = 600;
     dos.frame(null, rgba(320, 200));
     expect(paintable(state().frame, 800, 600)).toBe(true);
     expect([state().frameWidth, state().frameHeight]).toEqual([800, 600]);
@@ -207,7 +238,8 @@ describe('DOS screen frames', () => {
 
   it('RGB frames become opaque RGBA', async () => {
     const { dos, state } = await launch();
-    dos.width = 2; dos.height = 1;
+    dos.width = 2;
+    dos.height = 1;
     dos.frame(new Uint8Array([1, 2, 3, 4, 5, 6]), null);
     expect(Array.from(state().frame!)).toEqual([1, 2, 3, 255, 4, 5, 6, 255]);
   });

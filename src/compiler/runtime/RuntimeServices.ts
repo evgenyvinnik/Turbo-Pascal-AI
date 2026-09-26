@@ -20,7 +20,12 @@ const BYTE_CELL: BinaryCell = { kind: 'integer', bytes: 1, signed: false };
 interface Host extends MemoryAccess {
   /** A heap block: its cells, what they start as, its bytes, and how the
    * bytes lie when its type is known. */
-  allocate(words: number, defaults: StackValue[], bytes?: number, type?: BlockType & { map?: number }): number;
+  allocate(
+    words: number,
+    defaults: StackValue[],
+    bytes?: number,
+    type?: BlockType & { map?: number }
+  ): number;
   free(address: number): void;
   /** Free heap space, in total and in the largest block, in bytes. */
   heapAvailable(): { total: number; largest: number };
@@ -75,7 +80,12 @@ export class RuntimeServices {
     let text = '';
     for (let at = address; address !== 0 && text.length < 65535; at++) {
       const value = this.host.read(at);
-      const char = typeof value === 'string' ? value.charAt(0) : value ? String.fromCharCode(Number(value)) : '';
+      const char =
+        typeof value === 'string'
+          ? value.charAt(0)
+          : value
+            ? String.fromCharCode(Number(value))
+            : '';
       if (!char || char === '\0') break;
       text += char;
     }
@@ -83,7 +93,8 @@ export class RuntimeServices {
   }
   private putCString(address: number, text: string): void {
     if (!address) throw new PascalError('Nil pointer dereference');
-    for (let index = 0; index < text.length; index++) this.host.write(address + index, text[index]!);
+    for (let index = 0; index < text.length; index++)
+      this.host.write(address + index, text[index]!);
     this.host.write(address + text.length, '\0');
   }
   /** Turbo Pascal's Strings unit. Comparisons give the difference of the
@@ -96,14 +107,21 @@ export class RuntimeServices {
       for (let at = 0; at < limit; at++) {
         let p = x.charCodeAt(at) || 0,
           q = y.charCodeAt(at) || 0;
-        if (fold) [p, q] = [String.fromCharCode(p).toUpperCase().charCodeAt(0), String.fromCharCode(q).toUpperCase().charCodeAt(0)];
+        if (fold)
+          [p, q] = [
+            String.fromCharCode(p).toUpperCase().charCodeAt(0),
+            String.fromCharCode(q).toUpperCase().charCodeAt(0),
+          ];
         if (p !== q || !p) return p - q;
       }
       return 0;
     };
     const cased = (upper: boolean) => {
       const text = this.cString(a);
-      this.putCString(a, text.replace(/[a-z]/gi, (char) => (upper ? char.toUpperCase() : char.toLowerCase())));
+      this.putCString(
+        a,
+        text.replace(/[a-z]/gi, (char) => (upper ? char.toUpperCase() : char.toLowerCase()))
+      );
       return { result: a };
     };
     switch (index) {
@@ -187,32 +205,79 @@ export class RuntimeServices {
   }
   /** A heap block's type: `count` of a type, by its layout and map, then
    * `rest` bytes. */
-  private blockType(layout: number, map: number, refresh: number, variants: StackValue | undefined, count: number, rest: number,
-    unitBytes = 0, unitCells = 0): BlockType {
-    const cells = this.host.layout?.(layout) ?? [], shape = this.host.viewMap?.(map);
+  private blockType(
+    layout: number,
+    map: number,
+    refresh: number,
+    variants: StackValue | undefined,
+    count: number,
+    rest: number,
+    unitBytes = 0,
+    unitCells = 0
+  ): BlockType {
+    const cells = this.host.layout?.(layout) ?? [],
+      shape = this.host.viewMap?.(map);
     const parts = refresh >= 0 ? (this.host.refreshes?.(refresh) ?? []) : [];
     const ranges = typeof variants === 'string' ? (JSON.parse(variants) as [number, number][]) : [];
     if (count === 1 && rest === 0 && shape)
       return { layout: cells, shape, refresh: parts, variantCells: ranges };
     const repeated: BinaryCell[] = [];
     for (let index = 0; index < count; index++)
-      cells.forEach((cell, at) => repeated.push({ ...cell, offset: index * unitCells + (cell.offset ?? at) }));
-    for (let index = 0; index < rest; index++) repeated.push({ ...BYTE_CELL, offset: count * unitCells + index });
+      cells.forEach((cell, at) =>
+        repeated.push({ ...cell, offset: index * unitCells + (cell.offset ?? at) })
+      );
+    for (let index = 0; index < rest; index++)
+      repeated.push({ ...BYTE_CELL, offset: count * unitCells + index });
     const byte: ViewShape = { kind: 'cell', cell: BYTE_CELL };
     return {
       layout: repeated,
-      shape: { kind: 'record', fields: [
-        ...(count && shape ? [{ offset: 0, cells: count * unitCells, byte: 0, shape: { kind: 'array' as const, count, cells: unitCells, bytes: unitBytes, element: shape } }] : []),
-        ...(rest ? [{ offset: count * unitCells, cells: rest, byte: count * unitBytes, shape: { kind: 'array' as const, count: rest, cells: 1, bytes: 1, element: byte } }] : []),
-      ] },
-      refresh: Array.from({ length: count }, (_, index) => parts.map((part) => ({ part: part.part, offset: part.offset + index * unitCells }))).flat(),
+      shape: {
+        kind: 'record',
+        fields: [
+          ...(count && shape
+            ? [
+                {
+                  offset: 0,
+                  cells: count * unitCells,
+                  byte: 0,
+                  shape: {
+                    kind: 'array' as const,
+                    count,
+                    cells: unitCells,
+                    bytes: unitBytes,
+                    element: shape,
+                  },
+                },
+              ]
+            : []),
+          ...(rest
+            ? [
+                {
+                  offset: count * unitCells,
+                  cells: rest,
+                  byte: count * unitBytes,
+                  shape: { kind: 'array' as const, count: rest, cells: 1, bytes: 1, element: byte },
+                },
+              ]
+            : []),
+        ],
+      },
+      refresh: Array.from({ length: count }, (_, index) =>
+        parts.map((part) => ({ part: part.part, offset: part.offset + index * unitCells }))
+      ).flat(),
       variantCells: Array.from({ length: count }, (_, index) =>
-        ranges.map(([from, to]): [number, number] => [from + index * unitCells, to + index * unitCells])).flat(),
+        ranges.map(([from, to]): [number, number] => [
+          from + index * unitCells,
+          to + index * unitCells,
+        ])
+      ).flat(),
     };
   }
   /** Bytes at an address, as far as they reach. */
   private reach(address: number, layout: BinaryCell[]): number {
-    return this.host.reach?.(address, layout) ?? layout.reduce((size, cell) => size + cell.bytes, 0);
+    return (
+      this.host.reach?.(address, layout) ?? layout.reduce((size, cell) => size + cell.bytes, 0)
+    );
   }
   private bytesAt(address: number, layout: BinaryCell[], length: number): Uint8Array {
     if (this.host.bytesAt) return this.host.bytesAt(address, layout, length);
@@ -244,8 +309,19 @@ export class RuntimeServices {
       case 4: {
         const defaults = typeof args[2] === 'string' ? (JSON.parse(args[2]) as StackValue[]) : [];
         const [bytes = b, layout, map, refresh = -1] = args.slice(3, 7).map(Number);
-        const type = layout === undefined || map === undefined ? undefined : this.blockType(layout, map, refresh, args[7], 1, 0);
-        this.host.write(a, this.host.allocate(b, defaults, bytes, type && map !== undefined ? { ...type, map } : type));
+        const type =
+          layout === undefined || map === undefined
+            ? undefined
+            : this.blockType(layout, map, refresh, args[7], 1, 0);
+        this.host.write(
+          a,
+          this.host.allocate(
+            b,
+            defaults,
+            bytes,
+            type && map !== undefined ? { ...type, map } : type
+          )
+        );
         return {};
       }
       case 5:
@@ -258,11 +334,16 @@ export class RuntimeServices {
       case 60: {
         const layout = this.layoutOf(args[3]);
         const count = Math.max(0, Math.min(b, this.reach(a, layout)));
-        this.putBytes(a, layout, new Uint8Array(count).fill(typeof args[2] === 'string' ? args[2].charCodeAt(0) : c & 255));
+        this.putBytes(
+          a,
+          layout,
+          new Uint8Array(count).fill(typeof args[2] === 'string' ? args[2].charCodeAt(0) : c & 255)
+        );
         return {};
       }
       case 61: {
-        const source = this.layoutOf(args[3]), target = this.layoutOf(args[4]);
+        const source = this.layoutOf(args[3]),
+          target = this.layoutOf(args[4]);
         const count = Math.max(0, Math.min(c, this.reach(a, source), this.reach(b, target)));
         this.putBytes(b, target, this.bytesAt(a, source, count));
         return {};
@@ -277,17 +358,36 @@ export class RuntimeServices {
       // pointer's type (or of an array's element) as fit, then bytes.
       case 84: {
         const unit = typeof args[2] === 'string' ? (JSON.parse(args[2]) as StackValue[]) : [];
-        const [layout, map, unitBytes = 0, unitCells = 0, refresh = -1] = args.slice(3, 8).map(Number);
+        const [layout, map, unitBytes = 0, unitCells = 0, refresh = -1] = args
+          .slice(3, 8)
+          .map(Number);
         if (!Number.isInteger(b) || b < 0) throw new PascalError('Invalid allocation size');
         if (layout === undefined || map === undefined) {
           this.host.write(a, this.host.allocate(Math.max(1, b, unit.length), unit));
           return {};
         }
-        const count = unitBytes > 0 ? Math.floor(b / unitBytes) : 0, rest = b - count * unitBytes;
-        const type = this.blockType(layout, map, refresh, args[8], count, rest, unitBytes, unitCells);
+        const count = unitBytes > 0 ? Math.floor(b / unitBytes) : 0,
+          rest = b - count * unitBytes;
+        const type = this.blockType(
+          layout,
+          map,
+          refresh,
+          args[8],
+          count,
+          rest,
+          unitBytes,
+          unitCells
+        );
         const defaults = Array.from({ length: count }, () => unit).flat();
-        this.host.write(a, this.host.allocate(Math.max(1, count * unitCells + rest), defaults, b,
-          count === 1 && rest === 0 ? { ...type, map } : type));
+        this.host.write(
+          a,
+          this.host.allocate(
+            Math.max(1, count * unitCells + rest),
+            defaults,
+            b,
+            count === 1 && rest === 0 ? { ...type, map } : type
+          )
+        );
         return {};
       }
       case 85:
@@ -381,9 +481,18 @@ export class RuntimeServices {
           // Read exactly, then rounded to the variable's type: Real, Single,
           // Double, Extended, or Comp (9).
           try {
-            const exact = parseReal(text) ?? value, precision = Number(args[4] ?? 6);
-            real = precision === 6 ? roundReal48(Number(exact)) : precision === 4 ? Math.fround(Number(exact))
-              : precision === 8 ? Number(exact) : precision === 9 ? compReal(exact) : exact;
+            const exact = parseReal(text) ?? value,
+              precision = Number(args[4] ?? 6);
+            real =
+              precision === 6
+                ? roundReal48(Number(exact))
+                : precision === 4
+                  ? Math.fround(Number(exact))
+                  : precision === 8
+                    ? Number(exact)
+                    : precision === 9
+                      ? compReal(exact)
+                      : exact;
           } catch {
             code = Math.max(1, text.length);
           }
@@ -522,7 +631,9 @@ export class RuntimeServices {
           return {};
         }
         case 304:
-          return { result: ENVIRONMENT.find(([name]) => name === String(args[0]).toUpperCase())?.[1] ?? '' };
+          return {
+            result: ENVIRONMENT.find(([name]) => name === String(args[0]).toUpperCase())?.[1] ?? '',
+          };
         case 305:
           return { result: 0x1606 };
         case 306:
@@ -709,8 +820,8 @@ export class RuntimeServices {
           (
             {
               0: 'No error',
-          '-1': 'Graphics not initialized',
-          '-4': 'Invalid graphics driver',
+              '-1': 'Graphics not initialized',
+              '-4': 'Invalid graphics driver',
               '-8': 'Font file not found',
               '-10': 'Invalid graphics mode',
               '-11': 'Graphics error',

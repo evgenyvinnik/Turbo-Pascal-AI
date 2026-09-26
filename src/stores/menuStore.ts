@@ -44,81 +44,91 @@ export const useMenuStore = create<MenuState & MenuActions>()(
     subIndex: 0,
     subOpen: false,
 
-    openMenu: (index) =>
-      { set((s) => {
+    openMenu: (index) => {
+      set((s) => {
         s.open = true;
         s.menuIndex = Math.max(0, Math.min(currentMenus().length - 1, index));
         const items = currentMenus()[s.menuIndex]?.items ?? [];
         s.itemIndex = firstSelectable(items, 0, 1);
         s.subOpen = false;
         s.subIndex = 0;
-      }); },
+      });
+    },
 
-    close: () =>
-      { set((s) => {
+    close: () => {
+      set((s) => {
         s.open = false;
         s.subOpen = false;
-      }); },
+      });
+    },
 
-    setMenu: (index) =>
-      { set((s) => {
+    setMenu: (index) => {
+      set((s) => {
         if (index === s.menuIndex) return;
         s.menuIndex = Math.max(0, Math.min(currentMenus().length - 1, index));
         const items = currentMenus()[s.menuIndex]?.items ?? [];
         s.itemIndex = firstSelectable(items, 0, 1);
         s.subOpen = false;
-      }); },
+      });
+    },
 
-    moveMenu: (dir) =>
-      { set((s) => {
+    moveMenu: (dir) => {
+      set((s) => {
         s.menuIndex = (s.menuIndex + dir + currentMenus().length) % currentMenus().length;
         const items = currentMenus()[s.menuIndex]?.items ?? [];
         s.itemIndex = firstSelectable(items, 0, 1);
         s.subOpen = false;
-      }); },
+      });
+    },
 
-    moveItem: (dir) =>
-      { set((s) => {
+    moveItem: (dir) => {
+      set((s) => {
         const items = currentMenus()[s.menuIndex]?.items ?? [];
         if (!items.length) return;
         const next = (s.itemIndex + dir + items.length) % items.length;
         s.itemIndex = firstSelectable(items, next, dir);
-      }); },
+      });
+    },
 
-    setItem: (index) =>
-      { set((s) => {
+    setItem: (index) => {
+      set((s) => {
         const items = currentMenus()[s.menuIndex]?.items ?? [];
         if (index < 0 || index >= items.length) return;
         const node = items[index];
         if (node && isSeparator(node)) return;
         s.itemIndex = index;
         s.subOpen = false;
-      }); },
+      });
+    },
 
-    openSub: () =>
-      { set((s) => {
+    openSub: () => {
+      set((s) => {
         s.subOpen = true;
         s.subIndex = 0;
-      }); },
+      });
+    },
 
-    closeSub: () =>
-      { set((s) => {
+    closeSub: () => {
+      set((s) => {
         s.subOpen = false;
-      }); },
+      });
+    },
 
-    moveSub: (dir) =>
-      { set((s) => {
+    moveSub: (dir) => {
+      set((s) => {
         const items = currentMenus()[s.menuIndex]?.items ?? [];
         const node = items[s.itemIndex];
         const sub = node && !isSeparator(node) ? (node.submenu ?? []) : [];
         if (!sub.length) return;
         s.subIndex = (s.subIndex + dir + sub.length) % sub.length;
-      }); },
+      });
+    },
 
-    setSub: (index) =>
-      { set((s) => {
+    setSub: (index) => {
+      set((s) => {
         s.subIndex = Math.max(0, index);
-      }); },
+      });
+    },
 
     current: () => {
       const s = get();
@@ -128,5 +138,5 @@ export const useMenuStore = create<MenuState & MenuActions>()(
       if (s.subOpen && node.submenu) return node.submenu[s.subIndex] ?? null;
       return node;
     },
-  })),
+  }))
 );

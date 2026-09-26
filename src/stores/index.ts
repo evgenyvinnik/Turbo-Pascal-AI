@@ -14,12 +14,6 @@ export type { DialogValues, OpenDialog } from './dialogStore';
 export type { SearchSettings } from './ideStore';
 export type { FileNode } from './fileStore';
 export type { CompilationStatus, CompilationError, CompilationResult } from './compilerStore';
-export type {
-  DebugStatus,
-  Breakpoint,
-  WatchVariable,
-  StackFrame,
-  VMRegisters,
-} from './debugStore';
+export type { DebugStatus, Breakpoint, WatchVariable, StackFrame, VMRegisters } from './debugStore';
 export type { EditorSettings, CompilerSettings, UISettings } from './settingsStore';
 export type { DialogType, MenuItem, Notification } from './uiStore';

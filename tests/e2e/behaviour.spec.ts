@@ -5,7 +5,7 @@ test.describe('menus', () => {
   test('the menu bar carries the original ten titles', async ({ page }) => {
     const ide = await Ide.open(page);
     expect(await ide.text(0)).toBe(
-      '  File  Edit  Search  Run  Compile  Debug  Tools  Options  Window  Help',
+      '  File  Edit  Search  Run  Compile  Debug  Tools  Options  Window  Help'
     );
   });
 
@@ -257,7 +257,9 @@ test.describe('compiler', () => {
     expect(await ide.text(4)).toContain("writeln('Hello, world!');");
   });
 
-  test('Fibonacci accepts a number, calculates its sequence and resumes after input', async ({ page }) => {
+  test('Fibonacci accepts a number, calculates its sequence and resumes after input', async ({
+    page,
+  }) => {
     const ide = await Ide.open(page);
     await ide.openFile('FIBONACCI.PAS');
     await ide.press('Control+F9');
@@ -293,7 +295,9 @@ test.describe('compiler', () => {
 
   test('division by zero reports a runtime error with its source line', async ({ page }) => {
     const ide = await Ide.open(page);
-    await ide.typeSource('program Divide; var divisor: Integer;\nbegin\n  divisor := 0; WriteLn(1 div divisor);\nend.');
+    await ide.typeSource(
+      'program Divide; var divisor: Integer;\nbegin\n  divisor := 0; WriteLn(1 div divisor);\nend.'
+    );
     await ide.press('Control+F9');
     await ide.waitForDialog('Compiling');
     await ide.press('Enter');
@@ -305,7 +309,9 @@ test.describe('compiler', () => {
 
   test('an infinite loop yields to the UI and can be reset', async ({ page }) => {
     const ide = await Ide.open(page);
-    await ide.typeSource("program Forever;\nbegin\n  WriteLn('Started');\n  while True do begin end;\nend.");
+    await ide.typeSource(
+      "program Forever;\nbegin\n  WriteLn('Started');\n  while True do begin end;\nend."
+    );
     await ide.press('Control+F9');
     await ide.waitForDialog('Compiling');
     await ide.press('Enter');

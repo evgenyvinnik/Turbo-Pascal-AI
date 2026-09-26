@@ -9,7 +9,9 @@ describe('Free Pascal test headers', () => {
   });
 
   it('passes over blank lines and ordinary comments, as FPC does', () => {
-    expect(Object.fromEntries(readHeader('\n{ Bug report 1234 }\n\n  { %NORUN }\nprogram t;'))).toEqual({ NORUN: '' });
+    expect(
+      Object.fromEntries(readHeader('\n{ Bug report 1234 }\n\n  { %NORUN }\nprogram t;'))
+    ).toEqual({ NORUN: '' });
   });
 
   it('stops at the first line that does not start with a brace', () => {
@@ -21,8 +23,16 @@ describe('Free Pascal test headers', () => {
   });
 
   it('turns directives into what the test expects', () => {
-    expect(expectation(readHeader('{ %FAIL }'))).toEqual({ failsToCompile: true, compileOnly: false, exitCode: 0 });
-    expect(expectation(readHeader('{ %NORUN }\n{ %RESULT=3 }'))).toEqual({ failsToCompile: false, compileOnly: true, exitCode: 3 });
+    expect(expectation(readHeader('{ %FAIL }'))).toEqual({
+      failsToCompile: true,
+      compileOnly: false,
+      exitCode: 0,
+    });
+    expect(expectation(readHeader('{ %NORUN }\n{ %RESULT=3 }'))).toEqual({
+      failsToCompile: false,
+      compileOnly: true,
+      exitCode: 3,
+    });
   });
 });
 
@@ -35,11 +45,17 @@ describe('Free Pascal compiler output', () => {
   ].join('\n');
 
   it('takes the first error and where it is, not the summaries after it', () => {
-    expect(firstError(output)).toEqual({ message: 'Identifier not found "undefinedname"', site: { file: 'bad.pas', line: 4 } });
+    expect(firstError(output)).toEqual({
+      message: 'Identifier not found "undefinedname"',
+      site: { file: 'bad.pas', line: 4 },
+    });
   });
 
   it('reads a location without a column, and keeps a message with no location', () => {
-    expect(firstError('/tmp/x/t.pp(12) Fatal: Syntax error').site).toEqual({ file: 't.pp', line: 12 });
+    expect(firstError('/tmp/x/t.pp(12) Fatal: Syntax error').site).toEqual({
+      file: 't.pp',
+      line: 12,
+    });
     expect(firstError('Fatal: Compilation aborted')).toEqual({ message: 'Compilation aborted' });
   });
 

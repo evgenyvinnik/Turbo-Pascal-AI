@@ -125,7 +125,8 @@ describe('the DOS null device', () => {
 
   it('is NUL in any directory and with any extension, but NULL is an ordinary file', () => {
     const disk = new VirtualFileSystem();
-    for (const name of ['nul', 'C:\\TEMP\\NUL.TXT', 'dir/Nul.dat']) expect(disk.exists(name)).toBe(true);
+    for (const name of ['nul', 'C:\\TEMP\\NUL.TXT', 'dir/Nul.dat'])
+      expect(disk.exists(name)).toBe(true);
     expect(disk.exists('NULL.TXT')).toBe(false);
     disk.write('NULL.TXT', 'kept');
     expect(disk.read('NULL.TXT')).toBe('kept');

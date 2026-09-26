@@ -20,7 +20,7 @@ export function paintEditWindow(
   win: TPWindow,
   buf: Buffer,
   active: boolean,
-  breakpoints: number[] = [],
+  breakpoints: number[] = []
 ): EditorCursor | null {
   const client = clientRect(win.rect);
   paintFrame(scr, {
@@ -52,8 +52,8 @@ export function paintEditWindow(
     const breakpoint = breakpoints.includes(lineNo + 1);
     if (inHighlight) {
       scr.fill({ x: client.x, y: client.y + row, w: client.w, h: 1 }, ' ', TP.editHighlight);
-    }
-    else if (breakpoint) scr.fill({ x: client.x, y: client.y + row, w: client.w, h: 1 }, ' ', TP.editError);
+    } else if (breakpoint)
+      scr.fill({ x: client.x, y: client.y + row, w: client.w, h: 1 }, ' ', TP.editError);
     for (let i = 0; i < client.w; i += 1) {
       const col = buf.scroll.col + i;
       const ch = text[col];
@@ -65,7 +65,9 @@ export function paintEditWindow(
       const a =
         selected || inHighlight
           ? TP.editHighlight
-          : breakpoint ? TP.editError : { fg: lineColours[col] ?? TP.editText.fg, bg: TP.editText.bg };
+          : breakpoint
+            ? TP.editError
+            : { fg: lineColours[col] ?? TP.editText.fg, bg: TP.editText.bg };
       scr.put(client.x + i, client.y + row, ch, a);
     }
   }

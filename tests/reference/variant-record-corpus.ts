@@ -81,7 +81,17 @@ begin
   x.s := 'hi'; WriteLn(x.a, ' ', x.l);
   Move(x, u, 4); WriteLn(u.lo, ' ', u.hi, ' ', u.c[3], u.c[4])
 end.`,
-    output: ['52 18 120 86', '308 22136 513', '309 26232', 'BA', 'CD 17475', '16705 A', '16643 17218 ABC', '26626 1130981378', '2 104 iC'],
+    output: [
+      '52 18 120 86',
+      '308 22136 513',
+      '309 26232',
+      'BA',
+      'CD 17475',
+      '16705 A',
+      '16643 17218 ABC',
+      '26626 1130981378',
+      '2 104 iC',
+    ],
   },
   {
     name: 'variant-record-nested-cases-and-fields-overlay',

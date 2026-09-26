@@ -60,7 +60,10 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
         scr.writeHot(px, py, c.text, lit ? TP.dlgLabelFocus : TP.dlgLabel, TP.dlgLabelHot);
         const target = focusList.findIndex((f) => 'id' in f && f.id === c.for);
         if (target >= 0) {
-          hits.push({ rect: { x: px, y: py, w: Screen.plainLength(c.text), h: 1 }, focusIndex: target });
+          hits.push({
+            rect: { x: px, y: py, w: Screen.plainLength(c.text), h: 1 },
+            focusIndex: target,
+          });
         }
         break;
       }
@@ -78,7 +81,10 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
           scr.put(px + c.w + 2, py, HISTORY[2], TP.dlgHistorySide);
         }
         if (isFocused) {
-          cursor = { col: px + 1 + (d.selectAll ? 0 : Math.max(0, Math.min(room, d.caret - start))), row: py };
+          cursor = {
+            col: px + 1 + (d.selectAll ? 0 : Math.max(0, Math.min(room, d.caret - start))),
+            row: py,
+          };
         }
         if (fi >= 0) hits.push({ rect: { x: px, y: py, w: c.w, h: 1 }, focusIndex: fi });
         break;
@@ -101,7 +107,12 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
           scr.write(cx + 1, cy, mark, base);
           scr.writeHot(cx + 5, cy, item.label, base, TP.dlgClusterHot);
           if (isFocused && i === d.clusterRow) cursor = { col: cx + 2, row: cy };
-          hits.push({ rect: { x: cx, y: cy, w: colWidth, h: 1 }, focusIndex: fi, row: i, activate: true });
+          hits.push({
+            rect: { x: cx, y: cy, w: colWidth, h: 1 },
+            focusIndex: fi,
+            row: i,
+            activate: true,
+          });
         });
         break;
       }
@@ -119,10 +130,12 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
         const selected = Number(d.values[c.id] ?? 0);
         const columns = scroll === 'h' && c.divider ? 2 : 1;
         const divider = c.divider ?? body.w;
-        const firstColumn = scroll === 'h' ? Math.max(0, Math.floor(selected / body.h) - columns + 1) : 0;
-        const top = scroll === 'h'
-          ? firstColumn * body.h
-          : Math.max(0, Math.min(selected - body.h + 1, Math.max(0, c.items.length - body.h)));
+        const firstColumn =
+          scroll === 'h' ? Math.max(0, Math.floor(selected / body.h) - columns + 1) : 0;
+        const top =
+          scroll === 'h'
+            ? firstColumn * body.h
+            : Math.max(0, Math.min(selected - body.h + 1, Math.max(0, c.items.length - body.h)));
         for (let i = 0; i < body.h * columns; i += 1) {
           const index = top + i;
           const column = Math.floor(i / body.h);
@@ -145,9 +158,25 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
           });
         }
         if (scroll === 'v') {
-          scr.scrollBar(px + c.w - 1, py, c.h, true, selected, c.items.length ? Math.max(1, c.items.length - 1) : 0, TP.dlgListScroll);
+          scr.scrollBar(
+            px + c.w - 1,
+            py,
+            c.h,
+            true,
+            selected,
+            c.items.length ? Math.max(1, c.items.length - 1) : 0,
+            TP.dlgListScroll
+          );
         } else if (scroll === 'h') {
-          scr.scrollBar(px, py + c.h - 1, c.w, false, firstColumn, Math.max(0, Math.ceil(c.items.length / body.h) - columns), TP.dlgListScroll);
+          scr.scrollBar(
+            px,
+            py + c.h - 1,
+            c.w,
+            false,
+            firstColumn,
+            Math.max(0, Math.ceil(c.items.length / body.h) - columns),
+            TP.dlgListScroll
+          );
         }
         break;
       }
@@ -168,22 +197,34 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
         scr.fill({ x: px, y: py, w: c.w, h: 1 }, ' ', base);
         scr.writeHot(px + Math.max(0, Math.floor((c.w - len) / 2)), py, c.label, base, hot);
         scr.buttonShadow({ x: px, y: py, w: c.w, h: 1 });
-        if (fi >= 0) hits.push({ rect: { x: px, y: py, w: c.w, h: 1 }, focusIndex: fi, activate: true });
+        if (fi >= 0)
+          hits.push({ rect: { x: px, y: py, w: c.w, h: 1 }, focusIndex: fi, activate: true });
         break;
       }
 
       case 'info':
         scr.fill({ x: px, y: py, w: c.w, h: c.h }, ' ', c.attr ?? TP.dlgInfo);
-        c.lines.forEach((line, i) => scr.write(px + 1, py + i, line.slice(0, c.w - 2), c.attr ?? TP.dlgInfo));
+        c.lines.forEach((line, i) =>
+          scr.write(px + 1, py + i, line.slice(0, c.w - 2), c.attr ?? TP.dlgInfo)
+        );
         break;
 
       case 'help': {
         const scroll = Number(d.values[c.id] ?? 0);
         scr.frame({ x: px, y: py, w: c.w, h: c.h }, TP.dlgFrame, false);
         paintHelpText(scr, px + 1, py + 1, c.w - 2, c.h - 2, c.lines, c.topic ?? '', scroll);
-        scr.scrollBar(px + c.w - 1, py + 1, c.h - 2, true, scroll, Math.max(1, c.lines.length - (c.h - 2)), TP.toolScroll);
+        scr.scrollBar(
+          px + c.w - 1,
+          py + 1,
+          c.h - 2,
+          true,
+          scroll,
+          Math.max(1, c.lines.length - (c.h - 2)),
+          TP.toolScroll
+        );
         scr.scrollBar(px + 1, py + c.h - 1, c.w - 2, false, 0, 1, TP.toolScroll);
-        if (fi >= 0) hits.push({ rect: { x: px + 1, y: py + 1, w: c.w - 2, h: c.h - 2 }, focusIndex: fi });
+        if (fi >= 0)
+          hits.push({ rect: { x: px + 1, y: py + 1, w: c.w - 2, h: c.h - 2 }, focusIndex: fi });
         cursor = { col: px + 1, row: py + 1 };
         break;
       }
@@ -208,7 +249,13 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
         const rows = Math.ceil(c.colors.length / c.cols);
         scr.frame({ x: px, y: py, w: c.cols * 3 + 2, h: rows + 2 }, TP.dlgFrame, false);
         scr.put(px + 1, py, ' ', TP.dlgFrame);
-        const end = scr.writeHot(px + 2, py, c.label, isFocused ? TP.dlgLabelFocus : TP.dlgLabel, TP.dlgLabelHot);
+        const end = scr.writeHot(
+          px + 2,
+          py,
+          c.label,
+          isFocused ? TP.dlgLabelFocus : TP.dlgLabel,
+          TP.dlgLabelHot
+        );
         scr.put(end, py, ' ', TP.dlgFrame);
         const selected = Number(d.values[c.id] ?? 0);
         c.colors.forEach((color, i) => {
@@ -224,15 +271,21 @@ export function paintDialog(scr: Screen, d: OpenDialog): DialogPaintResult {
       }
 
       case 'sample': {
-        const foreground = d.def.controls.find((control) => control.kind === 'swatches' && control.id === 'foreground');
-        const background = d.def.controls.find((control) => control.kind === 'swatches' && control.id === 'background');
+        const foreground = d.def.controls.find(
+          (control) => control.kind === 'swatches' && control.id === 'foreground'
+        );
+        const background = d.def.controls.find(
+          (control) => control.kind === 'swatches' && control.id === 'background'
+        );
         const attr: Attr = {
-          fg: foreground?.kind === 'swatches'
-            ? foreground.colors[Number(d.values.foreground ?? 0)] ?? c.attr.fg
-            : c.attr.fg,
-          bg: background?.kind === 'swatches'
-            ? background.colors[Number(d.values.background ?? 0)] ?? c.attr.bg
-            : c.attr.bg,
+          fg:
+            foreground?.kind === 'swatches'
+              ? (foreground.colors[Number(d.values.foreground ?? 0)] ?? c.attr.fg)
+              : c.attr.fg,
+          bg:
+            background?.kind === 'swatches'
+              ? (background.colors[Number(d.values.background ?? 0)] ?? c.attr.bg)
+              : c.attr.bg,
         };
         scr.fill({ x: px, y: py, w: c.w, h: c.h }, ' ', attr);
         for (let i = 0; i < c.h; i += 1) {

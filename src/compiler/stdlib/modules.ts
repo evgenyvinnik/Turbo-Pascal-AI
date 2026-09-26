@@ -6,21 +6,9 @@
  */
 
 import { TypeKind, SymbolKind, type TypeInfo, Symbol } from '../symbols/Symbol';
-import {
-  type BuiltinDef,
-  ALL_BUILTINS,
-  isBuiltin,
-  getBuiltin,
-  ParamMode,
-} from './builtin';
-import {
-  CRT_CONSTANTS,
-  ALL_CRT_PROCS,
-} from './crt';
-import {
-  GRAPH_CONSTANTS,
-  ALL_GRAPH_PROCS,
-} from './graph';
+import { type BuiltinDef, ALL_BUILTINS, isBuiltin, getBuiltin, ParamMode } from './builtin';
+import { CRT_CONSTANTS, ALL_CRT_PROCS } from './crt';
+import { GRAPH_CONSTANTS, ALL_GRAPH_PROCS } from './graph';
 
 /**
  * Unit definition interface
@@ -127,17 +115,17 @@ export class ModuleLoader {
       name: StandardUnit.DOS,
       procedures: this.createDosProcs(),
       constants: new Map([
-        ['FMCLOSED', 0xD7B0],
-        ['FMINPUT', 0xD7B1],
-        ['FMOUTPUT', 0xD7B2],
-        ['FMINOUT', 0xD7B3],
+        ['FMCLOSED', 0xd7b0],
+        ['FMINPUT', 0xd7b1],
+        ['FMOUTPUT', 0xd7b2],
+        ['FMINOUT', 0xd7b3],
         ['READONLY', 0x01],
         ['HIDDEN', 0x02],
         ['SYSFILE', 0x04],
         ['VOLUMEID', 0x08],
         ['DIRECTORY', 0x10],
         ['ARCHIVE', 0x20],
-        ['ANYFILE', 0x3F],
+        ['ANYFILE', 0x3f],
         ['FCARRY', 0x0001],
         ['FPARITY', 0x0004],
         ['FAUXILIARY', 0x0010],
@@ -217,9 +205,7 @@ export class ModuleLoader {
       name: StandardUnit.PRINTER,
       procedures: [],
       constants: new Map(),
-      variables: new Map([
-        ['LST', { type: { kind: TypeKind.FILE, size: 0 } }],
-      ]),
+      variables: new Map([['LST', { type: { kind: TypeKind.FILE, size: 0 } }]]),
     });
   }
 
@@ -227,10 +213,25 @@ export class ModuleLoader {
    * Create DOS unit procedure stubs
    */
   private createDosProcs(): BuiltinDef[] {
-    const value = (name: string, type = TypeKind.INTEGER) => ({ name, type, mode: ParamMode.VALUE });
+    const value = (name: string, type = TypeKind.INTEGER) => ({
+      name,
+      type,
+      mode: ParamMode.VALUE,
+    });
     const out = (name: string, type = TypeKind.INTEGER) => ({ name, type, mode: ParamMode.VAR });
-    const record = (name: string, typeName: string) => ({ name, type: TypeKind.RECORD, mode: ParamMode.VAR, typeName });
-    const routine = (name: string, procedureIndex: number, params: BuiltinDef['params'], description: string, returnType?: TypeKind): BuiltinDef => ({
+    const record = (name: string, typeName: string) => ({
+      name,
+      type: TypeKind.RECORD,
+      mode: ParamMode.VAR,
+      typeName,
+    });
+    const routine = (
+      name: string,
+      procedureIndex: number,
+      params: BuiltinDef['params'],
+      description: string,
+      returnType?: TypeKind
+    ): BuiltinDef => ({
       name,
       isFunction: returnType !== undefined,
       ...(returnType === undefined ? {} : { returnType }),
@@ -247,22 +248,58 @@ export class ModuleLoader {
       routine('SetVerify', 313, [value('Verify', B)], 'Set whether DOS verifies disk writes'),
       routine('GetFAttr', 314, [out('F', TypeKind.FILE), out('Attr')], "A file's attributes"),
       routine('SetFAttr', 315, [out('F', TypeKind.FILE), value('Attr')], "Set a file's attributes"),
-      routine('GetFTime', 316, [out('F', TypeKind.FILE), out('Time')], 'When a file was last written, packed'),
-      routine('SetFTime', 317, [out('F', TypeKind.FILE), value('Time')], 'Set when a file was last written'),
-      routine('FindFirst', 318, [value('Path', S), value('Attr'), record('F', 'SearchRec')], 'Find the first file that matches'),
+      routine(
+        'GetFTime',
+        316,
+        [out('F', TypeKind.FILE), out('Time')],
+        'When a file was last written, packed'
+      ),
+      routine(
+        'SetFTime',
+        317,
+        [out('F', TypeKind.FILE), value('Time')],
+        'Set when a file was last written'
+      ),
+      routine(
+        'FindFirst',
+        318,
+        [value('Path', S), value('Attr'), record('F', 'SearchRec')],
+        'Find the first file that matches'
+      ),
       routine('FindNext', 319, [record('F', 'SearchRec')], 'Find the next file that matches'),
-      routine('UnpackTime', 320, [value('P'), record('T', 'DateTime')], 'A packed time as a DateTime'),
+      routine(
+        'UnpackTime',
+        320,
+        [value('P'), record('T', 'DateTime')],
+        'A packed time as a DateTime'
+      ),
       routine('PackTime', 321, [record('T', 'DateTime'), out('P')], 'A DateTime as a packed time'),
       routine('SwapVectors', 322, [], 'Swap the interrupt vectors the System unit took'),
       routine('Keep', 323, [value('ExitCode')], 'End the program, staying resident'),
       routine('Exec', 324, [value('Path', S), value('ComLine', S)], 'Run another program'),
       routine('DosExitCode', 325, [], 'The exit code of the program Exec ran', TypeKind.INTEGER),
-      routine('FSearch', 326, [value('Path', S), value('DirList', S)], 'Find a file in a list of directories', S),
+      routine(
+        'FSearch',
+        326,
+        [value('Path', S), value('DirList', S)],
+        'Find a file in a list of directories',
+        S
+      ),
       routine('FExpand', 327, [value('Path', S)], 'A file name with its drive and full path', S),
-      routine('FSplit', 328, [value('Path', S), out('Dir', S), out('Name', S), out('Ext', S)], 'Split a file name into its directory, name and extension'),
+      routine(
+        'FSplit',
+        328,
+        [value('Path', S), out('Dir', S), out('Name', S), out('Ext', S)],
+        'Split a file name into its directory, name and extension'
+      ),
       routine('EnvCount', 329, [], 'The number of environment strings', TypeKind.INTEGER),
       routine('EnvStr', 330, [value('Index')], 'An environment string, NAME=value', S),
-      routine('Intr', 331, [value('IntNo'), record('Regs', 'Registers')], 'Call a software interrupt'),
+      routine(
+        'Intr',
+        331,
+        [value('IntNo'), record('Regs', 'Registers')],
+        'Call a software interrupt'
+      ),
       routine('MsDos', 332, [record('Regs', 'Registers')], 'Call DOS, interrupt 21h'),
       {
         name: 'GetDate',
@@ -315,9 +352,7 @@ export class ModuleLoader {
         name: 'GetEnv',
         isFunction: true,
         returnType: TypeKind.STRING,
-        params: [
-          { name: 'EnvVar', type: TypeKind.STRING, mode: ParamMode.VALUE },
-        ],
+        params: [{ name: 'EnvVar', type: TypeKind.STRING, mode: ParamMode.VALUE }],
         description: 'Get an environment variable value',
         procedureIndex: 304,
       },
@@ -333,9 +368,7 @@ export class ModuleLoader {
         name: 'DiskFree',
         isFunction: true,
         returnType: TypeKind.INTEGER,
-        params: [
-          { name: 'Drive', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-        ],
+        params: [{ name: 'Drive', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
         description: 'Return the free disk space in bytes',
         procedureIndex: 306,
       },
@@ -343,9 +376,7 @@ export class ModuleLoader {
         name: 'DiskSize',
         isFunction: true,
         returnType: TypeKind.INTEGER,
-        params: [
-          { name: 'Drive', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-        ],
+        params: [{ name: 'Drive', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
         description: 'Return the total disk size in bytes',
         procedureIndex: 307,
       },
@@ -378,7 +409,13 @@ export class ModuleLoader {
   /** The Overlay unit's routines. */
   private createOverlayProcs(): BuiltinDef[] {
     const longint = (name: string) => ({ name, type: TypeKind.INTEGER, mode: ParamMode.VALUE });
-    const routine = (name: string, procedureIndex: number, params: BuiltinDef['params'], isFunction: boolean, description: string): BuiltinDef => ({
+    const routine = (
+      name: string,
+      procedureIndex: number,
+      params: BuiltinDef['params'],
+      isFunction: boolean,
+      description: string
+    ): BuiltinDef => ({
       name,
       isFunction,
       ...(isFunction ? { returnType: TypeKind.INTEGER } : {}),
@@ -387,7 +424,13 @@ export class ModuleLoader {
       procedureIndex,
     });
     return [
-      routine('OvrInit', 450, [{ name: 'FileName', type: TypeKind.STRING, mode: ParamMode.VALUE }], false, 'Open the overlay file'),
+      routine(
+        'OvrInit',
+        450,
+        [{ name: 'FileName', type: TypeKind.STRING, mode: ParamMode.VALUE }],
+        false,
+        'Open the overlay file'
+      ),
       routine('OvrInitEMS', 451, [], false, 'Load the overlay file into expanded memory'),
       routine('OvrSetBuf', 452, [longint('Size')], false, 'Set the size of the overlay buffer'),
       routine('OvrGetBuf', 453, [], true, 'The size of the overlay buffer'),
@@ -401,31 +444,97 @@ export class ModuleLoader {
   private createTurbo3Procs(): BuiltinDef[] {
     const file = (name: string) => ({ name, type: TypeKind.FILE, mode: ParamMode.VAR });
     return [
-      { name: 'AssignKbd', isFunction: false, params: [file('F')], description: 'Assign a text file to the keyboard, read without echo', procedureIndex: 460 },
-      { name: 'MemAvail', isFunction: true, returnType: TypeKind.INTEGER, params: [], description: 'The free heap, in 16-byte paragraphs', procedureIndex: 461 },
-      { name: 'MaxAvail', isFunction: true, returnType: TypeKind.INTEGER, params: [], description: 'The largest free heap block, in paragraphs', procedureIndex: 462 },
-      { name: 'LongFileSize', isFunction: true, returnType: TypeKind.REAL, params: [file('F')], description: 'The size of a file, as a real', procedureIndex: 463 },
-      { name: 'LongFilePos', isFunction: true, returnType: TypeKind.REAL, params: [file('F')], description: 'The position in a file, as a real', procedureIndex: 464 },
-      { name: 'LongSeek', isFunction: false, params: [file('F'), { name: 'Pos', type: TypeKind.REAL, mode: ParamMode.VALUE }], description: 'Move to a component given as a real', procedureIndex: 465 },
-      { name: 'NormVideo', isFunction: false, params: [], description: 'Yellow text, as Turbo Pascal 3 wrote it', procedureIndex: 466 },
-      { name: 'HighVideo', isFunction: false, params: [], description: 'Yellow text, as Turbo Pascal 3 wrote it', procedureIndex: 467 },
-      { name: 'LowVideo', isFunction: false, params: [], description: 'Light gray text, as Turbo Pascal 3 wrote it', procedureIndex: 468 },
+      {
+        name: 'AssignKbd',
+        isFunction: false,
+        params: [file('F')],
+        description: 'Assign a text file to the keyboard, read without echo',
+        procedureIndex: 460,
+      },
+      {
+        name: 'MemAvail',
+        isFunction: true,
+        returnType: TypeKind.INTEGER,
+        params: [],
+        description: 'The free heap, in 16-byte paragraphs',
+        procedureIndex: 461,
+      },
+      {
+        name: 'MaxAvail',
+        isFunction: true,
+        returnType: TypeKind.INTEGER,
+        params: [],
+        description: 'The largest free heap block, in paragraphs',
+        procedureIndex: 462,
+      },
+      {
+        name: 'LongFileSize',
+        isFunction: true,
+        returnType: TypeKind.REAL,
+        params: [file('F')],
+        description: 'The size of a file, as a real',
+        procedureIndex: 463,
+      },
+      {
+        name: 'LongFilePos',
+        isFunction: true,
+        returnType: TypeKind.REAL,
+        params: [file('F')],
+        description: 'The position in a file, as a real',
+        procedureIndex: 464,
+      },
+      {
+        name: 'LongSeek',
+        isFunction: false,
+        params: [file('F'), { name: 'Pos', type: TypeKind.REAL, mode: ParamMode.VALUE }],
+        description: 'Move to a component given as a real',
+        procedureIndex: 465,
+      },
+      {
+        name: 'NormVideo',
+        isFunction: false,
+        params: [],
+        description: 'Yellow text, as Turbo Pascal 3 wrote it',
+        procedureIndex: 466,
+      },
+      {
+        name: 'HighVideo',
+        isFunction: false,
+        params: [],
+        description: 'Yellow text, as Turbo Pascal 3 wrote it',
+        procedureIndex: 467,
+      },
+      {
+        name: 'LowVideo',
+        isFunction: false,
+        params: [],
+        description: 'Light gray text, as Turbo Pascal 3 wrote it',
+        procedureIndex: 468,
+      },
     ];
   }
 
   /** The Graph3 unit: Turbo Pascal 3's graphics, with integer parameters
    * throughout. GetPic, PutPic and Pattern take a variable of any type. */
   private createGraph3Procs(): BuiltinDef[] {
-    const routine = (name: string, procedureIndex: number, names: string, description: string, returnType?: TypeKind): BuiltinDef => ({
+    const routine = (
+      name: string,
+      procedureIndex: number,
+      names: string,
+      description: string,
+      returnType?: TypeKind
+    ): BuiltinDef => ({
       name,
       isFunction: returnType !== undefined,
       ...(returnType === undefined ? {} : { returnType }),
       params: names
-        ? names.split(',').map((param) =>
-            param === 'Buffer' || param === 'P'
-              ? { name: param, type: TypeKind.POINTER, mode: ParamMode.VAR }
-              : { name: param, type: TypeKind.INTEGER, mode: ParamMode.VALUE }
-          )
+        ? names
+            .split(',')
+            .map((param) =>
+              param === 'Buffer' || param === 'P'
+                ? { name: param, type: TypeKind.POINTER, mode: ParamMode.VAR }
+                : { name: param, type: TypeKind.INTEGER, mode: ParamMode.VALUE }
+            )
         : [],
       description,
       procedureIndex,
@@ -470,8 +579,8 @@ export class ModuleLoader {
       routine('TurtleThere', 536, '', 'Whether the turtle shows in the window', TypeKind.BOOLEAN),
       routine('TurtleWindow', 537, 'X,Y,W,H', 'Make part of the screen the window, by its center'),
       routine('Wrap', 538, '', 'Bring the turtle back on the other side'),
-      routine('Xcor', 539, '', 'The turtle\'s X coordinate', I),
-      routine('Ycor', 540, '', 'The turtle\'s Y coordinate', I),
+      routine('Xcor', 539, '', "The turtle's X coordinate", I),
+      routine('Ycor', 540, '', "The turtle's Y coordinate", I),
     ];
   }
 
@@ -500,21 +609,87 @@ export class ModuleLoader {
       routine('StrCopy', 351, [pchar('Dest'), pchar('Source')], P, 'Copy Source to Dest'),
       routine('StrCat', 352, [pchar('Dest'), pchar('Source')], P, 'Append Source to Dest'),
       routine('StrComp', 353, [pchar('Str1'), pchar('Str2')], I, 'Compare two strings'),
-      routine('StrPos', 354, [pchar('Str1'), pchar('Str2')], P, 'The first occurrence of Str2 in Str1, or nil'),
+      routine(
+        'StrPos',
+        354,
+        [pchar('Str1'), pchar('Str2')],
+        P,
+        'The first occurrence of Str2 in Str1, or nil'
+      ),
       routine('StrUpper', 355, [pchar('Str')], P, 'Convert to uppercase in place'),
       routine('StrLower', 356, [pchar('Str')], P, 'Convert to lowercase in place'),
       routine('StrEnd', 357, [pchar('Str')], P, 'A pointer to the terminating null'),
-      routine('StrMove', 358, [pchar('Dest'), pchar('Source'), word('Count')], P, 'Copy Count characters, nulls included'),
-      routine('StrECopy', 359, [pchar('Dest'), pchar('Source')], P, 'Copy Source to Dest and point at its end'),
-      routine('StrLCopy', 360, [pchar('Dest'), pchar('Source'), word('MaxLen')], P, 'Copy at most MaxLen characters'),
-      routine('StrPCopy', 361, [pchar('Dest'), { name: 'Source', type: TypeKind.STRING, mode: ParamMode.VALUE }], P, 'Copy a Pascal string to Dest'),
-      routine('StrLCat', 362, [pchar('Dest'), pchar('Source'), word('MaxLen')], P, 'Append, keeping Dest to MaxLen characters'),
+      routine(
+        'StrMove',
+        358,
+        [pchar('Dest'), pchar('Source'), word('Count')],
+        P,
+        'Copy Count characters, nulls included'
+      ),
+      routine(
+        'StrECopy',
+        359,
+        [pchar('Dest'), pchar('Source')],
+        P,
+        'Copy Source to Dest and point at its end'
+      ),
+      routine(
+        'StrLCopy',
+        360,
+        [pchar('Dest'), pchar('Source'), word('MaxLen')],
+        P,
+        'Copy at most MaxLen characters'
+      ),
+      routine(
+        'StrPCopy',
+        361,
+        [pchar('Dest'), { name: 'Source', type: TypeKind.STRING, mode: ParamMode.VALUE }],
+        P,
+        'Copy a Pascal string to Dest'
+      ),
+      routine(
+        'StrLCat',
+        362,
+        [pchar('Dest'), pchar('Source'), word('MaxLen')],
+        P,
+        'Append, keeping Dest to MaxLen characters'
+      ),
       routine('StrIComp', 363, [pchar('Str1'), pchar('Str2')], I, 'Compare, ignoring case'),
-      routine('StrLComp', 364, [pchar('Str1'), pchar('Str2'), word('MaxLen')], I, 'Compare at most MaxLen characters'),
-      routine('StrLIComp', 365, [pchar('Str1'), pchar('Str2'), word('MaxLen')], I, 'Compare at most MaxLen characters, ignoring case'),
-      routine('StrScan', 366, [pchar('Str'), { name: 'Chr', type: TypeKind.CHAR, mode: ParamMode.VALUE }], P, 'The first occurrence of Chr, or nil'),
-      routine('StrRScan', 367, [pchar('Str'), { name: 'Chr', type: TypeKind.CHAR, mode: ParamMode.VALUE }], P, 'The last occurrence of Chr, or nil'),
-      routine('StrPas', 368, [pchar('Str')], TypeKind.STRING, 'A null-terminated string as a Pascal string'),
+      routine(
+        'StrLComp',
+        364,
+        [pchar('Str1'), pchar('Str2'), word('MaxLen')],
+        I,
+        'Compare at most MaxLen characters'
+      ),
+      routine(
+        'StrLIComp',
+        365,
+        [pchar('Str1'), pchar('Str2'), word('MaxLen')],
+        I,
+        'Compare at most MaxLen characters, ignoring case'
+      ),
+      routine(
+        'StrScan',
+        366,
+        [pchar('Str'), { name: 'Chr', type: TypeKind.CHAR, mode: ParamMode.VALUE }],
+        P,
+        'The first occurrence of Chr, or nil'
+      ),
+      routine(
+        'StrRScan',
+        367,
+        [pchar('Str'), { name: 'Chr', type: TypeKind.CHAR, mode: ParamMode.VALUE }],
+        P,
+        'The last occurrence of Chr, or nil'
+      ),
+      routine(
+        'StrPas',
+        368,
+        [pchar('Str')],
+        TypeKind.STRING,
+        'A null-terminated string as a Pascal string'
+      ),
       routine('StrNew', 369, [pchar('Str')], P, 'A copy on the heap, or nil for an empty string'),
       routine('StrDispose', 370, [pchar('Str')], undefined, 'Release a string StrNew made'),
     ];
@@ -598,7 +773,9 @@ export class ModuleLoader {
         return proc ? { proc, unit: qualifier } : undefined;
       }
       if (!this.activeUnits.has(qualifier)) return undefined;
-      const proc = this.units.get(qualifier)?.procedures.find((entry) => entry.name.toUpperCase() === member);
+      const proc = this.units
+        .get(qualifier)
+        ?.procedures.find((entry) => entry.name.toUpperCase() === member);
       return proc ? { proc, unit: qualifier } : undefined;
     }
     const upperName = name.toUpperCase();
@@ -647,7 +824,9 @@ export class ModuleLoader {
   lookupConstant(name: string): { value: number; unit: string } | undefined {
     const [qualifier, member] = name.toUpperCase().split('.');
     if (member !== undefined && qualifier !== undefined) {
-      const value = this.activeUnits.has(qualifier) ? this.units.get(qualifier)?.constants.get(member) : undefined;
+      const value = this.activeUnits.has(qualifier)
+        ? this.units.get(qualifier)?.constants.get(member)
+        : undefined;
       return value === undefined ? undefined : { value, unit: qualifier };
     }
     const upperName = name.toUpperCase();
@@ -762,11 +941,7 @@ export class ModuleLoader {
 
     // Create symbols for constants
     for (const [name, value] of unit.constants) {
-      const symbol = new Symbol(
-        name,
-        SymbolKind.CONSTANT,
-        { kind: TypeKind.INTEGER, size: 2 }
-      );
+      const symbol = new Symbol(name, SymbolKind.CONSTANT, { kind: TypeKind.INTEGER, size: 2 });
       symbol.value = value;
       symbols.push(symbol);
     }

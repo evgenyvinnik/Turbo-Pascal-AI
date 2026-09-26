@@ -31,6 +31,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - run: bun run format:check
+      # Fails on any error, and on more warnings than the cap in package.json.
       - run: bun run lint
       - run: bunx vitest run
       - run: bun run build

@@ -68,7 +68,9 @@ describe('Typed constants', () => {
 
   it('holds only addresses that are fixed when the program starts', () => {
     expect(() =>
-      compile('program T; procedure P; var x: Integer; const Q: ^Integer = @x; begin end; begin end.')
+      compile(
+        'program T; procedure P; var x: Integer; const Q: ^Integer = @x; begin end; begin end.'
+      )
     ).toThrow(/Address of a global variable expected/);
     expect(() => compile('program T; var x: Integer; const Q: ^Integer = x; begin end.')).toThrow(
       /Constant expression expected/

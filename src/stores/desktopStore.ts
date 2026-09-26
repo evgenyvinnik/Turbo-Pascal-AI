@@ -17,7 +17,14 @@ import {
 
 export const DESKTOP: Rect = { x: 0, y: 1, w: 80, h: 23 };
 
-export type WindowKind = 'edit' | 'output' | 'watches' | 'callstack' | 'messages' | 'help' | 'registers';
+export type WindowKind =
+  | 'edit'
+  | 'output'
+  | 'watches'
+  | 'callstack'
+  | 'messages'
+  | 'help'
+  | 'registers';
 
 export interface Buffer {
   id: string;
@@ -158,8 +165,8 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
     seq: 0,
     untitled: 0,
 
-    newFile: () =>
-      { set((s) => {
+    newFile: () => {
+      set((s) => {
         const name = `NONAME${String(s.untitled).padStart(2, '0')}.PAS`;
         s.untitled += 1;
         s.seq += 1;
@@ -178,10 +185,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           selected: 0,
         });
         s.activeId = id;
-      }); },
+      });
+    },
 
-    openFile: (name, path, text) =>
-      { set((s) => {
+    openFile: (name, path, text) => {
+      set((s) => {
         const existing = Object.values(s.buffers).find((b) => b.path === path);
         if (existing) {
           const win = s.windows.find((w) => w.bufferId === existing.id);
@@ -206,10 +214,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           selected: 0,
         });
         s.activeId = id;
-      }); },
+      });
+    },
 
-    closeWindow: (id) =>
-      { set((s) => {
+    closeWindow: (id) => {
+      set((s) => {
         const target = id ?? s.activeId;
         if (!target) return;
         const idx = s.windows.findIndex((w) => w.id === target);
@@ -220,26 +229,29 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           s.buffers = Object.fromEntries(Object.entries(s.buffers).filter(([k]) => k !== orphan));
         }
         s.activeId = s.windows.length ? (s.windows[s.windows.length - 1]?.id ?? null) : null;
-      }); },
+      });
+    },
 
-    closeAll: () =>
-      { set((s) => {
+    closeAll: () => {
+      set((s) => {
         s.windows = [];
         s.buffers = {};
         s.activeId = null;
-      }); },
+      });
+    },
 
-    focusWindow: (id) =>
-      { set((s) => {
+    focusWindow: (id) => {
+      set((s) => {
         const idx = s.windows.findIndex((w) => w.id === id);
         if (idx < 0) return;
         const [win] = s.windows.splice(idx, 1);
         if (win) s.windows.push(win);
         s.activeId = id;
-      }); },
+      });
+    },
 
-    cycleWindow: (dir) =>
-      { set((s) => {
+    cycleWindow: (dir) => {
+      set((s) => {
         if (s.windows.length < 2) return;
         if (dir === 1) {
           const front = s.windows.pop();
@@ -249,10 +261,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           if (back) s.windows.push(back);
         }
         s.activeId = s.windows[s.windows.length - 1]?.id ?? null;
-      }); },
+      });
+    },
 
-    selectByNumber: (n) =>
-      { set((s) => {
+    selectByNumber: (n) => {
+      set((s) => {
         const idx = s.windows.findIndex((w) => w.num === n);
         if (idx < 0) return;
         const [win] = s.windows.splice(idx, 1);
@@ -260,10 +273,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           s.windows.push(win);
           s.activeId = win.id;
         }
-      }); },
+      });
+    },
 
-    zoomActive: () =>
-      { set((s) => {
+    zoomActive: () => {
+      set((s) => {
         const win = s.windows.find((w) => w.id === s.activeId);
         if (!win) return;
         if (win.prevRect) {
@@ -273,10 +287,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           win.prevRect = { ...win.rect };
           win.rect = { ...DESKTOP };
         }
-      }); },
+      });
+    },
 
-    tile: () =>
-      { set((s) => {
+    tile: () => {
+      set((s) => {
         const n = s.windows.length;
         if (n === 0) return;
         const cols = n <= 2 ? 1 : Math.ceil(Math.sqrt(n));
@@ -294,10 +309,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
             h: cy === rows - 1 ? DESKTOP.h - cy * h : h,
           };
         });
-      }); },
+      });
+    },
 
-    cascade: () =>
-      { set((s) => {
+    cascade: () => {
+      set((s) => {
         s.windows.forEach((win, i) => {
           win.prevRect = null;
           win.rect = {
@@ -307,10 +323,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
             h: Math.max(5, DESKTOP.h - i),
           };
         });
-      }); },
+      });
+    },
 
-    setRect: (id, rect) =>
-      { set((s) => {
+    setRect: (id, rect) => {
+      set((s) => {
         const win = s.windows.find((w) => w.id === id);
         if (!win) return;
         win.rect = {
@@ -319,7 +336,8 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           w: Math.max(10, Math.min(DESKTOP.w, rect.w)),
           h: Math.max(3, Math.min(DESKTOP.h, rect.h)),
         };
-      }); },
+      });
+    },
 
     toggleTool: (kind) => {
       const win = get().windows.find((w) => w.kind === kind);
@@ -331,8 +349,8 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
       }
     },
 
-    openTool: (kind) =>
-      { set((s) => {
+    openTool: (kind) => {
+      set((s) => {
         const existing = s.windows.find((w) => w.kind === kind);
         if (existing) {
           const idx = s.windows.indexOf(existing);
@@ -355,19 +373,22 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           selected: 0,
         });
         s.activeId = id;
-      }); },
+      });
+    },
 
-    setToolSelection: (id, index) =>
-      { set((s) => {
+    setToolSelection: (id, index) => {
+      set((s) => {
         const win = s.windows.find((w) => w.id === id);
         if (win) win.selected = Math.max(0, index);
-      }); },
+      });
+    },
 
-    scrollTool: (id, delta) =>
-      { set((s) => {
+    scrollTool: (id, delta) => {
+      set((s) => {
         const win = s.windows.find((w) => w.id === id);
         if (win) win.scroll = Math.max(0, win.scroll + delta);
-      }); },
+      });
+    },
 
     activeWindow: () => get().windows.find((w) => w.id === get().activeId) ?? null,
 
@@ -377,16 +398,17 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
       return get().buffers[win.bufferId] ?? null;
     },
 
-    edit: (fn) =>
-      { set((s) => {
+    edit: (fn) => {
+      set((s) => {
         const win = s.windows.find((w) => w.id === s.activeId);
         if (!win?.bufferId) return;
         const buf = s.buffers[win.bufferId];
         if (buf) fn(buf);
-      }); },
+      });
+    },
 
-    typeText: (text) =>
-      { get().edit((b) => {
+    typeText: (text) => {
+      get().edit((b) => {
         snapshot(b);
         if (b.anchor && comparePos(b.anchor, b.cursor) !== 0) {
           b.cursor = deleteRange(b.lines, b.anchor, b.cursor);
@@ -398,10 +420,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
         }
         b.cursor = insertText(b.lines, b.cursor, text);
         b.error = null;
-      }); },
+      });
+    },
 
-    newline: () =>
-      { get().edit((b) => {
+    newline: () => {
+      get().edit((b) => {
         snapshot(b);
         if (b.anchor && comparePos(b.anchor, b.cursor) !== 0) {
           b.cursor = deleteRange(b.lines, b.anchor, b.cursor);
@@ -411,10 +434,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
         const indent = /^[ \t]*/.exec(line)?.[0] ?? '';
         b.cursor = insertText(b.lines, b.cursor, `\n${indent}`);
         b.error = null;
-      }); },
+      });
+    },
 
-    backspace: () =>
-      { get().edit((b) => {
+    backspace: () => {
+      get().edit((b) => {
         snapshot(b);
         if (b.anchor && comparePos(b.anchor, b.cursor) !== 0) {
           b.cursor = deleteRange(b.lines, b.anchor, b.cursor);
@@ -429,10 +453,11 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
         } else {
           b.undo.pop();
         }
-      }); },
+      });
+    },
 
-    del: () =>
-      { get().edit((b) => {
+    del: () => {
+      get().edit((b) => {
         snapshot(b);
         if (b.anchor && comparePos(b.anchor, b.cursor) !== 0) {
           b.cursor = deleteRange(b.lines, b.anchor, b.cursor);
@@ -447,17 +472,19 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
         } else {
           b.undo.pop();
         }
-      }); },
+      });
+    },
 
-    moveCursor: (to, extend) =>
-      { get().edit((b) => {
+    moveCursor: (to, extend) => {
+      get().edit((b) => {
         if (extend && !b.anchor) b.anchor = { ...b.cursor };
         if (!extend) b.anchor = null;
         b.cursor = clampPos(b.lines, to);
-      }); },
+      });
+    },
 
-    moveBy: (dLine, dCol, extend) =>
-      { get().edit((b) => {
+    moveBy: (dLine, dCol, extend) => {
+      get().edit((b) => {
         if (extend && !b.anchor) b.anchor = { ...b.cursor };
         if (!extend) b.anchor = null;
         let { line, col } = b.cursor;
@@ -477,53 +504,60 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
         }
         if (dLine !== 0) line += dLine;
         b.cursor = clampPos(b.lines, { line, col });
-      }); },
+      });
+    },
 
-    moveWord: (dir, extend) =>
-      { get().edit((b) => {
+    moveWord: (dir, extend) => {
+      get().edit((b) => {
         if (extend && !b.anchor) b.anchor = { ...b.cursor };
         if (!extend) b.anchor = null;
         const line = b.lines[b.cursor.line] ?? '';
         const col = dir === 1 ? wordEnd(line, b.cursor.col) : wordStart(line, b.cursor.col);
         b.cursor = clampPos(b.lines, { line: b.cursor.line, col });
-      }); },
+      });
+    },
 
-    home: (extend) =>
-      { get().edit((b) => {
+    home: (extend) => {
+      get().edit((b) => {
         if (extend && !b.anchor) b.anchor = { ...b.cursor };
         if (!extend) b.anchor = null;
         b.cursor = { line: b.cursor.line, col: 0 };
-      }); },
+      });
+    },
 
-    end: (extend) =>
-      { get().edit((b) => {
+    end: (extend) => {
+      get().edit((b) => {
         if (extend && !b.anchor) b.anchor = { ...b.cursor };
         if (!extend) b.anchor = null;
         b.cursor = { line: b.cursor.line, col: (b.lines[b.cursor.line] ?? '').length };
-      }); },
+      });
+    },
 
-    pageMove: (dir, extend, pageSize) =>
-      { get().edit((b) => {
+    pageMove: (dir, extend, pageSize) => {
+      get().edit((b) => {
         if (extend && !b.anchor) b.anchor = { ...b.cursor };
         if (!extend) b.anchor = null;
         b.cursor = clampPos(b.lines, { line: b.cursor.line + dir * pageSize, col: b.cursor.col });
         b.scroll.line = Math.max(0, b.scroll.line + dir * pageSize);
-      }); },
+      });
+    },
 
-    gotoLine: (line) =>
-      { get().edit((b) => {
+    gotoLine: (line) => {
+      get().edit((b) => {
         b.anchor = null;
         b.cursor = clampPos(b.lines, { line: line - 1, col: 0 });
-      }); },
+      });
+    },
 
-    selectAll: () =>
-      { get().edit((b) => {
+    selectAll: () => {
+      get().edit((b) => {
         b.anchor = { line: 0, col: 0 };
         b.cursor = {
           line: b.lines.length - 1,
           col: (b.lines[b.lines.length - 1] ?? '').length,
         };
-      }); },
+      });
+    },
 
     copy: () => {
       const b = get().activeBuffer();
@@ -557,41 +591,45 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
       });
     },
 
-    clearSelection: () =>
-      { get().edit((b) => {
+    clearSelection: () => {
+      get().edit((b) => {
         if (!b.anchor) return;
         snapshot(b);
         b.cursor = deleteRange(b.lines, b.anchor, b.cursor);
         b.anchor = null;
-      }); },
+      });
+    },
 
-    undo: () =>
-      { get().edit((b) => {
+    undo: () => {
+      get().edit((b) => {
         const prev = b.undo.pop();
         if (!prev) return;
         b.redo.push({ lines: [...b.lines], cursor: { ...b.cursor } });
         b.lines = prev.lines;
         b.cursor = clampPos(prev.lines, prev.cursor);
         b.anchor = null;
-      }); },
+      });
+    },
 
-    redo: () =>
-      { get().edit((b) => {
+    redo: () => {
+      get().edit((b) => {
         const next = b.redo.pop();
         if (!next) return;
         b.undo.push({ lines: [...b.lines], cursor: { ...b.cursor } });
         b.lines = next.lines;
         b.cursor = clampPos(next.lines, next.cursor);
         b.anchor = null;
-      }); },
+      });
+    },
 
-    toggleInsert: () =>
-      { get().edit((b) => {
+    toggleInsert: () => {
+      get().edit((b) => {
         b.insert = !b.insert;
-      }); },
+      });
+    },
 
-    markSaved: (name, path) =>
-      { set((s) => {
+    markSaved: (name, path) => {
+      set((s) => {
         const win = s.windows.find((w) => w.id === s.activeId);
         if (!win?.bufferId) return;
         const buf = s.buffers[win.bufferId];
@@ -602,27 +640,31 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
           buf.path = path ?? name;
           win.title = name;
         }
-      }); },
+      });
+    },
 
-    setError: (line, message) =>
-      { get().edit((b) => {
+    setError: (line, message) => {
+      get().edit((b) => {
         b.error = { line, message };
         b.cursor = clampPos(b.lines, { line: line - 1, col: 0 });
-      }); },
+      });
+    },
 
-    clearError: () =>
-      { get().edit((b) => {
+    clearError: () => {
+      get().edit((b) => {
         b.error = null;
-      }); },
+      });
+    },
 
-    setHighlight: (line) =>
-      { get().edit((b) => {
+    setHighlight: (line) => {
+      get().edit((b) => {
         b.highlight = line;
         if (line !== null) b.cursor = clampPos(b.lines, { line: line - 1, col: b.cursor.col });
-      }); },
+      });
+    },
 
-    ensureVisible: (pageSize, pageCols) =>
-      { get().edit((b) => {
+    ensureVisible: (pageSize, pageCols) => {
+      get().edit((b) => {
         if (b.cursor.line < b.scroll.line) b.scroll.line = b.cursor.line;
         if (b.cursor.line > b.scroll.line + pageSize - 1) {
           b.scroll.line = b.cursor.line - pageSize + 1;
@@ -633,8 +675,9 @@ export const useDesktopStore = create<DesktopState & DesktopActions>()(
         }
         b.scroll.line = Math.max(0, Math.min(b.scroll.line, Math.max(0, b.lines.length - 1)));
         b.scroll.col = Math.max(0, b.scroll.col);
-      }); },
-  })),
+      });
+    },
+  }))
 );
 
 export const bufferText = (b: Buffer): string => fromLines(b.lines);

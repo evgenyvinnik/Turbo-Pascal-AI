@@ -46,7 +46,7 @@ export function paintToolWindow(
   rows: ToolRow[],
   active: boolean,
   pal: ToolPalette,
-  options: { selectable?: boolean; scrollbars?: boolean; indent?: number } = {},
+  options: { selectable?: boolean; scrollbars?: boolean; indent?: number } = {}
 ): void {
   const { selectable = false, scrollbars = true, indent = 1 } = options;
   const client = clientRect(win.rect);
@@ -76,7 +76,11 @@ export function paintToolWindow(
   for (let i = 0; i < client.h; i += 1) {
     const index = win.scroll + i;
     // Watches keeps an insertion row; other lists only select actual entries.
-    const isSel = selectable && active && index === win.selected && (rows[index] !== undefined || win.kind === 'watches');
+    const isSel =
+      selectable &&
+      active &&
+      index === win.selected &&
+      (rows[index] !== undefined || win.kind === 'watches');
     if (isSel) scr.fill({ x: client.x, y: client.y + i, w: client.w, h: 1 }, ' ', pal.selected);
     const row = rows[index];
     if (!row) continue;

@@ -8,7 +8,10 @@ const parse = (source: string) => new Parser(new Lexer(new Stream(source))).pars
 
 describe('Pascal parser', () => {
   it.each(['HELLO', 'FIBONACCI', 'PRIMES', 'SQUARE'])('parses bundled %s.PAS', (name) => {
-    const source = readFileSync(new URL(`../../public/samples/${name}.PAS`, import.meta.url), 'utf8');
+    const source = readFileSync(
+      new URL(`../../public/samples/${name}.PAS`, import.meta.url),
+      'utf8'
+    );
     expect(parse(source).block.statements.length).toBeGreaterThan(0);
   });
 
@@ -18,13 +21,21 @@ describe('Pascal parser', () => {
       type: 'call',
       arguments: [
         { type: 'formattedArgument', value: { value: 12 }, width: { value: 5 } },
-        { type: 'formattedArgument', value: { value: 3.14159 }, width: { value: 8 }, precision: { value: 2 } },
+        {
+          type: 'formattedArgument',
+          value: { value: 3.14159 },
+          width: { value: 8 },
+          precision: { value: 2 },
+        },
       ],
     });
   });
 
   it('parses negative and character array bounds', () => {
-    expect(parse("program T; var a: array[-2..2] of Integer; b: array['a'..'z'] of Integer; begin end.").block.declarations).toHaveLength(2);
+    expect(
+      parse("program T; var a: array[-2..2] of Integer; b: array['a'..'z'] of Integer; begin end.")
+        .block.declarations
+    ).toHaveLength(2);
   });
 
   it('parses forward procedures, with statements, xor, and case ranges', () => {
@@ -64,7 +75,15 @@ describe('Pascal lexer', () => {
   it('keeps escaped quotes, comments, ranges, and source lines intact', () => {
     const lexer = new Lexer(new Stream("{first}\n(*second*)\n'Pascal''s' 1..3 2.5e-2"));
     const tokens = Array.from({ length: 7 }, () => lexer.next());
-    expect(tokens.map(({ value }) => value)).toEqual(['first', 'second', "Pascal's", '1', '..', '3', '2.5e-2']);
+    expect(tokens.map(({ value }) => value)).toEqual([
+      'first',
+      'second',
+      "Pascal's",
+      '1',
+      '..',
+      '3',
+      '2.5e-2',
+    ]);
     expect(tokens.map(({ lineNumber }) => lineNumber)).toEqual([1, 2, 3, 3, 3, 3, 3]);
   });
 

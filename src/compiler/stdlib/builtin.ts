@@ -501,8 +501,10 @@ export const STRING_BUILTINS: BuiltinDef[] = [
  * Built-in memory management procedures
  */
 export const MEMORY_BUILTINS: BuiltinDef[] = [
-  ...(['High', 'Low'] as const).map(name => ({
-    name, isFunction: true, returnType: TypeKind.INTEGER,
+  ...(['High', 'Low'] as const).map((name) => ({
+    name,
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
     params: [{ name: 'X', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: `Return the ${name === 'High' ? 'upper' : 'lower'} bound of an ordinal, array, or string`,
     procedureIndex: name === 'High' ? BuiltinProcedure.HIGH : BuiltinProcedure.LOW,
@@ -538,9 +540,7 @@ export const CONTROL_BUILTINS: BuiltinDef[] = [
   {
     name: 'Halt',
     isFunction: false,
-    params: [
-      { name: 'ExitCode', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true },
-    ],
+    params: [{ name: 'ExitCode', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true }],
     description: 'Terminate program execution with an optional exit code',
     procedureIndex: BuiltinProcedure.HALT,
   },
@@ -575,9 +575,7 @@ export const RANDOM_BUILTINS: BuiltinDef[] = [
     name: 'Random',
     isFunction: true,
     returnType: TypeKind.INTEGER,
-    params: [
-      { name: 'Range', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true },
-    ],
+    params: [{ name: 'Range', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true }],
     description: 'Return a random number (0..Range-1 or 0.0..1.0)',
     procedureIndex: BuiltinProcedure.RANDOM,
   },
@@ -592,15 +590,96 @@ export const RANDOM_BUILTINS: BuiltinDef[] = [
 
 /** Standard file services operate on the browser's Pascal virtual drive. */
 export const FILE_BUILTINS: BuiltinDef[] = [
-  { name: 'Assign', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Name', type: TypeKind.STRING, mode: ParamMode.VALUE }], description: 'Associate a file variable with a file name', procedureIndex: 46 },
-  ...(['Reset', 'Rewrite', 'Append', 'Close'] as const).map((name, offset): BuiltinDef => ({ name, isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, ...(offset < 2 ? [{ name: 'RecordSize', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true }] : [])], description: `${name} a file`, procedureIndex: 47 + offset })),
-  ...(['FilePos', 'FileSize'] as const).map((name, offset): BuiltinDef => ({ name, isFunction: true, returnType: TypeKind.INTEGER, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }], description: `${name} in records`, procedureIndex: 66 + offset })),
-  { name: 'Seek', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Position', type: TypeKind.INTEGER, mode: ParamMode.VALUE }], description: 'Move to a file record', procedureIndex: 68 },
-  { name: 'Erase', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }], description: 'Remove a closed file', procedureIndex: 69 },
-  { name: 'Rename', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Name', type: TypeKind.STRING, mode: ParamMode.VALUE }], description: 'Rename a closed file', procedureIndex: 74 },
-  { name: 'IOResult', isFunction: true, returnType: TypeKind.INTEGER, params: [], description: 'Return the last I/O result', procedureIndex: 75 },
-  { name: 'Truncate', isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }], description: 'Truncate a file at its current position', procedureIndex: 76 },
-  ...(['BlockRead', 'BlockWrite'] as const).map((name, offset): BuiltinDef => ({ name, isFunction: false, params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }, { name: 'Buffer', type: TypeKind.INTEGER, mode: ParamMode.VAR }, { name: 'Count', type: TypeKind.INTEGER, mode: ParamMode.VALUE }, { name: 'Result', type: TypeKind.INTEGER, mode: ParamMode.VAR, optional: true }], description: `${name} binary records`, procedureIndex: 80 + offset })),
+  {
+    name: 'Assign',
+    isFunction: false,
+    params: [
+      { name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR },
+      { name: 'Name', type: TypeKind.STRING, mode: ParamMode.VALUE },
+    ],
+    description: 'Associate a file variable with a file name',
+    procedureIndex: 46,
+  },
+  ...(['Reset', 'Rewrite', 'Append', 'Close'] as const).map(
+    (name, offset): BuiltinDef => ({
+      name,
+      isFunction: false,
+      params: [
+        { name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR },
+        ...(offset < 2
+          ? [{ name: 'RecordSize', type: TypeKind.INTEGER, mode: ParamMode.VALUE, optional: true }]
+          : []),
+      ],
+      description: `${name} a file`,
+      procedureIndex: 47 + offset,
+    })
+  ),
+  ...(['FilePos', 'FileSize'] as const).map(
+    (name, offset): BuiltinDef => ({
+      name,
+      isFunction: true,
+      returnType: TypeKind.INTEGER,
+      params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }],
+      description: `${name} in records`,
+      procedureIndex: 66 + offset,
+    })
+  ),
+  {
+    name: 'Seek',
+    isFunction: false,
+    params: [
+      { name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR },
+      { name: 'Position', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+    ],
+    description: 'Move to a file record',
+    procedureIndex: 68,
+  },
+  {
+    name: 'Erase',
+    isFunction: false,
+    params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }],
+    description: 'Remove a closed file',
+    procedureIndex: 69,
+  },
+  {
+    name: 'Rename',
+    isFunction: false,
+    params: [
+      { name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR },
+      { name: 'Name', type: TypeKind.STRING, mode: ParamMode.VALUE },
+    ],
+    description: 'Rename a closed file',
+    procedureIndex: 74,
+  },
+  {
+    name: 'IOResult',
+    isFunction: true,
+    returnType: TypeKind.INTEGER,
+    params: [],
+    description: 'Return the last I/O result',
+    procedureIndex: 75,
+  },
+  {
+    name: 'Truncate',
+    isFunction: false,
+    params: [{ name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR }],
+    description: 'Truncate a file at its current position',
+    procedureIndex: 76,
+  },
+  ...(['BlockRead', 'BlockWrite'] as const).map(
+    (name, offset): BuiltinDef => ({
+      name,
+      isFunction: false,
+      params: [
+        { name: 'F', type: TypeKind.FILE, mode: ParamMode.VAR },
+        { name: 'Buffer', type: TypeKind.INTEGER, mode: ParamMode.VAR },
+        { name: 'Count', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
+        { name: 'Result', type: TypeKind.INTEGER, mode: ParamMode.VAR, optional: true },
+      ],
+      description: `${name} binary records`,
+      procedureIndex: 80 + offset,
+    })
+  ),
 ];
 
 /**
@@ -679,7 +758,8 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
       { name: 'P', type: TypeKind.POINTER, mode: ParamMode.VAR },
       { name: 'Size', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
     ],
-    description: name === 'GetMem' ? 'Allocate a heap block of Size bytes' : 'Release a block from GetMem',
+    description:
+      name === 'GetMem' ? 'Allocate a heap block of Size bytes' : 'Release a block from GetMem',
     procedureIndex: name === 'GetMem' ? BuiltinProcedure.GETMEM : BuiltinProcedure.FREEMEM,
   })),
   ...(['MemAvail', 'MaxAvail'] as const).map((name) => ({
@@ -687,7 +767,8 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
     isFunction: true,
     returnType: TypeKind.INTEGER,
     params: [],
-    description: name === 'MemAvail' ? 'Return the free heap space' : 'Return the largest free heap block',
+    description:
+      name === 'MemAvail' ? 'Return the free heap space' : 'Return the largest free heap block',
     procedureIndex: name === 'MemAvail' ? BuiltinProcedure.MEMAVAIL : BuiltinProcedure.MAXAVAIL,
   })),
   {
@@ -709,7 +790,11 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
     [
       ['Seg', 'The segment a variable lies in', BuiltinProcedure.SEG],
       ['CSeg', 'The code segment', BuiltinProcedure.CSEG],
-      ['DSeg', 'The data segment, which holds the globals and typed constants', BuiltinProcedure.DSEG],
+      [
+        'DSeg',
+        'The data segment, which holds the globals and typed constants',
+        BuiltinProcedure.DSEG,
+      ],
       ['SSeg', 'The stack segment, which holds the locals', BuiltinProcedure.SSEG],
     ] as const
   ).map(([name, description, procedureIndex]) => ({
@@ -764,7 +849,9 @@ export const SYSTEM_BUILTINS: BuiltinDef[] = [
     isFunction: false,
     params: [{ name: 'P', type: TypeKind.POINTER, mode: ParamMode.VAR }],
     description:
-      name === 'Mark' ? 'Record the current heap top in a pointer' : 'Release the heap back to a marked top',
+      name === 'Mark'
+        ? 'Record the current heap top in a pointer'
+        : 'Release the heap back to a marked top',
     procedureIndex: name === 'Mark' ? BuiltinProcedure.MARK : BuiltinProcedure.RELEASE,
   })),
   {

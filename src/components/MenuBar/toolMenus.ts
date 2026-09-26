@@ -2,7 +2,10 @@ import type { ToolSettings } from '../../stores/ideStore';
 import type { MenuEntry, MenuNode } from './menuDefs';
 
 /** Derive both presentation and command identity from the saved tool order. */
-export function buildToolsMenuItems(settings: readonly ToolSettings[], defaults: readonly MenuNode[]): MenuNode[] {
+export function buildToolsMenuItems(
+  settings: readonly ToolSettings[],
+  defaults: readonly MenuNode[]
+): MenuNode[] {
   const fixed = defaults.slice(0, 4);
   const builtins = defaults.slice(4).filter((node): node is MenuEntry => !('separator' in node));
   const used = new Set(['m']);
@@ -17,7 +20,10 @@ export function buildToolsMenuItems(settings: readonly ToolSettings[], defaults:
     let label = builtin?.label ?? setting.title.replaceAll('~', '');
     if (!builtin) {
       const explicit = /~([a-z0-9])~/i.exec(setting.title)?.[1];
-      const hotkey = explicit && !used.has(explicit.toLowerCase()) ? explicit : label.match(/[a-z0-9]/gi)?.find((letter) => !used.has(letter.toLowerCase()));
+      const hotkey =
+        explicit && !used.has(explicit.toLowerCase())
+          ? explicit
+          : label.match(/[a-z0-9]/gi)?.find((letter) => !used.has(letter.toLowerCase()));
       if (hotkey) {
         used.add(hotkey.toLowerCase());
         const at = label.toLowerCase().indexOf(hotkey.toLowerCase());
@@ -25,7 +31,8 @@ export function buildToolsMenuItems(settings: readonly ToolSettings[], defaults:
       }
     }
     return {
-      id: `tools.custom.${String(index)}`, label,
+      id: `tools.custom.${String(index)}`,
+      label,
       ...(index < 4 ? { shortcut: `Shift+F${String(index + 2)}` } : {}),
       hint: builtin?.hint ?? `Run ${setting.title.replaceAll('~', '')}`,
     };
@@ -33,7 +40,10 @@ export function buildToolsMenuItems(settings: readonly ToolSettings[], defaults:
   return items.length ? [...fixed, ...items] : fixed.filter((entry) => !('separator' in entry));
 }
 
-export function configuredToolShortcut(key: string, settings: readonly ToolSettings[]): string | undefined {
+export function configuredToolShortcut(
+  key: string,
+  settings: readonly ToolSettings[]
+): string | undefined {
   const match = /^shift\+F([2-5])$/.exec(key);
   if (!match) return undefined;
   const index = Number(match[1]) - 2;

@@ -121,7 +121,7 @@ export const DEFAULT_CRT_VARIABLES: CrtVariables = {
   LastMode: TextModes.CO80,
   TextAttr: (TextColors.Black << 4) | TextColors.LightGray,
   WindMin: 0x0000, // (0,0) - top-left
-  WindMax: 0x184F, // (79,24) - bottom-right for 80x25
+  WindMax: 0x184f, // (79,24) - bottom-right for 80x25
 };
 
 /**
@@ -203,18 +203,14 @@ export const CRT_COLOR_PROCS: BuiltinDef[] = [
   {
     name: 'TextColor',
     isFunction: false,
-    params: [
-      { name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Set the foreground text color',
     procedureIndex: CrtProcedure.TEXTCOLOR,
   },
   {
     name: 'TextBackground',
     isFunction: false,
-    params: [
-      { name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Color', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Set the background text color',
     procedureIndex: CrtProcedure.TEXTBACKGROUND,
   },
@@ -242,9 +238,7 @@ export const CRT_COLOR_PROCS: BuiltinDef[] = [
   {
     name: 'TextMode',
     isFunction: false,
-    params: [
-      { name: 'Mode', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Mode', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Set the text mode',
     procedureIndex: CrtProcedure.TEXTMODE,
   },
@@ -279,9 +273,7 @@ export const CRT_SOUND_PROCS: BuiltinDef[] = [
   {
     name: 'Sound',
     isFunction: false,
-    params: [
-      { name: 'Hz', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Hz', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Start playing a sound at the specified frequency',
     procedureIndex: CrtProcedure.SOUND,
   },
@@ -295,9 +287,7 @@ export const CRT_SOUND_PROCS: BuiltinDef[] = [
   {
     name: 'Delay',
     isFunction: false,
-    params: [
-      { name: 'Ms', type: TypeKind.INTEGER, mode: ParamMode.VALUE },
-    ],
+    params: [{ name: 'Ms', type: TypeKind.INTEGER, mode: ParamMode.VALUE }],
     description: 'Pause execution for a specified number of milliseconds',
     procedureIndex: CrtProcedure.DELAY,
   },

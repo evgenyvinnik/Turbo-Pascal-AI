@@ -8,8 +8,17 @@ async function find(ide: Ide, text: string, options: string[] = []) {
   for (const option of options) await ide.press(`Alt+${option}`);
   await ide.press('Enter');
 }
-async function again(ide: Ide) { await ide.openMenu('s'); await ide.chooseItem('s'); }
-async function replace(ide: Ide, text: string, replacement: string, options: string[] = [], all = true) {
+async function again(ide: Ide) {
+  await ide.openMenu('s');
+  await ide.chooseItem('s');
+}
+async function replace(
+  ide: Ide,
+  text: string,
+  replacement: string,
+  options: string[] = [],
+  all = true
+) {
   await ide.openMenu('s');
   await ide.chooseItem('r');
   await ide.type(text);
@@ -18,11 +27,16 @@ async function replace(ide: Ide, text: string, replacement: string, options: str
   for (const option of options) await ide.press(`Alt+${option}`);
   await ide.press(all ? 'Alt+a' : 'Enter');
 }
-async function edit(ide: Ide, command: string) { await ide.openMenu('e'); await ide.chooseItem(command); }
+async function edit(ide: Ide, command: string) {
+  await ide.openMenu('e');
+  await ide.chooseItem(command);
+}
 
 // These assertions inspect the rendered editor and execute real commands; they
 // do not modify app stores or compare the implementation against itself.
-test('whole-word search excludes identifier substrings and wraps in both directions', async ({ page }) => {
+test('whole-word search excludes identifier substrings and wraps in both directions', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('scatter cat catfish cat');
   await ide.press('Home');
@@ -40,9 +54,13 @@ test('whole-word search excludes identifier substrings and wraps in both directi
   await expect(ide.row(23)).toContainText('1:24');
 });
 
-test('Search Again includes adjacent matches and scrolls distant results into view', async ({ page }) => {
+test('Search Again includes adjacent matches and scrolls distant results into view', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
-  await ide.typeSource(['catcat', ...Array.from({ length: 30 }, () => 'filler'), 'lastcat'].join('\n'));
+  await ide.typeSource(
+    ['catcat', ...Array.from({ length: 30 }, () => 'filler'), 'lastcat'].join('\n')
+  );
   await ide.moveTo(1, 1);
   await find(ide, 'cat');
   await expect(ide.row(23)).toContainText('1:4');
@@ -79,7 +97,9 @@ test('Change All respects selected text and is one Undo/Redo operation', async (
   await expect(ide.row(2)).toContainText('X X outside cat');
 });
 
-test('replacement from cursor excludes earlier text and treats replacement dollars literally', async ({ page }) => {
+test('replacement from cursor excludes earlier text and treats replacement dollars literally', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('cat cat cat');
   await ide.press('Home');
@@ -90,7 +110,9 @@ test('replacement from cursor excludes earlier text and treats replacement dolla
   await expect(ide.row(2)).toContainText('cat $& $&');
 });
 
-test('Prompt on replace applies Yes immediately, skips No and stops on Cancel', async ({ page }) => {
+test('Prompt on replace applies Yes immediately, skips No and stops on Cancel', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('cat cat cat');
   await ide.press('Home');
@@ -108,7 +130,9 @@ test('Prompt on replace applies Yes immediately, skips No and stops on Cancel', 
   await expect(ide.row(2)).toContainText('cat cat cat');
 });
 
-test('Replace OK changes one occurrence and cancelling a later dialog preserves settings', async ({ page }) => {
+test('Replace OK changes one occurrence and cancelling a later dialog preserves settings', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('cat cat');
   await ide.press('Home');
@@ -130,7 +154,9 @@ test('Replace OK changes one occurrence and cancelling a later dialog preserves 
   await expect(ide.row(10)).toContainText('[ ] Case sensitive');
 });
 
-test('Borland regular expressions support classes and repetition without JS-only operators', async ({ page }) => {
+test('Borland regular expressions support classes and repetition without JS-only operators', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource('bee\nbot\nb\nboo\n(b|o)?');
   await ide.moveTo(1, 1);
@@ -146,7 +172,9 @@ test('Borland regular expressions support classes and repetition without JS-only
   await expect(ide.row(1)).toContainText('NONAME00.PAS');
 });
 
-test('dialog accelerators focus inputs, toggle clusters and Delete clears selected input text', async ({ page }) => {
+test('dialog accelerators focus inputs, toggle clusters and Delete clears selected input text', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.openMenu('o');
   await ide.chooseItem('e');
@@ -167,7 +195,9 @@ test('dialog accelerators focus inputs, toggle clusters and Delete clears select
   await expect(ide.row(6)).toContainText('value');
 });
 
-test('clipboard shortcuts and Undo recover cleared text without replacing the clipboard', async ({ page }) => {
+test('clipboard shortcuts and Undo recover cleared text without replacing the clipboard', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('copied');
   await ide.press('Home');
@@ -192,7 +222,9 @@ test('clipboard shortcuts and Undo recover cleared text without replacing the cl
   await expect(ide.row(3)).toContainText('second line');
 });
 
-test('Grep handles quoted patterns, file masks, case flags and invalid arguments', async ({ page }) => {
+test('Grep handles quoted patterns, file masks, case flags and invalid arguments', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource('NEEDLE TOKEN\nother line');
   await ide.press('Shift+F2');
@@ -214,7 +246,9 @@ test('Grep handles quoted patterns, file masks, case flags and invalid arguments
   await ide.waitForText('Invalid Grep regular expression');
 });
 
-test('clearing Primary File makes the next compile use the active unsaved buffer', async ({ page }) => {
+test('clearing Primary File makes the next compile use the active unsaved buffer', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.openFile('HELLO.PAS');
   await ide.openMenu('c');
@@ -231,9 +265,13 @@ test('clearing Primary File makes the next compile use the active unsaved buffer
   await expect(ide.row(1)).toContainText('NONAME01.PAS');
 });
 
-test('Compiler Options overflow checking affects execution and explicit source directives override it', async ({ page }) => {
+test('Compiler Options overflow checking affects execution and explicit source directives override it', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
-  await ide.typeSource('program Overflow;\nvar a,b:Integer;\nbegin\n a:=30000;b:=10000;WriteLn(a+b);\nend.');
+  await ide.typeSource(
+    'program Overflow;\nvar a,b:Integer;\nbegin\n a:=30000;b:=10000;WriteLn(a+b);\nend.'
+  );
   await ide.openMenu('o');
   await ide.chooseItem('c');
   await ide.press('Alt+c');
@@ -252,9 +290,13 @@ test('Compiler Options overflow checking affects execution and explicit source d
   await expect(ide.row(18)).toContainText('-25536');
 });
 
-test('invalid Evaluate/Modify expressions preserve live variables and allow a subsequent valid edit', async ({ page }) => {
+test('invalid Evaluate/Modify expressions preserve live variables and allow a subsequent valid edit', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
-  await ide.typeSource('program Inspect;\nvar total:Integer;\nbegin\n total:=5;\n WriteLn(total);\nend.');
+  await ide.typeSource(
+    'program Inspect;\nvar total:Integer;\nbegin\n total:=5;\n WriteLn(total);\nend.'
+  );
   await ide.moveTo(5, 1);
   await ide.press('Control+F8');
   await ide.press('Control+F9');
@@ -279,7 +321,9 @@ test('invalid Evaluate/Modify expressions preserve live variables and allow a su
   await expect(ide.row(18)).toContainText('7');
 });
 
-test('Options Save keeps the custom configuration filename after a workspace reload', async ({ page }) => {
+test('Options Save keeps the custom configuration filename after a workspace reload', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.openMenu('o');
   await ide.chooseItem('m');
@@ -297,12 +341,22 @@ test('Options Save keeps the custom configuration filename after a workspace rel
   await restored.press('Enter');
   await restored.openMenu('o');
   await restored.chooseItem('s');
-  const disk = await page.evaluate(() => JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<string, string>);
-  expect(JSON.parse(disk['CUSTOM.TP'] ?? '{}')).toMatchObject({ optionDialogs: { 'options.memory': { stack: '54321' } } });
+  const disk = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
+        string,
+        string
+      >
+  );
+  expect(JSON.parse(disk['CUSTOM.TP'] ?? '{}')).toMatchObject({
+    optionDialogs: { 'options.memory': { stack: '54321' } },
+  });
   expect(disk['TURBO.TP']).toBeUndefined();
 });
 
-test('configured Grep arguments are editable defaults, execute correctly and survive Cancel', async ({ page }) => {
+test('configured Grep arguments are editable defaults, execute correctly and survive Cancel', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.type('CONFIGURED_TOKEN');
   await ide.openMenu('o');
@@ -324,7 +378,9 @@ test('configured Grep arguments are editable defaults, execute correctly and sur
   await ide.waitForText('NONAME00.PAS(1): CONFIGURED_TOKEN');
 });
 
-test('Compiler Options I/O checking controls missing-file errors and source directives override it', async ({ page }) => {
+test('Compiler Options I/O checking controls missing-file errors and source directives override it', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource(`program IOOption;
 var f:Text;

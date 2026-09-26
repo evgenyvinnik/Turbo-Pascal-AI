@@ -160,8 +160,7 @@ export function decodeInline(
       if ([0x26, 0x2e, 0x36, 0x3e].includes(opcode)) {
         override = SEGMENT_REGISTERS[(opcode >> 3) & 3];
         opcode = byte();
-      }
-      else if (opcode === 0xf3 || opcode === 0xf2) {
+      } else if (opcode === 0xf3 || opcode === 0xf2) {
         repeat = opcode === 0xf3 ? 'rep' : 'repne';
         opcode = byte();
       } else break;

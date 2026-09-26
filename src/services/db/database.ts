@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 
 export interface FileRecord {
-  path: string;           // Primary key
+  path: string; // Primary key
   name: string;
   content: string;
   type: 'file';
@@ -12,7 +12,7 @@ export interface FileRecord {
 }
 
 export interface DirectoryRecord {
-  path: string;           // Primary key
+  path: string; // Primary key
   name: string;
   type: 'directory';
   parentPath: string | null;
@@ -79,7 +79,7 @@ export class TurboPascalDB extends Dexie {
       settings: 'category',
       sessions: '++id, name, updatedAt',
       recentFiles: 'path, accessedAt',
-      breakpoints: 'id, filePath'
+      breakpoints: 'id, filePath',
     });
 
     // Dexie retains the version 1 stores and their contents when adding this

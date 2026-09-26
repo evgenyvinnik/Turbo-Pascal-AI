@@ -128,7 +128,8 @@ export function integerOperation(
  * 48-bit software arithmetic it uses for Real. */
 export function coprocessorOperation(operator: string, a: number, b: number, line = -1): number {
   if (operator === '/' && b === 0) throw new PascalError('Division by zero', line);
-  const result = operator === '+' ? a + b : operator === '-' ? a - b : operator === '*' ? a * b : a / b;
+  const result =
+    operator === '+' ? a + b : operator === '-' ? a - b : operator === '*' ? a * b : a / b;
   if (!Number.isFinite(result)) throw new PascalError('Real overflow', line);
   return result;
 }
@@ -136,7 +137,8 @@ export function coprocessorOperation(operator: string, a: number, b: number, lin
 /** A value as the 8087 holds it: a double where one holds it exactly, and
  * otherwise Extended's 64 bits. */
 export function coprocessorValue(value: Real, line = -1): Real {
-  if (typeof value === 'number' && !Number.isFinite(value)) throw new PascalError('Real overflow', line);
+  if (typeof value === 'number' && !Number.isFinite(value))
+    throw new PascalError('Real overflow', line);
   return value;
 }
 
@@ -163,7 +165,8 @@ export function realOperation(operator: string, a: number, b: number, line = -1)
 /** A value stored in a Comp: the 8087 rounds it to the nearest integer, an
  * exact half to even, and faults on one outside 64 bits. */
 export function compValue(value: Real, line = -1): Real {
-  if (typeof value === 'number' && !Number.isFinite(value)) throw new PascalError('Invalid numeric result', line);
+  if (typeof value === 'number' && !Number.isFinite(value))
+    throw new PascalError('Invalid numeric result', line);
   return compReal(value, line);
 }
 
@@ -202,8 +205,7 @@ export function formatReal(
   const places = fixed
     ? Math.min(decimals, maximum)
     : Math.min(maximum, Math.max(2, width - exponentDigits - 4));
-  let { digits, exponent } =
-    value === 0 ? { digits: '', exponent: 0 } : realDigits(absReal(value));
+  let { digits, exponent } = value === 0 ? { digits: '', exponent: 0 } : realDigits(absReal(value));
   let kept = fixed ? places + exponent + 1 : places;
   if (kept < 0) digits = '';
   else {
