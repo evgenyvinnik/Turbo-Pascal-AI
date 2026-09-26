@@ -3,7 +3,7 @@ import { TypeCode } from '../types/inst';
 import type { StackValue } from './Machine';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { encodeBinary, decodeBinary, type BinaryCell } from './BinaryCodec';
-import { roundReal48 } from '../codegen/numeric';
+import { parseReal } from '../codegen/float80';
 
 export interface MemoryAccess {
   read(address: number): StackValue;
@@ -355,7 +355,8 @@ export class FileRuntime {
               value = Number(token);
               if (!valid || !Number.isFinite(value))
                 throw new PascalError('Invalid number in file');
-              if (type === TypeCode.R) value = roundReal48(value);
+              // A real is read exactly; the store rounds it to the variable's type.
+              if (type === TypeCode.R) value = parseReal(token) ?? value;
             }
           }
           this.memory.write(target, value);

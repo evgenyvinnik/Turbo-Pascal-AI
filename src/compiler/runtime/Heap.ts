@@ -43,6 +43,8 @@ export class Heap {
   /** The block each cell and each eight bytes lie in, by first cell plus one. */
   private cellBlocks: Int32Array;
   private byteBlocks: Int32Array;
+  /** At each block's first cell, the view map New gave it, plus one. */
+  private startMaps: Int32Array;
 
   constructor(
     private readonly bottom: number,
@@ -54,6 +56,7 @@ export class Heap {
   ) {
     this.np = end;
     this.cellBlocks = new Int32Array(Math.max(0, end - bottom));
+    this.startMaps = new Int32Array(Math.max(0, end - bottom));
     this.byteBlocks = new Int32Array(Math.ceil(size / 8));
   }
 
@@ -66,6 +69,7 @@ export class Heap {
     this.freeBytes = [];
     this.cellBlocks.fill(0);
     this.byteBlocks.fill(0);
+    this.startMaps.fill(0);
   }
 
   /** A block of `words` cells and `bytes` bytes; its first cell. */
@@ -93,6 +97,7 @@ export class Heap {
     this.generation++;
     this.blocks.set(address, block);
     this.cellBlocks.fill(address + 1, address - this.bottom, address - this.bottom + words);
+    this.startMaps[address - this.bottom] = map === undefined ? 0 : map + 1;
     this.byteBlocks.fill(address + 1, linear / 8, (linear + size) / 8);
     return address;
   }
@@ -139,6 +144,10 @@ export class Heap {
     const block = start ? this.blocks.get(start - 1) : undefined;
     return block && linear >= block.linear && linear < block.linear + Math.max(8, Math.ceil(block.bytes / 8) * 8) ? block : undefined;
   }
+  /** The view map of the block New made that starts at a cell, or -1. */
+  mapAt(address: number): number {
+    return (this.startMaps[address - this.bottom] ?? 0) - 1;
+  }
   /** Whether a cell belongs to the heap's part of the store. */
   holds(address: number): boolean {
     return address >= this.bottom && address < this.end;
@@ -149,6 +158,7 @@ export class Heap {
     this.generation++;
     this.blocks.delete(block.start);
     this.cellBlocks.fill(0, block.start - this.bottom, block.start - this.bottom + block.words);
+    this.startMaps[block.start - this.bottom] = 0;
     this.byteBlocks.fill(0, block.linear / 8, (block.linear + size) / 8);
     this.freeCells.push({ address: block.start, words: block.words });
     this.freeCells.sort((a, b) => a.address - b.address);

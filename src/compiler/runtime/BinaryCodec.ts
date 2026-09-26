@@ -1,4 +1,5 @@
 import { PascalError } from '../errors/PascalError';
+import { Float80, decodeComp, decodeExtended, encodeComp, encodeExtended } from '../codegen/float80';
 import type { StackValue } from './Machine';
 import type { MemoryAccess } from './FileRuntime';
 
@@ -43,6 +44,10 @@ export function encodeBinary(
         if (member >= 0 && byte >= 0 && byte < cell.bytes)
           bytes[offset + byte]! |= 1 << (member & 7);
       }
+    } else if (cell.kind === 'comp') {
+      bytes.set(encodeComp(value instanceof Float80 ? value : Number(value)), offset);
+    } else if (cell.kind === 'real' && cell.bytes === 10) {
+      bytes.set(encodeExtended(value instanceof Float80 ? value : Number(value)), offset);
     } else if (cell.kind === 'real') {
       const number = Number(value);
       if (cell.bytes === 8) view.setFloat64(offset, number, true);
@@ -120,7 +125,9 @@ export function decodeBinary(
       for (let i = 0; i < cell.bytes * 8; i++)
         if ((bytes[offset + (i >>> 3)] ?? 0) & (1 << (i & 7))) members.push(baseOrdinal + i);
       value = JSON.stringify(members);
-    } else if (cell.kind === 'real') {
+    } else if (cell.kind === 'comp') value = decodeComp(bytes.subarray(offset, offset + 8));
+    else if (cell.kind === 'real' && cell.bytes === 10) value = decodeExtended(bytes.subarray(offset, offset + 10));
+    else if (cell.kind === 'real') {
       if (cell.bytes === 8) value = view.getFloat64(offset, true);
       else if (cell.bytes === 4) value = view.getFloat32(offset, true);
       else if (cell.bytes === 6 && bytes[offset]) {
