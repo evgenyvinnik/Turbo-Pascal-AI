@@ -19,7 +19,7 @@ import { BuiltinProcedure } from '../stdlib/builtin';
 import { CrtProcedure } from '../stdlib/crt';
 import { RuntimeServices } from './RuntimeServices';
 import { VirtualFileSystem } from './VirtualFileSystem';
-import { roundReal48 } from '../codegen/numeric';
+import { Float80, compareReal, negateReal, parseReal, truncReal } from '../codegen/float80';
 import { encodeDosText, decodeDosText } from '../encoding';
 import { Asm86, scanCode, type AsmHost, type AsmState } from './Asm86';
 import { VariantRuntime } from './Variants';
@@ -35,7 +35,7 @@ const ASSEMBLY_SLICE = 5_000;
 /**
  * Stack value type - can hold numbers, strings, or booleans
  */
-export type StackValue = number | string | boolean | null;
+export type StackValue = number | string | boolean | null | Float80;
 
 /**
  * Execution state of the machine
@@ -462,7 +462,7 @@ export class Machine {
         {
           const b = this.pop();
           const a = this.pop();
-          this.push(a === b ? 1 : 0);
+          this.push((a instanceof Float80 || b instanceof Float80 ? this.compareExtended(a, b) === 0 : a === b) ? 1 : 0);
         }
         break;
 
@@ -471,13 +471,17 @@ export class Machine {
         {
           const b = this.pop();
           const a = this.pop();
-          this.push(a !== b ? 1 : 0);
+          this.push((a instanceof Float80 || b instanceof Float80 ? this.compareExtended(a, b) !== 0 : a !== b) ? 1 : 0);
         }
         break;
 
       case Opcode.GRT:
         // Greater than comparison
         {
+          if (this.extendedOnTop()) {
+            this.push(this.popCompare() > 0 ? 1 : 0);
+            break;
+          }
           const b = this.popComparable(p);
           const a = this.popComparable(p);
           this.push(a > b ? 1 : 0);
@@ -487,6 +491,10 @@ export class Machine {
       case Opcode.GEQ:
         // Greater than or equal comparison
         {
+          if (this.extendedOnTop()) {
+            this.push(this.popCompare() >= 0 ? 1 : 0);
+            break;
+          }
           const b = this.popComparable(p);
           const a = this.popComparable(p);
           this.push(a >= b ? 1 : 0);
@@ -496,6 +504,10 @@ export class Machine {
       case Opcode.LES:
         // Less than comparison
         {
+          if (this.extendedOnTop()) {
+            this.push(this.popCompare() < 0 ? 1 : 0);
+            break;
+          }
           const b = this.popComparable(p);
           const a = this.popComparable(p);
           this.push(a < b ? 1 : 0);
@@ -505,6 +517,10 @@ export class Machine {
       case Opcode.LEQ:
         // Less than or equal comparison
         {
+          if (this.extendedOnTop()) {
+            this.push(this.popCompare() <= 0 ? 1 : 0);
+            break;
+          }
           const b = this.popComparable(p);
           const a = this.popComparable(p);
           this.push(a <= b ? 1 : 0);
@@ -629,8 +645,8 @@ export class Machine {
       case Opcode.NGR:
         // Negate real
         {
-          const a = this.popNumber();
-          this.push(-a);
+          const a = this.pop();
+          this.push(a instanceof Float80 ? negateReal(a) : -Number(a ?? 0));
         }
         break;
 
@@ -818,8 +834,8 @@ export class Machine {
       case Opcode.TRC:
         // Truncate real to integer (also ORD, CHR, RND depending on context)
         {
-          const a = this.popNumber();
-          this.push(Math.trunc(a));
+          const a = this.pop();
+          this.push(a instanceof Float80 ? Number(truncReal(a)) : Math.trunc(this.numberOf(a)));
         }
         break;
 
@@ -938,6 +954,7 @@ export class Machine {
     if (typeof value === 'number') {
       return value;
     }
+    if (value instanceof Float80) return value.valueOf();
     if (typeof value === 'boolean') {
       return value ? 1 : 0;
     }
@@ -947,6 +964,26 @@ export class Machine {
     return 0;
   }
 
+  /** Whether either of the two values about to be compared is an Extended
+   * beyond a double's precision, which is ordered exactly. */
+  private extendedOnTop(): boolean {
+    const b = this.dstore[this.sp], a = this.dstore[this.sp - 1];
+    return (typeof a === 'object' && a !== null) || (typeof b === 'object' && b !== null);
+  }
+  /** Pops two values and compares them exactly: negative, zero or positive. */
+  private popCompare(): number {
+    const b = this.pop(), a = this.pop();
+    return this.compareExtended(a, b);
+  }
+  private compareExtended(a: StackValue, b: StackValue): number {
+    return compareReal(a instanceof Float80 ? a : Number(a ?? 0), b instanceof Float80 ? b : Number(b ?? 0));
+  }
+  private numberOf(value: StackValue): number {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (typeof value === 'string') return value.charCodeAt(0) || 0;
+    return value instanceof Float80 ? value.valueOf() : 0;
+  }
   private popComparable(type: number): number | string {
     return (type as TypeCode) === TypeCode.S || (type as TypeCode) === TypeCode.C ? String(this.pop()) : this.popNumber();
   }
@@ -1538,9 +1575,13 @@ export class Machine {
           if (!Number.isSafeInteger(value) || value < -2147483648 || value > 2147483647) throw new PascalError('Integer input out of range');
         } else if (type === TypeCode.R) {
           if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(token)) throw new PascalError(`Invalid real input: ${token}`);
-          value = Number(token);
-          if (!Number.isFinite(value)) throw new PascalError('Real input out of range');
-          value = roundReal48(value);
+          // Read exactly, to Extended's 64 bits; the store rounds it to the
+          // variable's type.
+          try {
+            value = parseReal(token) ?? 0;
+          } catch {
+            throw new PascalError('Real input out of range');
+          }
         } else if (type === TypeCode.B) {
           if (!/^(true|false)$/i.test(token)) throw new PascalError(`Invalid boolean input: ${token}`);
           value = token.toLowerCase() === 'true' ? 1 : 0;

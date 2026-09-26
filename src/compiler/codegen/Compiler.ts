@@ -38,6 +38,7 @@ import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
 import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/FileRuntime';
 import { LINEAR_BASE } from '../runtime/AddressSpace';
+import { Float80, extendedOperation, parseReal, sqrtReal, type Real } from './float80';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { RawInstruction } from '../asm/parse';
 import { assemble, type AsmName } from '../asm/resolve';
@@ -67,7 +68,7 @@ interface CompiledUnit { node: UnitNode; scope: Scope; exports: Map<string, Symb
 
 /** Kept as an alias for callers that previously imported the compiler AST type. */
 export type INode = Node;
-type Value = number | string | boolean | null;
+type Value = number | string | boolean | null | Float80;
 type Kind =
   | 'integer'
   | 'real'
@@ -93,6 +94,12 @@ interface PascalType {
   openCapacity?: Variable;
   /** Comp: an 8087 real that holds 64-bit integers. */
   comp?: boolean;
+  /** An 8087 result of Single, Double and whole numbers only: the stores it
+   * goes to round it to a double at least, so it is computed in one. */
+  approximate?: boolean;
+  /** An approximate constant whose value is an Extended beyond a double, as
+   * 0.1 is: a store to a Double still rounds it. */
+  extendedValue?: boolean;
   /** `array of T` in a parameter list; indices run from 0 to the hidden High. */
   openArray?: boolean;
   openHigh?: Variable;
@@ -295,6 +302,12 @@ const STANDARD_VARIABLES: readonly StandardVariable[] = [
 const SYSTEM_UNIT: string = StandardUnit.SYSTEM;
 /** What 8087 arithmetic produces; stores round it to the variable's type. */
 const EXTENDED: PascalType = { ...REAL, byteSize: 10 };
+/** An 8087 result held as a double, which an Extended or Comp operand makes
+ * an EXTENDED one. */
+const INTERMEDIATE: PascalType = { ...EXTENDED, approximate: true };
+const EXTENDED_CONSTANT: PascalType = { ...INTERMEDIATE, extendedValue: true };
+/** Pi as the 8087's FLDPI loads it, to 64 bits. */
+const EXTENDED_PI = new Float80(false, 0xc90fdaa22168c235n, -62);
 const BOOLEAN: PascalType = { kind: 'boolean', size: 1, byteSize: 1, low: 0, high: 1 };
 const CHAR: PascalType = { kind: 'char', size: 1, byteSize: 1, low: 0, high: 255 };
 const STRING: PascalType = { kind: 'string', size: 1, byteSize: 256, capacity: 255 };
@@ -317,6 +330,11 @@ export class Compiler {
   private initializationOrder: CompiledUnit[] = [];
   private compilerOptions: CompilerOptions = {};
   private globalOffset = MARK_SIZE;
+  /** Whether the expression being compiled goes to an Extended or Comp, or
+   * is written as text: then the 8087's arithmetic keeps Extended's 64 bits,
+   * as it does for Extended and Comp operands. Otherwise a result of Single,
+   * Double and whole numbers is computed in a double. */
+  private exactContext = false;
   /** Whether a module uses the Printer unit, whose Lst the program opens. */
   private printerUsed = false;
   /** The standard units any module uses, whose variables the machine sets up. */
@@ -547,7 +565,7 @@ export class Compiler {
       system(name, {
         kind: 'constant',
         type: name === 'pi' ? this.realResult() : INTEGER,
-        value: name === 'pi' && !this.coprocessorMode() ? roundReal48(value) : value,
+        value: name === 'pi' ? (this.coprocessorMode() ? EXTENDED_PI : roundReal48(value)) : value,
       });
   }
 
@@ -869,7 +887,20 @@ export class Compiler {
   }
   /** The type of a real value computed in the current module. */
   private realResult(): PascalType {
-    return this.coprocessorMode() ? EXTENDED : REAL;
+    return this.coprocessorMode() ? INTERMEDIATE : REAL;
+  }
+  /** Extended and Comp values, and what the 8087 computes from them: kept to
+   * Extended's 64 bits rather than a double's 53. */
+  private exactReal(type: PascalType): boolean {
+    return type.kind === 'real' && (type.comp === true || (type.byteSize === 10 && type.approximate !== true));
+  }
+  /** A constant's value as the 8087 holds it. */
+  private realValue(value: unknown): Real {
+    return value instanceof Float80 ? value : Number(value);
+  }
+  /** The result type of 8087 arithmetic on these operands. */
+  private coprocessorResult(left: PascalType, right: PascalType): PascalType {
+    return this.exactContext || this.exactReal(left) || this.exactReal(right) ? EXTENDED : INTERMEDIATE;
   }
   private text(type: PascalType): boolean {
     return type.kind === 'string' || type.kind === 'char';
@@ -1423,7 +1454,7 @@ export class Compiler {
             : this.integerRangeType(Number(node.value), Number(node.value), node),
           value: node.isReal
             ? this.coprocessorMode()
-              ? coprocessorValue(Number(node.value), node.lineNumber)
+              ? coprocessorValue(parseReal(String(node.text ?? node.value), node.lineNumber) ?? Number(node.value), node.lineNumber)
               : roundReal48(Number(node.value), node.lineNumber)
             : Number(node.value),
         };
@@ -1534,13 +1565,16 @@ export class Compiler {
         if (real && !['+', '-', '*', '/'].includes(operator))
           this.fail(node, 'Integer operands required');
         const coprocessor = real && this.coprocessorArithmetic(left.type, right.type);
-        const value = real
-          ? (coprocessor ? coprocessorOperation : realOperation)(operator, a, b, node.lineNumber)
+        // Constant expressions are the compiler's, worked out in Extended.
+        const value: Value | Float80 = real
+          ? coprocessor
+            ? extendedOperation(operator, this.realValue(left.value), this.realValue(right.value), node.lineNumber)
+            : realOperation(operator, a, b, node.lineNumber)
           : integerOperation(operator, a, b, { bits: 32, signed: true }, true, node.lineNumber);
         return {
           kind: 'constant',
-          type: real ? (coprocessor ? EXTENDED : REAL) : this.integerRangeType(value, value, node),
-          value,
+          type: real ? (coprocessor ? this.coprocessorResult(left.type, right.type) : REAL) : this.integerRangeType(Number(value), Number(value), node),
+          value: value as Value,
         };
       }
       default:
@@ -2003,12 +2037,14 @@ export class Compiler {
     if (type.kind === 'real')
       value =
         type.comp
-          ? compValue(Number(value), node.lineNumber)
+          ? compValue(this.realValue(value), node.lineNumber)
           : type.byteSize === 6
           ? roundReal48(Number(value), node.lineNumber)
           : type.byteSize === 4
             ? Math.fround(Number(value))
-            : Number(value);
+            : type.byteSize === 10
+              ? this.realValue(value)
+              : Number(value);
     else if (type.kind === 'string') value = String(value).slice(0, type.capacity);
     else if (this.ordinal(type) && type.low !== undefined && type.high !== undefined) {
       const ordinal = this.ordinalValue(value);
@@ -2458,8 +2494,10 @@ export class Compiler {
       this.emit(Opcode.STI, this.typeCode(targetType));
       return;
     }
-    this.requireType(node.value, targetType, targetType.procedureSignature ? this.proceduralValue(node.value) : this.expression(node.value));
-    this.checkRange(targetType, node);
+    const sourceType = targetType.procedureSignature ? this.proceduralValue(node.value)
+      : this.inExactContext(this.exactReal(targetType), () => this.expression(node.value));
+    this.requireType(node.value, targetType, sourceType);
+    this.checkRange(targetType, node, sourceType);
     this.emit(Opcode.STI, this.typeCode(targetType));
   }
 
@@ -2684,7 +2722,7 @@ export class Compiler {
         if (operator === '+' && this.text(left) && this.text(right)) return STRING;
         if (operator === '-' && this.charPointer(left) && this.charPointer(right)) return WORD;
         if (operator === '/' || left.kind === 'real' || right.kind === 'real')
-          return this.coprocessorArithmetic(left, right) ? EXTENDED : REAL;
+          return this.coprocessorArithmetic(left, right) ? this.coprocessorResult(left, right) : REAL;
         if (left.kind === 'integer' && right.kind === 'integer')
           return this.integerResultType(left, right, operator);
         return left;
@@ -2696,6 +2734,11 @@ export class Compiler {
   private expression(node: Node): PascalType {
     return this.atSource(node, () => this.emitExpression(node));
   }
+  /** A constant's type as an expression, which says whether its value may be
+   * beyond a double. */
+  private literalType(value: unknown, type: PascalType): PascalType {
+    return type.approximate && value instanceof Float80 ? EXTENDED_CONSTANT : type;
+  }
   private emitExpression(node: Node): PascalType {
     node = this.qualified(node);
     if (node.internalVariable) { const variable = node.internalVariable as Variable; this.loadVariable(variable); return variable.type; }
@@ -2706,13 +2749,13 @@ export class Compiler {
       const folded = this.constant(node);
       if (!this.aggregate(folded.type)) {
         this.literal(folded.value, folded.type);
-        return folded.type;
+        return this.literalType(folded.value, folded.type);
       }
     }
     if (this.numericConstant(node)) {
       const value = this.constant(node);
       this.literal(value.value, value.type);
-      return value.type;
+      return this.literalType(value.value, value.type);
     }
     switch (node.type) {
       case NodeType.SET_LITERAL:
@@ -2753,13 +2796,13 @@ export class Compiler {
       case NodeType.NIL: {
         const constant = this.constant(node);
         this.literal(constant.value, constant.type);
-        return constant.type;
+        return this.literalType(constant.value, constant.type);
       }
       case NodeType.IDENTIFIER: {
         const symbol = this.lookup(node.name as string);
         if (symbol?.kind === 'constant') {
           this.literal(symbol.value, symbol.type);
-          return symbol.type;
+          return this.literalType(symbol.value, symbol.type);
         }
         if (symbol?.kind === 'variable') {
           if (symbol.type.procedureSignature) return this.proceduralCall({ ...node, type: NodeType.CALL, name: String(node.name), arguments: [] }, true, { node, type: symbol.type });
@@ -2852,7 +2895,29 @@ export class Compiler {
         this.fail(node, `Unsupported expression: ${node.type}`);
     }
   }
+  /** Arithmetic computes in the context its value goes to; a comparison's
+   * operands only in a double, unless one is an Extended or Comp. */
   private binary(node: BinaryOpNode): PascalType {
+    const saved = this.exactContext;
+    if (!['+', '-', '*', '/'].includes(node.operator.toLowerCase())) this.exactContext = false;
+    try {
+      return this.binaryOperation(node);
+    } finally {
+      this.exactContext = saved;
+    }
+  }
+  /** Compiles `compile` for a value that goes where Extended's precision
+   * counts: an Extended or Comp, or Write's text. */
+  private inExactContext<T>(exact: boolean, compile: () => T): T {
+    const saved = this.exactContext;
+    this.exactContext = exact;
+    try {
+      return compile();
+    } finally {
+      this.exactContext = saved;
+    }
+  }
+  private binaryOperation(node: BinaryOpNode): PascalType {
     const operation = node.operator.toLowerCase();
     if (!node.completeBooleanEvaluation && (operation === 'and' || operation === 'or') && this.expressionType(node.left).kind === 'boolean') {
       this.requireType(node.right, BOOLEAN, this.expressionType(node.right));
@@ -2953,10 +3018,18 @@ export class Compiler {
       // Real uses 48-bit software arithmetic; 8087 code computes at full
       // precision, with an Extended result.
       if (this.coprocessorArithmetic(left, right)) {
+        // With an Extended or Comp operand, to Extended's 64 bits; otherwise
+        // in a double, since the result is stored in one at most.
+        if (this.exactContext || this.exactReal(left) || this.exactReal(right)) {
+          this.helper(`8087x-${operator}-${String(line)}`, 2, (a, b) =>
+            extendedOperation(operator, a as Real, b as Real, line)
+          );
+          return EXTENDED;
+        }
         this.helper(`8087-${operator}-${String(line)}`, 2, (a, b) =>
           coprocessorOperation(operator, Number(a), Number(b), line)
         );
-        return EXTENDED;
+        return INTERMEDIATE;
       }
       this.helper(`real-${operator}-${String(line)}`, 2, (a, b) =>
         realOperation(operator, Number(a), Number(b), line)
@@ -3122,10 +3195,14 @@ export class Compiler {
     }
     this.fail(node, 'Variable required');
   }
-  private checkRange(type: PascalType, node: Node): void {
+  private checkRange(type: PascalType, node: Node, source?: PascalType): void {
     if (type.kind === 'real') {
       const line = node.lineNumber ?? this.line;
-      if (type.comp) this.helper(`comp-${String(line)}`, 1, (value) => compValue(Number(value), line));
+      if (type.comp) this.helper(`comp-${String(line)}`, 1, (value) => compValue(value as Real, line));
+      // A Double holds an Extended value to the nearest double; an 8087
+      // result computed in doubles already is one.
+      else if (type.byteSize === 8 && (!source || (source.kind === 'real' && source.byteSize === 10 && (!source.approximate || source.extendedValue)) || source.comp))
+        this.helper('double', 1, (value) => (value instanceof Float80 ? value.valueOf() : value));
       else if (type.byteSize === 6)
         this.helper(`real48-${String(line)}`, 1, (value) => roundReal48(Number(value), line));
       else if (type.byteSize === 4)
@@ -3269,8 +3346,10 @@ export class Compiler {
           else if (this.charPointer(parameter.type) && this.emitCharArrayPointer(argument)) {
             // passed as a pointer to its first character
           } else {
-            this.requireType(argument, parameter.type, parameter.type.procedureSignature ? this.proceduralValue(argument) : this.expression(argument));
-            this.checkRange(parameter.type, argument);
+            const source = parameter.type.procedureSignature ? this.proceduralValue(argument)
+              : this.inExactContext(this.exactReal(parameter.type), () => this.expression(argument));
+            this.requireType(argument, parameter.type, source);
+            this.checkRange(parameter.type, argument, source);
           }
           words++;
         }
@@ -3910,9 +3989,11 @@ export class Compiler {
       const type = this.expressionType(arguments_[0]);
       if (!['abs', 'sqr'].includes(name)) return type;
       if (type.kind === 'integer') return this.promoteInteger(type);
-      return type.kind === 'real' && this.coprocessorMode() ? EXTENDED : type;
+      return type.kind === 'real' && this.coprocessorMode() ? (this.exactReal(type) ? EXTENDED : INTERMEDIATE) : type;
     }
     if (name === 'random' && arguments_.length === 0) return this.realResult();
+    // Sqrt, Int and Frac of an Extended or Comp keep its precision.
+    if (['sqrt', 'int', 'frac'].includes(name) && arguments_[0] && this.exactReal(this.expressionType(arguments_[0]))) return EXTENDED;
     if (name === 'memavail' || name === 'maxavail') return LONGINT;
     // The Strings unit's pointers are PChars, which {$X+} can index and move.
     if (builtin.procedureIndex >= 350 && builtin.procedureIndex <= 370 && builtin.returnType === TypeKind.POINTER)
@@ -4330,13 +4411,21 @@ export class Compiler {
     this.line = node.lineNumber ?? this.line;
     if (['abs', 'sqr', 'succ', 'pred'].includes(name) && returnType.kind === 'integer') {
       this.integerHelper(name, returnType, node, 1);
+    } else if (name === 'sqrt' && this.coprocessorMode() && (this.exactContext || this.exactReal(this.expressionType(args[0]!)))) {
+      // The 8087's FSQRT rounds to Extended's 64 bits.
+      const line = node.lineNumber ?? this.line;
+      this.helper(`8087x-sqrt-${String(line)}`, 1, (value) => sqrtReal(value instanceof Float80 ? value : Number(value), line));
     } else if (name === 'sqr' && returnType.kind === 'real') {
       const line = node.lineNumber ?? this.line;
       const coprocessor = this.coprocessorMode() || this.coprocessorReal(returnType);
-      const operation = coprocessor ? coprocessorOperation : realOperation;
-      this.helper(`${coprocessor ? '8087' : 'real'}-sqr-${String(line)}`, 1, (value) =>
-        operation('*', Number(value), Number(value), line)
-      );
+      if (this.exactReal(returnType) || (coprocessor && this.exactContext))
+        this.helper(`8087x-sqr-${String(line)}`, 1, (value) => extendedOperation('*', value as Real, value as Real, line));
+      else {
+        const operation = coprocessor ? coprocessorOperation : realOperation;
+        this.helper(`${coprocessor ? '8087' : 'real'}-sqr-${String(line)}`, 1, (value) =>
+          operation('*', Number(value), Number(value), line)
+        );
+      }
     } else {
       this.emit(Opcode.CSP, args.length + layouts, builtin.procedureIndex);
       if (returnType.kind === 'real') this.checkRange(returnType, node);
@@ -4352,7 +4441,8 @@ export class Compiler {
   }
   private binaryCell(type: PascalType): BinaryCell {
     return {
-      kind: type.kind,
+      // A Comp's eight bytes are a two's complement integer.
+      kind: type.comp ? 'comp' : type.kind,
       bytes: type.byteSize,
       signed: (type.low ?? 0) < 0,
       ...(type.kind === 'set' ? { setByteOffset: Math.floor((type.low ?? 0) / 8) } : {}),
@@ -4676,7 +4766,9 @@ export class Compiler {
         this.literal(type.low ?? -2147483648, INTEGER);
         this.literal(type.high ?? 2147483647, INTEGER);
       }
-      this.emit(Opcode.CSP, type.kind === 'integer' ? 6 : 4, builtin.procedureIndex);
+      // A real target's precision: its size, or 9 for Comp.
+      if (type.kind === 'real') this.literal(type.comp ? 9 : type.byteSize, INTEGER);
+      this.emit(Opcode.CSP, type.kind === 'integer' ? 6 : type.kind === 'real' ? 5 : 4, builtin.procedureIndex);
     }
     return VOID;
   }
@@ -4749,7 +4841,8 @@ export class Compiler {
     // Formatting is a parser node only within Write/WriteLn arguments.
     const formatted = (node.type as string) === 'formattedArgument';
     const value = formatted ? (node.value as Node) : node;
-    const type = this.expression(value);
+    // Written as text, a real shows all of Extended's digits.
+    const type = this.inExactContext(this.coprocessorMode(), () => this.expression(value));
     if (this.aggregate(type) || ['pointer', 'file', 'set'].includes(type.kind))
       this.fail(node, 'Write requires a scalar or string value');
     // Under {$N+} every real is written by the 8087 routine, as Extended.
@@ -4775,7 +4868,7 @@ export class Compiler {
       // A negative precision asks a real for floating-point form.
       if (width < 0 || width > 32767 || (!real && precision < -1) || precision > 100)
         throw new PascalError('Invalid output field width or precision', line);
-      if (real) return formatReal(Number(raw), width, precision, coprocessor);
+      if (real) return formatReal(raw instanceof Float80 ? raw : Number(raw), width, precision, coprocessor);
       const text =
         type.kind === 'boolean'
           ? raw

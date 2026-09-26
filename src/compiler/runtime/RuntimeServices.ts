@@ -13,6 +13,7 @@ import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { ViewShape } from '../codegen/Bytecode';
 import type { BlockType } from './Heap';
 import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
+import { compReal, parseReal } from '../codegen/float80';
 
 const BYTE_CELL: BinaryCell = { kind: 'integer', bytes: 1, signed: false };
 
@@ -375,14 +376,19 @@ export class RuntimeServices {
             value > Number(args[5] ?? 2147483647))
         )
           code = Math.max(1, text.length);
+        let real: StackValue = value;
         if (code === 0 && type === TypeCode.R) {
+          // Read exactly, then rounded to the variable's type: Real, Single,
+          // Double, Extended, or Comp (9).
           try {
-            value = roundReal48(value);
+            const exact = parseReal(text) ?? value, precision = Number(args[4] ?? 6);
+            real = precision === 6 ? roundReal48(Number(exact)) : precision === 4 ? Math.fround(Number(exact))
+              : precision === 8 ? Number(exact) : precision === 9 ? compReal(exact) : exact;
           } catch {
             code = Math.max(1, text.length);
           }
         }
-        if (code === 0) this.host.write(b, value);
+        if (code === 0) this.host.write(b, type === TypeCode.R ? real : value);
         this.host.write(c, code);
         return {};
       }

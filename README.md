@@ -266,8 +266,11 @@ Integer expression promotion and overflow follow those widths, including
 range; arithmetic rounds before later operations, and math/input results are
 quantized to Real48. `Single`, `Double` and `Extended` are 8087 types, as in
 Turbo Pascal: a module that uses one, or is compiled with `{$N+}`, computes
-every real expression at full precision and rounds only when a value is stored
-(`Extended` is held as a double). `Write`, `WriteLn` and `Str` show reals in
+every real expression at full precision and rounds only when a value is stored.
+`Extended` holds a 64-bit significand and `Comp` a 64-bit integer, exactly, as
+the 8087 does; arithmetic with one, or stored into one, rounds as the 8087
+rounds, while an expression of `Single` and `Double` values that is stored in
+one of those is computed in doubles. `Write`, `WriteLn` and `Str` show reals in
 Turbo Pascal's forms, ` 1.5000000000E+00` for `Real` and
 ` 1.50000000000000E+0000` from the 8087. Pascal strings contain CP437 bytes;
 browser input and source literals convert at the boundary, preserving numeric
@@ -405,10 +408,9 @@ loading. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
 circle's centre. The Overlays allowed option is retained as an IDE preference,
 since every unit stays resident.
-The VM always enforces its memory/instruction limits. `Extended` is held as a
-double rather than in 80 bits, and `Comp` keeps whole numbers in one too, so
-values beyond 2^53 lose precision; transcendental math
-uses JavaScript functions, rounded to Real48 outside 8087 code. Debugger
+The VM always enforces its memory/instruction limits. Transcendental functions
+(`Sin`, `Cos`, `ArcTan`, `Ln`, `Exp`) use JavaScript's, which work in doubles,
+rounded to Real48 outside 8087 code. Debugger
 expressions take what Turbo Pascal 7's do: data, operators, the functions
 allowed in constant declarations, and `Mem`, `MemW` and `MemL`; as there, they
 do not call the program's routines. Help is newly authored, and recognized diagnostics use

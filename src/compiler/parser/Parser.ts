@@ -1535,12 +1535,12 @@ export class Parser {
 
     // Number literal
     if (this.currentToken.isNumber()) {
-      const value = parseFloat(this.currentToken.value);
-      const isReal =
-        this.currentToken.value.includes('.') ||
-        this.currentToken.value.toLowerCase().includes('e');
+      const text = this.currentToken.value;
+      const value = parseFloat(text);
+      const isReal = text.includes('.') || text.toLowerCase().includes('e');
       this.advance();
-      return this.node(NodeType.NUMBER, { value, isReal }, line);
+      // A real literal keeps its digits, which the 8087 holds to 64 bits.
+      return this.node(NodeType.NUMBER, { value, isReal, ...(isReal ? { text } : {}) }, line);
     }
 
     // String literal

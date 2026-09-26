@@ -9,6 +9,7 @@
 import { INative } from '../codegen/Bytecode';
 import { BuiltinProcedure } from '../stdlib/builtin';
 import { PascalError } from '../errors/PascalError';
+import { Float80, absReal, extendedOperation, fracReal, intReal, roundReal, sqrtReal, truncReal } from '../codegen/float80';
 
 /**
  * Native procedure function signature
@@ -176,17 +177,20 @@ export class NativeRegistry implements INative {
    */
   private registerStandardProcedures(): void {
     // Math functions
+    // An Extended beyond a double's precision keeps it, as the 8087 does;
+    // the transcendental functions compute in a double.
     this.register(StandardProcedure.ABS, 'Abs', 1, true, (x) => {
-      return Math.abs(this.toNumber(x));
+      return x instanceof Float80 ? absReal(x) : Math.abs(this.toNumber(x));
     });
 
     this.register(StandardProcedure.SQR, 'Sqr', 1, true, (x) => {
+      if (x instanceof Float80) return extendedOperation('*', x, x);
       const n = this.toNumber(x);
       return n * n;
     });
 
     this.register(StandardProcedure.SQRT, 'Sqrt', 1, true, (x) => {
-      return Math.sqrt(this.toNumber(x));
+      return x instanceof Float80 ? sqrtReal(x) : Math.sqrt(this.toNumber(x));
     });
 
     this.register(StandardProcedure.SIN, 'Sin', 1, true, (x) => {
@@ -210,19 +214,21 @@ export class NativeRegistry implements INative {
     });
 
     this.register(StandardProcedure.TRUNC, 'Trunc', 1, true, (x) => {
-      return Math.trunc(this.toNumber(x));
+      return x instanceof Float80 ? Number(truncReal(x)) : Math.trunc(this.toNumber(x));
     });
 
     this.register(StandardProcedure.ROUND, 'Round', 1, true, (x) => {
+      if (x instanceof Float80) return Number(roundReal(x));
       const value = this.toNumber(x);
       return Math.sign(value) * Math.floor(Math.abs(value) + 0.5);
     });
 
     this.register(BuiltinProcedure.FRAC, 'Frac', 1, true, (x) => {
+      if (x instanceof Float80) return fracReal(x);
       const value = this.toNumber(x);
       return value - Math.trunc(value);
     });
-    this.register(BuiltinProcedure.INT, 'Int', 1, true, (x) => Math.trunc(this.toNumber(x)));
+    this.register(BuiltinProcedure.INT, 'Int', 1, true, (x) => (x instanceof Float80 ? intReal(x) : Math.trunc(this.toNumber(x))));
 
     // Ordinal functions
     this.register(StandardProcedure.ORD, 'Ord', 1, true, (x) => {
@@ -373,6 +379,7 @@ export class NativeRegistry implements INative {
     if (typeof value === 'number') {
       return value;
     }
+    if (value instanceof Float80) return value.valueOf();
     if (typeof value === 'boolean') {
       return value ? 1 : 0;
     }

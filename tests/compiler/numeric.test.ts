@@ -4,6 +4,9 @@ import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 import { roundReal48, realOperation, formatReal } from '../../src/compiler/codegen/numeric';
+import {
+  Float80, compReal, decodeExtended, encodeExtended, extendedOperation, parseReal, sqrtReal,
+} from '../../src/compiler/codegen/float80';
 
 const compile = (source: string) =>
   new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse());
@@ -195,5 +198,77 @@ describe('Turbo Pascal numeric representation', () => {
     expect(() => roundReal48(2 ** 127)).toThrow(/Real overflow/);
     expect(() => compile('program T;var r:Real;begin r:=1e40 end.')).toThrow(/Real overflow/);
     expect(execute('program T;var r:Real;begin r:=1e-30;WriteLn(r*r=0)end.')).toEqual(['TRUE']);
+  });
+
+  it('holds Extended in 64 significant bits and Comp as a 64-bit integer', () => {
+    expect(
+      execute(`{$N+} program T;var a,b,c:Comp;e:Extended;d:Double;i:Integer;
+      begin a:=0;b:=1;for i:=1 to 90 do begin c:=a+b;a:=b;b:=c end;WriteLn(a:0:0,' ',a);
+        c:=9007199254740993.0;c:=c+1;WriteLn(c:0:0,' ',SizeOf(c));
+        e:=9007199254740992.0;e:=e+1;d:=e;WriteLn(e:0:0,' ',d:0:0,' ',SizeOf(e));
+        e:=1e4000;WriteLn(e)
+      end.`)
+    ).toEqual([
+      '2880067194370816120  2.88006719437082E+0018',
+      '9007199254740994 8',
+      '9007199254740993 9007199254740992 10',
+      ' 1.00000000000000E+4000',
+    ]);
+    expect(() => execute('{$N+} program T;var c:Comp;e:Extended;begin e:=1e19;c:=e end.')).toThrow(
+      /Invalid numeric result/
+    );
+  });
+
+  it('keeps Extended results exact and rounds them only where they are stored in a Double', () => {
+    expect(
+      execute(`{$N+} program T;const K=1/3;var e:Extended;d:Double;a,b:Integer;
+      procedure P(v:Double);begin Write(v:0:18,' ') end;
+      begin a:=1;b:=3;e:=a/b;d:=a/b;WriteLn(e:0:18,' ',d:0:18,' ',a/b:0:18);
+        d:=K;P(K);e:=K;WriteLn(d:0:18,' ',e:0:18,' ',e*3=1);
+        d:=0.1;e:=0.1;WriteLn(d=0.1,' ',e=0.1,' ',d:0:18,' ',e:0:18);
+        e:=Pi;d:=Pi;WriteLn(Pi:0:18,' ',d:0:18,' ',e=Pi,' ',d=Pi);
+        e:=Sqrt(2.0);d:=Sqrt(2);WriteLn(e:0:18,' ',Sqrt(d*d)=d)
+      end.`)
+    ).toEqual([
+      '0.333333333333333333 0.333333333333333315 0.333333333333333333',
+      '0.333333333333333315 0.333333333333333315 0.333333333333333333 TRUE',
+      'FALSE TRUE 0.100000000000000006 0.100000000000000000',
+      '3.141592653589793240 3.141592653589793120 TRUE FALSE',
+      '1.414213562373095050 TRUE',
+    ]);
+  });
+
+  it('reads, converts and stores Extended and Comp without passing through a double', () => {
+    expect(
+      execute(
+        `{$N+} program T;var e,g:Extended;c,h:Comp;code:Integer;f:file of Extended;fc:file of Comp;
+          x:array[0..9]of Byte;i:Integer;
+        begin Val('123456789012345678',c,code);WriteLn(c-123456789012345600.0:0:0,' ',code);
+          ReadLn(c);WriteLn(c-9223372036854775800.0:0:0);ReadLn(e);WriteLn(e=0.1);
+          e:=1;e:=e/3;Assign(f,'E.DAT');Rewrite(f);Write(f,e);Close(f);Reset(f);Read(f,g);Close(f);Erase(f);
+          c:=1234567890123456789.0;Assign(fc,'C.DAT');Rewrite(fc);Write(fc,c);Close(fc);
+          Reset(fc);Read(fc,h);Close(fc);Erase(fc);WriteLn(g=e,' ',h-c:0:0);
+          e:=1;Move(e,x,10);for i:=0 to 9 do Write(x[i],' ');WriteLn
+        end.`,
+        ['9223372036854775807', '0.1']
+      )
+    ).toEqual(['78 0', '7', 'TRUE', 'TRUE 0', '0 0 0 0 0 0 0 128 255 63 ']);
+  });
+
+  it('rounds the 8087 operations and conversions once, the nearest and a half to even', () => {
+    const third = extendedOperation('/', 1, 3) as Float80;
+    expect(third.significand).toBe(0xaaaaaaaaaaaaaaabn);
+    expect(third.exponent).toBe(-65);
+    expect(extendedOperation('*', third, 3)).toBe(1);
+    expect(extendedOperation('+', 2 ** 63, 1)).toBeInstanceOf(Float80);
+    expect(extendedOperation('+', 2 ** 64, 1)).toBe(2 ** 64);
+    expect((extendedOperation('+', 2 ** 64, 3) as Float80).significand).toBe(2n ** 63n + 2n);
+    expect((sqrtReal(2) as Float80).significand).toBe(0xb504f333f9de6484n);
+    expect([compReal(2.5), compReal(3.5), compReal(-2.5)]).toEqual([2, 4, -2]);
+    expect(Array.from(encodeExtended(parseReal('0.1') ?? 0))).toEqual([
+      0xcd, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xfb, 0x3f,
+    ]);
+    expect(decodeExtended(encodeExtended(third))).toEqual(third);
+    expect(() => parseReal('1e5000')).toThrow(/Real overflow/);
   });
 });

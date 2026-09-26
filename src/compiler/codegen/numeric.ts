@@ -1,4 +1,5 @@
 import { PascalError } from '../errors/PascalError';
+import { Float80, absReal, compReal, realDigits, type Real } from './float80';
 
 /**
  * Borland Turbo Pascal 7 Language Guide, pp. 25, 69 and 219:
@@ -127,16 +128,15 @@ export function integerOperation(
  * 48-bit software arithmetic it uses for Real. */
 export function coprocessorOperation(operator: string, a: number, b: number, line = -1): number {
   if (operator === '/' && b === 0) throw new PascalError('Division by zero', line);
-  return coprocessorValue(
-    operator === '+' ? a + b : operator === '-' ? a - b : operator === '*' ? a * b : a / b,
-    line
-  );
+  const result = operator === '+' ? a + b : operator === '-' ? a - b : operator === '*' ? a * b : a / b;
+  if (!Number.isFinite(result)) throw new PascalError('Real overflow', line);
+  return result;
 }
 
-/** A value as the 8087 holds it. JavaScript has no 80-bit type, so this is a
- * double, which is Extended's precision for every value Double can hold. */
-export function coprocessorValue(value: number, line = -1): number {
-  if (!Number.isFinite(value)) throw new PascalError('Real overflow', line);
+/** A value as the 8087 holds it: a double where one holds it exactly, and
+ * otherwise Extended's 64 bits. */
+export function coprocessorValue(value: Real, line = -1): Real {
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new PascalError('Real overflow', line);
   return value;
 }
 
@@ -162,27 +162,9 @@ export function realOperation(operator: string, a: number, b: number, line = -1)
 
 /** A value stored in a Comp: the 8087 rounds it to the nearest integer, an
  * exact half to even, and faults on one outside 64 bits. */
-export function compValue(value: number, line = -1): number {
-  const floor = Math.floor(value),
-    rest = value - floor;
-  const rounded = rest > 0.5 || (rest === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;
-  if (!Number.isFinite(rounded) || Math.abs(rounded) >= 2 ** 63)
-    throw new PascalError('Invalid numeric result', line);
-  return rounded === 0 ? 0 : rounded;
-}
-
-/** The exact decimal expansion of a positive finite double: its significant
- * digits and the power of ten of the first, so value = d.ddd × 10^exponent. */
-function decimalDigits(value: number): { digits: string; exponent: number } {
-  const bits = new DataView(Float64Array.of(value).buffer).getBigUint64(0, true);
-  const biased = Number((bits >> 52n) & 0x7ffn);
-  const fraction = bits & ((1n << 52n) - 1n);
-  const mantissa = biased ? fraction | (1n << 52n) : fraction;
-  const power = (biased || 1) - 1075;
-  // m × 2^-k is m × 5^k / 10^k, so the integer m × 5^k holds every digit.
-  const integer = power >= 0 ? mantissa << BigInt(power) : mantissa * 5n ** BigInt(-power);
-  const text = integer.toString();
-  return { digits: text.replace(/0+$/, ''), exponent: text.length - 1 - Math.max(0, -power) };
+export function compValue(value: Real, line = -1): Real {
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new PascalError('Invalid numeric result', line);
+  return compReal(value, line);
 }
 
 /** Adds one unit in the last place of a digit string; '' means the carry
@@ -208,11 +190,12 @@ export const defaultRealWidth = (coprocessor: boolean) => (coprocessor ? 23 : 17
  * fifteen.
  */
 export function formatReal(
-  value: number,
+  value: Real,
   width: number,
   decimals: number,
   coprocessor: boolean
 ): string {
+  const negative = value instanceof Float80 ? value.negative : value < 0;
   const maximum = coprocessor ? 18 : 11;
   const exponentDigits = coprocessor ? 4 : 2;
   const fixed = decimals >= 0;
@@ -220,7 +203,7 @@ export function formatReal(
     ? Math.min(decimals, maximum)
     : Math.min(maximum, Math.max(2, width - exponentDigits - 4));
   let { digits, exponent } =
-    value === 0 ? { digits: '', exponent: 0 } : decimalDigits(Math.abs(value));
+    value === 0 ? { digits: '', exponent: 0 } : realDigits(absReal(value));
   let kept = fixed ? places + exponent + 1 : places;
   if (kept < 0) digits = '';
   else {
@@ -235,7 +218,7 @@ export function formatReal(
   const digit = (position: number) => (position >= 0 ? (digits[position] ?? '0') : '0');
   let text: string;
   if (fixed) {
-    text = value < 0 ? '-' : '';
+    text = negative ? '-' : '';
     if (exponent < 0) text += '0';
     else for (let position = 0; position <= exponent; position++) text += digit(position);
     if (places > 0) {
@@ -243,7 +226,7 @@ export function formatReal(
       for (let place = 1; place <= places; place++) text += digit(exponent + place);
     }
   } else {
-    text = (value < 0 ? '-' : ' ') + digit(0) + '.';
+    text = (negative ? '-' : ' ') + digit(0) + '.';
     for (let position = 1; position < places; position++) text += digit(position);
     text += `E${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent)).padStart(exponentDigits, '0')}`;
   }

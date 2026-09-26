@@ -8,6 +8,7 @@
 import { inst, Opcode } from '../types';
 import type { AsmBlock } from '../asm/types';
 import type { BinaryCell } from '../runtime/BinaryCodec';
+import type { Float80 } from './float80';
 
 /** How a type's cells lie in its bytes: one cell, an array of elements that
  * are `cells` cells and `bytes` bytes each, or a record's fields, each at a
@@ -155,7 +156,7 @@ export interface DebugScope {
     static?: boolean;
     type: DebugType;
   }[];
-  constants: { name: string; value: number | string | boolean | null; type: DebugType }[];
+  constants: { name: string; value: number | string | boolean | null | Float80; type: DebugType }[];
 }
 
 /**
@@ -170,7 +171,7 @@ export class Bytecode {
   /**
    * Constants store - ordered list of JavaScript constant objects (numbers, strings, etc.)
    */
-  public constants: Array<number | string | boolean | null> = [];
+  public constants: Array<number | string | boolean | null | Float80> = [];
 
   /**
    * Typed constants - copied to the start of dstore when bytecode is loaded
@@ -254,7 +255,7 @@ export class Bytecode {
    * @param c - The constant value to add
    * @returns The index of the constant in the constants array
    */
-  addConstant(c: number | string | boolean | null): number {
+  addConstant(c: number | string | boolean | null | Float80): number {
     // Re-use existing constants. We could use a hash table for this.
     for (let i = 0; i < this.constants.length; i++) {
       if (c === this.constants[i]) {
@@ -429,7 +430,7 @@ export class Bytecode {
    * @param index - The constant index
    * @returns The constant value
    */
-  getConstant(index: number): number | string | boolean | null {
+  getConstant(index: number): number | string | boolean | null | Float80 {
     return this.constants[index]!;
   }
 
