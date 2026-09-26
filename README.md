@@ -472,8 +472,10 @@ browser compiler must then accept the program and exit with the same code,
 since the tests check themselves; or, for a must-fail test, reject it at the
 line where Free Pascal does. Results are reported separately for programs that
 must run, compile, or be rejected, and written to
-`artifacts/verification/fpc-suite.json`. The run reports; it does not yet fail
-on regressions.
+`artifacts/verification/fpc-suite.json`. The tests that pass are listed by name in
+`tests/fpc-suite/baseline.json`, and the run fails when one of them stops passing;
+`bun run test:fpc-suite:update` adds new passes to the list. CI runs it on Linux,
+where a listed test Free Pascal does not judge there is reported, not failed.
 
 IDE browser regressions exercise whole-word/backward/wrapped/scoped search,
 the documented Borland regular-expression syntax, replacement prompts and

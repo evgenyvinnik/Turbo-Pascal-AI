@@ -9,6 +9,7 @@ import { overlayCases } from './overlay-corpus';
 import { memoryCases } from './memory-corpus';
 import { systemCases } from './system-corpus';
 import { diagnosticCases } from './diagnostic-corpus';
+import { stringCases } from './string-corpus';
 /** Portable TP-mode programs, checked against an independent Free Pascal run. */
 export interface ReferenceCase {
   name: string;
@@ -176,4 +177,4 @@ WriteLn(u,',',v,',',w);i:=${String(dividend)};j:=${String(divisor)};WriteLn(i di
   });
 }
 
-export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases, ...coprocessorCases, ...typedConstantCases, ...parameterCases, ...variantRecordCases, ...overlayCases, ...memoryCases, ...systemCases, ...diagnosticCases];
+export const referenceCases = [...curatedCases, ...rejectedCases, ...generatedCases(), ...languageCases, ...switchCases, ...exitCases, ...coprocessorCases, ...typedConstantCases, ...parameterCases, ...variantRecordCases, ...overlayCases, ...memoryCases, ...systemCases, ...diagnosticCases, ...stringCases];

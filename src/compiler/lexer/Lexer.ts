@@ -67,6 +67,20 @@ export class Lexer {
   }
 
   /**
+   * After a ^ where the parser expects a value: the character right after it
+   * as a control character, ^G for Chr(7) and ^[ for Chr(27), letters in
+   * either case. Undefined when no character follows directly.
+   */
+  readControlCharacter(): string | undefined {
+    if (this.peekedToken !== null) return undefined;
+    const ch = this.stream.peek();
+    if (ch === null || /\s/.test(ch)) return undefined;
+    this.stream.next();
+    const code = ch.toUpperCase().charCodeAt(0);
+    return String.fromCharCode(code < 64 ? code + 64 : code - 64);
+  }
+
+  /**
    * Returns the next token without advancing the lexer position
    * @returns The next token
    */

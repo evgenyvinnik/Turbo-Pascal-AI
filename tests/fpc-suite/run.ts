@@ -7,6 +7,13 @@
  * themselves, so the exit code is the verdict; differing output is recorded
  * but does not fail a test.
  *
+ * The tests that passed before are listed, by name only, in baseline.json. A
+ * run fails when one of them is judged and no longer passes. One that is not
+ * judged here, which Free Pascal on another platform can cause, is reported
+ * but does not fail the run. FPC_SUITE_UPDATE=1 (bun run
+ * test:fpc-suite:update) writes this run's passes into the list, keeping the
+ * listed tests it did not judge.
+ *
  * Usage: bun run fpc-suite:fetch && bun run test:fpc-suite
  */
 import { execFile } from 'node:child_process';
@@ -69,6 +76,9 @@ const FPC_ONLY_SYNTAX: readonly (readonly [RegExp, string])[] = [
   [/=\s*type\s+[a-z_]/i, 'declares a distinct type alias (T = type X)'],
   [/\/\//, 'uses // comments'],
   [/;\s*(?:cdecl|stdcall|safecall|cppdecl|mwpascal|softfloat|local)\s*;/i, 'uses a Free Pascal procedure directive'],
+  // Turbo Pascal's assembler takes Intel syntax. Free Pascal reads AT&T only
+  // on x86, so such a test fails in different places on other CPUs.
+  [/\basm\b[\s\S]*?%[a-z]{2,3}\b/i, 'uses AT&T assembler syntax'],
 ];
 /** Program text without strings or brace comments, keeping `//`. */
 const withoutBraces = (source: string) =>
@@ -336,3 +346,23 @@ for (const [title, category] of [['Skipped', 'skipped'], ['Excluded', 'excluded'
 console.log('\nMost common browser-compiler rejections:');
 for (const [message, n] of tally('fail', (o) => o.verdict.reason === 'the browser compiler rejects it' ? shape(o.vm?.message) : '').filter(([m]) => m).slice(0, 12)) console.log(`  ${String(n).padStart(4)}  ${message}`);
 console.log(`\nReport: ${reportPath}`);
+
+// The tests that passed before must still pass.
+const baselinePath = path.resolve('tests/fpc-suite/baseline.json');
+const baseline = JSON.parse(await readFile(baselinePath, 'utf8')) as { passing: string[] };
+const verdicts = new Map(outcomes.map((outcome) => [outcome.test, outcome.verdict]));
+const listed = new Set(baseline.passing);
+const regressions = baseline.passing.filter((test) => ['fail', 'error'].includes(verdicts.get(test)?.category ?? ''));
+const unjudged = baseline.passing.filter((test) => !['pass', 'fail', 'error'].includes(verdicts.get(test)?.category ?? ''));
+const newPasses = outcomes.filter((outcome) => outcome.verdict.category === 'pass' && !listed.has(outcome.test)).map((outcome) => outcome.test);
+console.log(`\nBaseline: ${String(baseline.passing.length - unjudged.length)} of ${String(baseline.passing.length)} listed passes judged here`);
+if (newPasses.length) console.log(`  ${String(newPasses.length)} newly passing: ${newPasses.join(', ')}`);
+if (process.env.FPC_SUITE_UPDATE) {
+  const passing = [...new Set([...unjudged, ...outcomes.filter((o) => o.verdict.category === 'pass').map((o) => o.test)])].sort();
+  await writeFile(baselinePath, JSON.stringify({ ...baseline, passing }, null, 2) + '\n');
+  console.log(`  Wrote ${String(passing.length)} passing tests to ${path.relative(process.cwd(), baselinePath)}`);
+} else if (regressions.length) {
+  console.log(`  ${String(regressions.length)} no longer pass:`);
+  for (const test of regressions) console.log(`    ${test}: ${verdicts.get(test)?.reason ?? ''}`);
+  process.exitCode = 1;
+} else if (newPasses.length) console.log('  Run bun run test:fpc-suite:update to add them.');
