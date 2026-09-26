@@ -44,11 +44,12 @@ bun run test:visual
 # Refresh the pixel snapshot baselines
 bun run test:e2e:update
 
-# Lint
+# Lint (fails on errors and on more warnings than the --max-warnings cap)
 bun run lint
 
-# Format code
+# Format code, and check it as CI does
 bun run format
+bun run format:check
 
 # Build for production
 bun run build
