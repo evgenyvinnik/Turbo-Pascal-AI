@@ -25,14 +25,21 @@ export const STACK_TOP = 0xfff0;
  *   string characters from the store's size (its cells times 257 at most)
  *   linear addresses  LINEAR_BASE .. +1M
  *   I/O ports         PORT_BASE .. +128K
+ *   far pointers      FAR_BASE, 64K for each segment they name
  *   views             VIEW_BASE, VIEW_SPAN cells each */
 /** An address made from a segment and offset, as Ptr makes one, is this
  * plus its linear address, so adding to it moves byte by byte. */
 export const LINEAR_BASE = 2 ** 28;
 /** Port[P] is this plus P, and PortW[P] that plus 65536. */
 export const PORT_BASE = LINEAR_BASE + 2 ** 24;
+/** Ptr(S, O) whose segment is not the one Seg gives for its byte, as
+ * Ptr($1234, $5678) is: this plus the segment's number in a list of such
+ * segments times 64K, plus O. Seg and Ofs give S and O back. */
+export const FAR_BASE = LINEAR_BASE + 2 ** 25;
 /** Where views' addresses start. */
 export const VIEW_BASE = 2 ** 29;
+/** How many segments far pointers can name; past that Ptr is linear. */
+const FAR_SEGMENTS = (VIEW_BASE - FAR_BASE) / 0x10000;
 /** How many cells one view can show. */
 const VIEW_SPAN = 1 << 17;
 /** The largest store whose string characters' addresses stay below
@@ -40,6 +47,35 @@ const VIEW_SPAN = 1 << 17;
 export const MAX_CELLS = Math.floor(LINEAR_BASE / 257);
 const MEGABYTE = 0x100000;
 const RAW_SEGMENT = 0xf000;
+
+/** The segment and offset Seg and Ofs give for a byte of memory: the data
+ * and stack segments, the BIOS data area and text screen at their own
+ * segments, and elsewhere a normalized pointer, as Turbo Pascal's heap
+ * gives one. */
+export function splitLinear(linear: number): { segment: number; offset: number } {
+  const within = (segment: number, size: number) => linear >= segment * 16 && linear < segment * 16 + size;
+  for (const segment of [DATA_SEGMENT, STACK_SEGMENT])
+    if (within(segment, 0x10000)) return { segment, offset: linear - segment * 16 };
+  if (within(BIOS_DATA >> 4, 0x100)) return { segment: BIOS_DATA >> 4, offset: linear - BIOS_DATA };
+  if (within(VIDEO_TEXT >> 4, 0x8000)) return { segment: VIDEO_TEXT >> 4, offset: linear - VIDEO_TEXT };
+  return { segment: linear >> 4, offset: linear & 15 };
+}
+/** Ptr(S, O) as an address: linear where S:O is how Seg and Ofs name its
+ * byte, otherwise far, with S numbered in `segments`, which grows. */
+export function farAddress(segment: number, offset: number, segments: number[]): number {
+  segment &= 0xffff;
+  offset &= 0xffff;
+  if (!segment && !offset) return 0;
+  const linear = (segment * 16 + offset) % MEGABYTE;
+  const usual = splitLinear(linear);
+  if (usual.segment === segment && usual.offset === offset) return LINEAR_BASE + linear;
+  let index = segments.indexOf(segment);
+  if (index < 0) {
+    if (segments.length >= FAR_SEGMENTS) return LINEAR_BASE + linear;
+    index = segments.push(segment) - 1;
+  }
+  return FAR_BASE + index * 0x10000 + offset;
+}
 /** Types whose RETYPE of a plain cell is remembered: keys stay small integers. */
 const PLAIN_MAPS = 4096;
 
@@ -84,6 +120,9 @@ interface View {
   identity: boolean;
   /** Memory outside the program's variables, by address alone. */
   raw?: boolean;
+  /** For a raw view made from a far pointer: the segment Ptr gave, which Seg
+   * and Ofs of its cells keep. */
+  segment?: number;
   /** The bytes of the variable @ took the address of, in the region: the
    * view reaches only these. */
   bound?: [number, number];
@@ -141,10 +180,15 @@ export class AddressSpace {
   private plainGeneration = -1;
   private blockRegions = new WeakMap<HeapBlock, Region>();
   private blockCount = 0;
+  /** The segments far pointers name: the compiler's, then the program's. */
+  private segments: number[] = [];
 
-  constructor(private host: SpaceHost) {}
+  constructor(private host: SpaceHost) {
+    this.segments = [...host.bytecode.farSegments];
+  }
 
   reset(): void {
+    this.segments = [...this.host.bytecode.farSegments];
     this.views = [];
     this.viewKeys.clear();
     this.shapeMatches.clear();
@@ -265,6 +309,8 @@ export class AddressSpace {
   private placeOf(address: number): Place | undefined {
     if (!Number.isFinite(address) || address < 0) return undefined;
     if (address >= LINEAR_BASE && address < PORT_BASE) return this.placeAt((address - LINEAR_BASE) % MEGABYTE);
+    const far = this.farParts(address);
+    if (far) return this.placeAt((far.segment * 16 + far.offset) % MEGABYTE);
     if (address >= this.viewBase) {
       const shown = this.viewCell(address);
       if (!shown) return undefined;
@@ -304,22 +350,32 @@ export class AddressSpace {
    * data segment and the locals in the stack segment, at their own offsets;
    * a heap pointer is normalized, as Turbo Pascal's heap gives it. */
   segmentOf(address: number): { segment: number; offset: number } {
+    const named = this.namedSegment(address);
+    if (named) return named;
     const linear = this.linearOf(address);
     if (linear === undefined) return { segment: STACK_SEGMENT, offset: address & 0xffff };
-    return this.split(linear);
+    return splitLinear(linear);
   }
-  private split(linear: number): { segment: number; offset: number } {
-    const within = (segment: number, size: number) => linear >= segment * 16 && linear < segment * 16 + size;
-    for (const segment of [DATA_SEGMENT, STACK_SEGMENT])
-      if (within(segment, 0x10000)) return { segment, offset: linear - segment * 16 };
-    if (within(BIOS_DATA >> 4, 0x100)) return { segment: BIOS_DATA >> 4, offset: linear - BIOS_DATA };
-    if (within(VIDEO_TEXT >> 4, 0x8000)) return { segment: VIDEO_TEXT >> 4, offset: linear - VIDEO_TEXT };
-    return { segment: linear >> 4, offset: linear & 15 };
+  /** The segment and offset of a far pointer, or of a view of memory made
+   * from one, which keep the segment Ptr was given. */
+  private namedSegment(address: number): { segment: number; offset: number } | undefined {
+    const far = this.farParts(address);
+    if (far) return far;
+    if (address < this.viewBase) return undefined;
+    const at = this.viewAt(address);
+    const shown = at?.view.segment === undefined ? undefined : this.viewCell(address);
+    if (!at || !shown || at.view.segment === undefined) return undefined;
+    const offset = (at.view.region.linear ?? 0) + at.view.start + shown.byte - at.view.segment * 16;
+    return offset >= 0 && offset <= 0xffff ? { segment: at.view.segment, offset } : undefined;
+  }
+  private farParts(address: number): { segment: number; offset: number } | undefined {
+    if (address < FAR_BASE || address >= VIEW_BASE) return undefined;
+    const segment = this.segments[Math.floor((address - FAR_BASE) / 0x10000)];
+    return segment === undefined ? undefined : { segment, offset: (address - FAR_BASE) & 0xffff };
   }
   /** Ptr: the address a segment and offset make. */
   pointer(segment: number, offset: number): number {
-    const linear = ((segment & 0xffff) * 16 + (offset & 0xffff)) % MEGABYTE;
-    return segment === 0 && offset === 0 ? 0 : LINEAR_BASE + linear;
+    return farAddress(segment, offset, this.segments);
   }
   /** SPtr: the offset of the stack's top, below the innermost frame. */
   stackPointer(): number {
@@ -331,9 +387,11 @@ export class AddressSpace {
   pointerBits(value: StackValue): number {
     if (value === 0 || value === null || value === false) return 0;
     const number = Number(value);
+    const named = Number.isFinite(number) ? this.namedSegment(number) : undefined;
+    if (named) return named.segment * 0x10000 + named.offset;
     const linear = Number.isFinite(number) ? this.linearOf(number) : undefined;
     if (linear !== undefined) {
-      const { segment, offset } = this.split(linear);
+      const { segment, offset } = splitLinear(linear);
       return segment * 0x10000 + offset;
     }
     let id = this.rawIds.get(value);
@@ -476,9 +534,10 @@ export class AddressSpace {
     return field ? [field.byte, field.byte + (field.bytes ?? shapeBytes(field.shape))] : whole;
   }
   /** Memory shown as a type from a linear address. */
-  private rawView(linear: number, shape: ViewShape, map: number): number {
+  private rawView(linear: number, shape: ViewShape, map: number, segment?: number): number {
     const region: Region = { key: `raw:${String(linear)}`, target: 0, layout: [], shape, linear, refresh: [], variantCells: [] };
-    return this.viewAddress(this.viewId(`raw:${String(linear)}:${String(map)}`, () => ({ region, shape, start: 0, syncs: [], identity: false, raw: true })));
+    return this.viewAddress(this.viewId(`raw:${String(linear)}:${String(map)}:${String(segment ?? '')}`,
+      () => ({ region, shape, start: 0, syncs: [], identity: false, raw: true, ...(segment === undefined ? {} : { segment }) })));
   }
   /** Which view an address lies in, and its cell offset there. */
   private viewAt(address: number): { id: number; view: View; offset: number } | undefined {
@@ -515,7 +574,7 @@ export class AddressSpace {
       if (place) return this.boundedIdentity(place.region) + (cell - place.region.target);
     }
     const place = identity !== 0 ? undefined : this.placeOf(target);
-    if (place && 'linear' in place) return this.rawView(place.linear + start, shape, map) + (cell - target);
+    if (place && 'linear' in place) return this.rawView(place.linear + start, shape, map, this.farParts(target)?.segment) + (cell - target);
     if (place) {
       const key = `view:${place.region.key}:${String(map)}:${String(place.byte + start)}:${JSON.stringify(syncs)}`;
       return this.viewAddress(this.viewId(key, () => ({ region: place.region, shape, start: place.byte + start, syncs, identity: false })), cell - target);
@@ -567,7 +626,7 @@ export class AddressSpace {
     if (character && shape.kind === 'cell' && shape.cell.kind === 'char') return pointer;
     const place = this.placeOf(pointer);
     if (!place) return pointer;
-    if ('linear' in place) return this.rawView(place.linear, shape, map);
+    if ('linear' in place) return this.rawView(place.linear, shape, map, this.farParts(pointer)?.segment);
     // A byte where a cell of the region starts is that cell.
     const at = cellAtByte(place.region.layout, place.byte);
     const cell = at && place.region.layout[at.index];
@@ -614,9 +673,13 @@ export class AddressSpace {
     return this.viewAddress(id);
   }
   /** A pointer about to be compared: the byte of memory it points at, so
-   * pointers to one byte compare equal however they were made. */
+   * pointers to one byte compare equal however they were made. A far
+   * pointer is its segment and offset, as Turbo Pascal compares all 32 bits:
+   * Ptr($1234, $5678) is not Ptr($179B, 8). */
   normalize(value: StackValue): StackValue {
     if (typeof value !== 'number' || value === 0) return value;
+    const named = this.namedSegment(value);
+    if (named) return -1 - MEGABYTE - (named.segment * 0x10000 + named.offset);
     const linear = this.linearOf(value);
     if (linear !== undefined) return -1 - linear;
     const at = this.viewAt(value);
@@ -703,11 +766,16 @@ export class AddressSpace {
 
   /** A linear address as a cell: one byte of memory. */
   peekLinear(address: number): number {
-    return this.readLinear((address - LINEAR_BASE) % MEGABYTE, 1)[0] ?? 0;
+    return this.readLinear(this.linearByte(address), 1)[0] ?? 0;
   }
   pokeLinear(address: number, value: StackValue): void {
     const byte = typeof value === 'string' ? value.charCodeAt(0) : Number(value);
-    this.writeLinear((address - LINEAR_BASE) % MEGABYTE, Uint8Array.of(byte & 0xff));
+    this.writeLinear(this.linearByte(address), Uint8Array.of(byte & 0xff));
+  }
+  /** The byte of memory a linear or far address names. */
+  private linearByte(address: number): number {
+    const far = this.farParts(address);
+    return far ? (far.segment * 16 + far.offset) % MEGABYTE : (address - LINEAR_BASE) % MEGABYTE;
   }
   /** The first cell of the heap block an address points into, for Dispose
    * and FreeMem. */

@@ -161,6 +161,21 @@ describe('Pointers as bytes', () => {
     ).toEqual(['TRUE TRUE TRUE', '12', '11']);
   });
 
+  it("keep the segment and offset Ptr was given, as Seg, Ofs and comparisons see them", () => {
+    expect(
+      output(`program T; type PB = ^Byte; TR = record a, b: Word end; PR = ^TR; PtrRec = record Ofs, Seg: Word end;
+      const K = Ptr($1234, $5678);
+      var p: Pointer; q: PB; r: PR; c: PChar; x: Word absolute $1234:$0010;
+      begin
+        p := Ptr($1234, $5678); q := p; q^ := 7;
+        WriteLn(Seg(p^), ':', Ofs(p^), ' ', Seg(K^), ':', Ofs(K^), ' ', Mem[$179B:8], ' ', PtrRec(p).Seg = $1234);
+        r := Ptr($1234, $100); c := p; Inc(c, 2); WriteLn(Ofs(r^.b), ' ', Seg(r^.b), ' ', Ofs(c^), ' ', LongInt(K) = $12345678);
+        x := 513; WriteLn(Seg(x), ':', Ofs(x), ' ', MemW[$1235:0]);
+        WriteLn(p = Ptr($179B, 8), ' ', p = K, ' ', Ptr($B800, 2) = Ptr($B800, 2), ' ', Seg(Ptr($A000, 5)^), ':', Ofs(Ptr($A000, 5)^))
+      end.`)
+    ).toEqual(['4660:22136 4660:22136 7 TRUE', '258 4660 22138 TRUE', '4660:16 513', 'FALSE TRUE TRUE 40960:5']);
+  });
+
   it('come back as the same pointer from a file', () => {
     const disk = new VirtualFileSystem();
     const machine = run(`program T; type PNode = ^TNode; TNode = record n: Integer; next: PNode end;

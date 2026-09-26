@@ -194,6 +194,10 @@ export class Bytecode {
    * variable's bytes as such a type. */
   public viewMaps: ViewShape[] = [];
 
+  /** Segments of far pointers the compiler made, as Ptr($1234, $5678) or
+   * `absolute $1234:$5678`: the address space numbers them first. */
+  public farSegments: number[] = [];
+
   /** Every variant part of the program's record types, by number. */
   public variantParts: VariantPartInfo[] = [];
 

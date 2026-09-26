@@ -402,7 +402,10 @@ variable's bytes as its own type wherever it is dereferenced. Reading or
 writing past the variable through such a pointer is a run-time error rather
 than whatever memory follows it. An address made by `Ptr` or from a string's
 character is a plain one, which reads memory byte by byte, past the variable
-too. A structure, and the data segment, hold up to 65520 bytes, as in Turbo
+too. `Ptr(S, O)` keeps S and O, as does a variable declared `absolute S:O`:
+`Seg` and `Ofs` give them back, and pointers compare by segment and offset,
+so `Ptr($1234, $5678)` reaches the byte `Ptr($179B, 8)` does but is not equal
+to it. A structure, and the data segment, hold up to 65520 bytes, as in Turbo
 Pascal. It does not implement original overlay/linker formats or `.BGI`
 loading. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the

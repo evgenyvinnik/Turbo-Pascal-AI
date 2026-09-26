@@ -83,8 +83,10 @@ describe('zero-based arrays of Char as PChars', () => {
     expect(
       execute(`{$X+} program T; var ca: array[0..9] of Char; p, q: PChar;
       begin ca := 'abcdefghi'#0; p := ca; q := ca + 3;
-        WriteLn(q^, ' ', q - ca, ' ', ca - p, ' ', (2 + p)^, ' ', p = ca, ' ', q > ca, ' ', (ca + 1)[1]) end.`)
-    ).toEqual(['d 3 0 c TRUE TRUE c']);
+        WriteLn(q^, ' ', q - ca, ' ', ca - p, ' ', (2 + p)^, ' ', p = ca, ' ', q > ca, ' ', (ca + 1)[1]);
+        Inc(p); Inc(p, 2); Dec(q); WriteLn(p^, q^) end.`)
+    ).toEqual(['d 3 0 c TRUE TRUE c', 'dc']);
+    expect(() => compile(`{$X-} program T; var p: PChar; begin Inc(p) end.`)).toThrow(/Inc and Dec require an ordinal variable/);
   });
 });
 

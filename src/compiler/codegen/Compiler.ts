@@ -37,7 +37,7 @@ import {
 import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
 import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/FileRuntime';
-import { LINEAR_BASE } from '../runtime/AddressSpace';
+import { LINEAR_BASE, farAddress } from '../runtime/AddressSpace';
 import { Float80, extendedOperation, parseReal, sqrtReal, type Real } from './float80';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { RawInstruction } from '../asm/parse';
@@ -1047,7 +1047,8 @@ export class Compiler {
           if (declaration.address) {
             // At a segment and offset: whatever lies there, seen as the type.
             const [segment, offset] = declaration.address.map((part) => this.ordinalValue(this.constant(part).value) & 0xffff);
-            const absolute = LINEAR_BASE + (((segment ?? 0) * 16 + (offset ?? 0)) % 0x100000);
+            // 0:0 is the interrupt table's first byte, not nil.
+            const absolute = farAddress(segment ?? 0, offset ?? 0, this.bytecode.farSegments) || LINEAR_BASE;
             for (const name of declaration.names)
               this.declare(name, { kind: 'variable', name, type, offset: 0, scope: this.scope, reference: false, absolute }, node);
             break;
@@ -1928,10 +1929,10 @@ export class Compiler {
         return integer(name === 'trunc' ? Math.trunc(real) : Math.sign(real) * Math.round(Math.abs(real)));
       }
       case 'ptr': {
-        // A segment and offset: a linear address, which finds its variable
-        // when it is used. Ptr(0, 0) is nil.
+        // A segment and offset: an address that finds its variable when it
+        // is used, and keeps the segment for Seg. Ptr(0, 0) is nil.
         const segment = ordinal() & 0xffff, offset = (second ? this.ordinalValue(this.constant(second).value) : 0) & 0xffff;
-        return { kind: 'constant', type: POINTER, value: segment || offset ? LINEAR_BASE + ((segment * 16 + offset) % 0x100000) : 0 };
+        return { kind: 'constant', type: POINTER, value: farAddress(segment, offset, this.bytecode.farSegments) };
       }
       default:
         return this.fail(call, 'Constant expression expected');
@@ -4558,7 +4559,9 @@ export class Compiler {
       const address = this.temp(POINTER);
       this.addressVariable(address);
       const type = this.address(args[0]!);
-      if (!this.ordinal(type)) this.fail(args[0]!, 'Inc and Dec require an ordinal variable');
+      // Under {$X+} Inc and Dec move a PChar, as P + N does.
+      const pchar = this.charPointer(type) && node.extendedSyntax !== false;
+      if (!this.ordinal(type) && !pchar) this.fail(args[0]!, 'Inc and Dec require an ordinal variable');
       this.emit(Opcode.STI, TypeCode.A);
       this.loadVariable(address);
       this.loadVariable(address);
