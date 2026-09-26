@@ -6,21 +6,70 @@ import type { StrokeFont } from './StrokeFont';
  * brightnesses and three saturations, and black. */
 function defaultVgaPalette(): [number, number, number][] {
   const ega: [number, number, number][] = [
-    [0, 0, 0], [0, 0, 42], [0, 42, 0], [0, 42, 42], [42, 0, 0], [42, 0, 42], [42, 21, 0], [42, 42, 42],
-    [21, 21, 21], [21, 21, 63], [21, 63, 21], [21, 63, 63], [63, 21, 21], [63, 21, 63], [63, 63, 21], [63, 63, 63],
+    [0, 0, 0],
+    [0, 0, 42],
+    [0, 42, 0],
+    [0, 42, 42],
+    [42, 0, 0],
+    [42, 0, 42],
+    [42, 21, 0],
+    [42, 42, 42],
+    [21, 21, 21],
+    [21, 21, 63],
+    [21, 63, 21],
+    [21, 63, 63],
+    [63, 21, 21],
+    [63, 21, 63],
+    [63, 63, 21],
+    [63, 63, 63],
   ];
-  const grays = [0, 5, 8, 11, 14, 17, 20, 24, 28, 32, 36, 40, 45, 50, 56, 63].map((v): [number, number, number] => [v, v, v]);
-  const ring = ([a, b, c, d, e]: number[]): [number, number, number][] => [
-    [a, a, e], [b, a, e], [c, a, e], [d, a, e], [e, a, e], [e, a, d], [e, a, c], [e, a, b],
-    [e, a, a], [e, b, a], [e, c, a], [e, d, a], [e, e, a], [d, e, a], [c, e, a], [b, e, a],
-    [a, e, a], [a, e, b], [a, e, c], [a, e, d], [a, e, e], [a, d, e], [a, c, e], [a, b, e],
-  ] as [number, number, number][];
+  const grays = [0, 5, 8, 11, 14, 17, 20, 24, 28, 32, 36, 40, 45, 50, 56, 63].map(
+    (v): [number, number, number] => [v, v, v]
+  );
+  const ring = ([a, b, c, d, e]: number[]): [number, number, number][] =>
+    [
+      [a, a, e],
+      [b, a, e],
+      [c, a, e],
+      [d, a, e],
+      [e, a, e],
+      [e, a, d],
+      [e, a, c],
+      [e, a, b],
+      [e, a, a],
+      [e, b, a],
+      [e, c, a],
+      [e, d, a],
+      [e, e, a],
+      [d, e, a],
+      [c, e, a],
+      [b, e, a],
+      [a, e, a],
+      [a, e, b],
+      [a, e, c],
+      [a, e, d],
+      [a, e, e],
+      [a, d, e],
+      [a, c, e],
+      [a, b, e],
+    ] as [number, number, number][];
   const steps = [
-    [0, 16, 31, 47, 63], [31, 39, 47, 55, 63], [45, 49, 54, 58, 63],
-    [0, 7, 14, 21, 28], [14, 17, 21, 24, 28], [20, 22, 24, 26, 28],
-    [0, 4, 8, 12, 16], [8, 10, 12, 14, 16], [11, 12, 13, 15, 16],
+    [0, 16, 31, 47, 63],
+    [31, 39, 47, 55, 63],
+    [45, 49, 54, 58, 63],
+    [0, 7, 14, 21, 28],
+    [14, 17, 21, 24, 28],
+    [20, 22, 24, 26, 28],
+    [0, 4, 8, 12, 16],
+    [8, 10, 12, 14, 16],
+    [11, 12, 13, 15, 16],
   ];
-  return [...ega, ...grays, ...steps.flatMap(ring), ...Array.from({ length: 8 }, (): [number, number, number] => [0, 0, 0])];
+  return [
+    ...ega,
+    ...grays,
+    ...steps.flatMap(ring),
+    ...Array.from({ length: 8 }, (): [number, number, number] => [0, 0, 0]),
+  ];
 }
 /** A six-bit DAC level as eight bits. */
 const eightBit = (level: number) => ((level & 63) << 2) | ((level & 63) >> 4);
@@ -117,7 +166,9 @@ export class GraphicsRuntime {
   }
   /** The 256 colors as 24-bit RGB, while mode 13h is on. */
   colors(): number[] | undefined {
-    return this.dac?.map(([red, green, blue]) => (eightBit(red) << 16) | (eightBit(green) << 8) | eightBit(blue));
+    return this.dac?.map(
+      ([red, green, blue]) => (eightBit(red) << 16) | (eightBit(green) << 8) | eightBit(blue)
+    );
   }
   /** Ports 3C7h, 3C8h and 3C9h: choose an entry to read or write, then its
    * red, green and blue in turn. */
@@ -127,14 +178,16 @@ export class GraphicsRuntime {
     if (value === undefined) {
       if (port !== 0x3c9) return port === 0x3c8 ? this.dacWrite.index : 0;
       const level = dac[this.dacRead.index]![this.dacRead.component]!;
-      if (++this.dacRead.component === 3) this.dacRead = { index: (this.dacRead.index + 1) & 255, component: 0 };
+      if (++this.dacRead.component === 3)
+        this.dacRead = { index: (this.dacRead.index + 1) & 255, component: 0 };
       return level;
     }
     if (port === 0x3c8) this.dacWrite = { index: value & 255, component: 0 };
     else if (port === 0x3c7) this.dacRead = { index: value & 255, component: 0 };
     else if (port === 0x3c9) {
       dac[this.dacWrite.index]![this.dacWrite.component] = value & 63;
-      if (++this.dacWrite.component === 3) this.dacWrite = { index: (this.dacWrite.index + 1) & 255, component: 0 };
+      if (++this.dacWrite.component === 3)
+        this.dacWrite = { index: (this.dacWrite.index + 1) & 255, component: 0 };
       this.revision++;
     }
     return 0;
@@ -144,7 +197,8 @@ export class GraphicsRuntime {
     const palette = this.palette;
     const shown = palette ? this.pixels.map((color) => palette[color] ?? 0) : this.pixels.slice();
     for (const dot of this.decoration)
-      if (dot.x >= 0 && dot.y >= 0 && dot.x < this.width && dot.y < this.height) shown[dot.y * this.width + dot.x] = dot.color;
+      if (dot.x >= 0 && dot.y >= 0 && dot.x < this.width && dot.y < this.height)
+        shown[dot.y * this.width + dot.x] = dot.color;
     return shown;
   }
   view(left: number, top: number, right: number, bottom: number, clip: boolean): void {

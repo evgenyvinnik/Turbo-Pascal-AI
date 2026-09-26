@@ -17,9 +17,20 @@ export interface WorkspaceSnapshot {
     seq: number;
     untitled: number;
   };
-  ide: Pick<ReturnType<typeof useIdeStore.getState>,
-    'helpTopic' | 'search' | 'destination' | 'primaryFile' | 'optionsFile' | 'directory' |
-    'compilerOptions' | 'optionDialogs' | 'tools' | 'programParameters' | 'defines'>;
+  ide: Pick<
+    ReturnType<typeof useIdeStore.getState>,
+    | 'helpTopic'
+    | 'search'
+    | 'destination'
+    | 'primaryFile'
+    | 'optionsFile'
+    | 'directory'
+    | 'compilerOptions'
+    | 'optionDialogs'
+    | 'tools'
+    | 'programParameters'
+    | 'defines'
+  >;
   debug: {
     breakpoints: Breakpoint[];
     watches: { id: string; expression: string }[];
@@ -40,7 +51,8 @@ function malformed(path: string): never {
 }
 
 function safeKey(value: string, path: string): string {
-  if (!value || value === '__proto__' || value === 'constructor' || value === 'prototype') malformed(path);
+  if (!value || value === '__proto__' || value === 'constructor' || value === 'prototype')
+    malformed(path);
   return value;
 }
 
@@ -80,7 +92,7 @@ function integer(value: unknown, path: string, minimum = 0): number {
 }
 
 function strings(value: unknown, path: string): string[] {
-  return array(value, path).map(item => string(item, path));
+  return array(value, path).map((item) => string(item, path));
 }
 
 function lines(value: unknown, path: string): string[] {
@@ -89,8 +101,14 @@ function lines(value: unknown, path: string): string[] {
   return result;
 }
 
-function record<T>(value: unknown, path: string, decode: (item: unknown, key: string) => T): Record<string, T> {
-  return Object.fromEntries(Object.entries(object(value, path)).map(([key, item]) => [key, decode(item, key)]));
+function record<T>(
+  value: unknown,
+  path: string,
+  decode: (item: unknown, key: string) => T
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(object(value, path)).map(([key, item]) => [key, decode(item, key)])
+  );
 }
 
 function position(value: unknown, content: string[], path: string, scroll = false): Pos {
@@ -103,7 +121,7 @@ function position(value: unknown, content: string[], path: string, scroll = fals
 }
 
 function undoHistory(value: unknown, path: string): WorkspaceBuffer['undo'] {
-  return array(value, path).map(item => {
+  return array(value, path).map((item) => {
     const source = object(item, path);
     const content = lines(source.lines, `${path}.lines`);
     return { lines: content, cursor: position(source.cursor, content, `${path}.cursor`) };
@@ -143,7 +161,15 @@ function rect(value: unknown, path: string): Rect {
   };
 }
 
-const WINDOW_KINDS = new Set<string>(['edit', 'output', 'watches', 'callstack', 'messages', 'help', 'registers']);
+const WINDOW_KINDS = new Set<string>([
+  'edit',
+  'output',
+  'watches',
+  'callstack',
+  'messages',
+  'help',
+  'registers',
+]);
 
 function window(value: unknown): TPWindow {
   const source = object(value, 'window');
@@ -165,15 +191,18 @@ function window(value: unknown): TPWindow {
 function ide(value: unknown): WorkspaceSnapshot['ide'] {
   const source = object(value, 'IDE settings');
   const search = object(source.search, 'search settings');
-  if (source.destination !== 'Memory' && source.destination !== 'Disk') malformed('compile destination');
-  const compilerOptions = record(source.compilerOptions, 'compiler options', item =>
-    array(item, 'compiler option flags').map(flag => boolean(flag, 'compiler option flag')));
-  const optionDialogs = record<DialogValues>(source.optionDialogs, 'option dialogs', item =>
-    record(item, 'option dialog values', option => {
+  if (source.destination !== 'Memory' && source.destination !== 'Disk')
+    malformed('compile destination');
+  const compilerOptions = record(source.compilerOptions, 'compiler options', (item) =>
+    array(item, 'compiler option flags').map((flag) => boolean(flag, 'compiler option flag'))
+  );
+  const optionDialogs = record<DialogValues>(source.optionDialogs, 'option dialogs', (item) =>
+    record(item, 'option dialog values', (option) => {
       if (typeof option === 'string') return option;
       if (typeof option === 'number') return integer(option, 'option selection');
-      return array(option, 'option flags').map(flag => boolean(flag, 'option flag'));
-    }));
+      return array(option, 'option flags').map((flag) => boolean(flag, 'option flag'));
+    })
+  );
   return {
     helpTopic: string(source.helpTopic, 'help topic'),
     search: {
@@ -181,7 +210,10 @@ function ide(value: unknown): WorkspaceSnapshot['ide'] {
       replacement: string(search.replacement, 'replacement text'),
       caseSensitive: boolean(search.caseSensitive, 'case-sensitive search'),
       wholeWords: boolean(search.wholeWords, 'whole-word search'),
-      regularExpression: search.regularExpression === undefined ? false : boolean(search.regularExpression, 'regular-expression search'),
+      regularExpression:
+        search.regularExpression === undefined
+          ? false
+          : boolean(search.regularExpression, 'regular-expression search'),
       backward: boolean(search.backward, 'backward search'),
       selectedOnly: boolean(search.selectedOnly, 'selection search'),
       entireScope: boolean(search.entireScope, 'search scope'),
@@ -189,11 +221,12 @@ function ide(value: unknown): WorkspaceSnapshot['ide'] {
     },
     destination: source.destination,
     primaryFile: string(source.primaryFile, 'primary file'),
-    optionsFile: source.optionsFile === undefined ? 'TURBO.TP' : string(source.optionsFile, 'options file'),
+    optionsFile:
+      source.optionsFile === undefined ? 'TURBO.TP' : string(source.optionsFile, 'options file'),
     directory: string(source.directory, 'working directory'),
     compilerOptions,
     optionDialogs,
-    tools: array(source.tools, 'tools').map(item => {
+    tools: array(source.tools, 'tools').map((item) => {
       const tool = object(item, 'tool');
       return {
         title: string(tool.title, 'tool title'),
@@ -207,7 +240,7 @@ function ide(value: unknown): WorkspaceSnapshot['ide'] {
 }
 
 function uniqueIds(values: { id: string }[], path: string): void {
-  if (new Set(values.map(value => value.id)).size !== values.length) malformed(path);
+  if (new Set(values.map((value) => value.id)).size !== values.length) malformed(path);
 }
 
 function debug(value: unknown): WorkspaceSnapshot['debug'] {
@@ -219,13 +252,20 @@ function debug(value: unknown): WorkspaceSnapshot['debug'] {
       file: string(breakpoint.file, 'breakpoint file'),
       line: integer(breakpoint.line, 'breakpoint line', 1),
       enabled: boolean(breakpoint.enabled, 'breakpoint enabled state'),
-      ...(breakpoint.condition === undefined ? {} : { condition: string(breakpoint.condition, 'breakpoint condition') }),
-      ...(breakpoint.passCount === undefined ? {} : { passCount: integer(breakpoint.passCount, 'breakpoint pass count') }),
+      ...(breakpoint.condition === undefined
+        ? {}
+        : { condition: string(breakpoint.condition, 'breakpoint condition') }),
+      ...(breakpoint.passCount === undefined
+        ? {}
+        : { passCount: integer(breakpoint.passCount, 'breakpoint pass count') }),
     };
   });
-  const watches = array(source.watches, 'watches').map(item => {
+  const watches = array(source.watches, 'watches').map((item) => {
     const watch = object(item, 'watch');
-    return { id: identifier(watch.id, 'watch ID'), expression: string(watch.expression, 'watch expression') };
+    return {
+      id: identifier(watch.id, 'watch ID'),
+      expression: string(watch.expression, 'watch expression'),
+    };
   });
   uniqueIds(breakpoints, 'duplicate breakpoint IDs');
   uniqueIds(watches, 'duplicate watch IDs');
@@ -241,16 +281,19 @@ export function decodeWorkspace(payload: unknown): WorkspaceSnapshot {
   const buffers = record(desktop.buffers, 'buffers', buffer);
   const windows = array(desktop.windows, 'windows').map(window);
   uniqueIds(windows, 'duplicate window IDs');
-  const activeId = desktop.activeId === null ? null : identifier(desktop.activeId, 'active window ID');
-  if (activeId === null ? windows.length !== 0 : !windows.some(item => item.id === activeId)) malformed('active window');
+  const activeId =
+    desktop.activeId === null ? null : identifier(desktop.activeId, 'active window ID');
+  if (activeId === null ? windows.length !== 0 : !windows.some((item) => item.id === activeId))
+    malformed('active window');
   for (const item of windows) {
     if (item.kind === 'edit') {
-      if (item.bufferId === null || !Object.hasOwn(buffers, item.bufferId)) malformed('editor buffer reference');
+      if (item.bufferId === null || !Object.hasOwn(buffers, item.bufferId))
+        malformed('editor buffer reference');
     } else if (item.bufferId !== null) malformed('tool window buffer reference');
   }
   let seq = integer(desktop.seq, 'window counter');
   let untitled = integer(desktop.untitled, 'untitled file counter');
-  for (const id of [...Object.keys(buffers), ...windows.map(item => item.id)]) {
+  for (const id of [...Object.keys(buffers), ...windows.map((item) => item.id)]) {
     const match = /^[wb](\d+)$/.exec(id);
     if (match) seq = Math.max(seq, integer(Number(match[1]), 'numeric window or buffer ID'));
   }
@@ -258,7 +301,8 @@ export function decodeWorkspace(payload: unknown): WorkspaceSnapshot {
     const match = /^NONAME(\d+)\.PAS$/i.exec(item.name);
     if (match) untitled = Math.max(untitled, integer(Number(match[1]), 'untitled file name') + 1);
   }
-  if (seq >= Number.MAX_SAFE_INTEGER || untitled >= Number.MAX_SAFE_INTEGER) malformed('exhausted file counters');
+  if (seq >= Number.MAX_SAFE_INTEGER || untitled >= Number.MAX_SAFE_INTEGER)
+    malformed('exhausted file counters');
   const debugState = debug(source.debug);
   const outputSource = object(source.output, 'output');
   const output = {
@@ -266,10 +310,16 @@ export function decodeWorkspace(payload: unknown): WorkspaceSnapshot {
     messages: strings(outputSource.messages, 'messages'),
   };
   for (const item of windows) {
-    const rowCount = item.kind === 'output' ? output.programOutput.length
-      : item.kind === 'messages' ? output.messages.length
-      : item.kind === 'watches' ? debugState.watches.length
-      : item.kind === 'callstack' || item.kind === 'registers' ? 0 : null;
+    const rowCount =
+      item.kind === 'output'
+        ? output.programOutput.length
+        : item.kind === 'messages'
+          ? output.messages.length
+          : item.kind === 'watches'
+            ? debugState.watches.length
+            : item.kind === 'callstack' || item.kind === 'registers'
+              ? 0
+              : null;
     if (rowCount !== null) {
       item.scroll = Math.min(item.scroll, Math.max(0, rowCount - 1));
       item.selected = Math.min(item.selected, Math.max(0, rowCount - 1));
@@ -278,13 +328,18 @@ export function decodeWorkspace(payload: unknown): WorkspaceSnapshot {
   return {
     version: 1,
     desktop: {
-      buffers, windows, activeId,
+      buffers,
+      windows,
+      activeId,
       clipboard: string(desktop.clipboard, 'clipboard'),
-      seq, untitled,
+      seq,
+      untitled,
     },
     ide: ide(source.ide),
     debug: debugState,
-    histories: record(source.histories, 'input histories', item => strings(item, 'input history')),
+    histories: record(source.histories, 'input histories', (item) =>
+      strings(item, 'input history')
+    ),
     output,
   };
 }

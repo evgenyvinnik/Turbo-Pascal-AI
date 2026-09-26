@@ -12,31 +12,50 @@ describe('workspace compilation', () => {
     });
     expect(tree.type).toBe('unit');
     expect(bytecode.sources['LIB/BASE.PAS']).toContain('Number=42');
-    expect(() => compileProject('unit Broken; interface var n:Missing; implementation end.', 'BROKEN.PAS'))
-      .toThrow(errorWith({ sourceFile: 'BROKEN.PAS' }));
+    expect(() =>
+      compileProject('unit Broken; interface var n:Missing; implementation end.', 'BROKEN.PAS')
+    ).toThrow(errorWith({ sourceFile: 'BROKEN.PAS' }));
   });
   it('resolves configured unit/include directories and conditional defines from an immutable source snapshot', () => {
-    const { bytecode } = compileProject('program Main; uses Values; begin WriteLn(Value); end.', 'MAIN.PAS', {
-      sources: {
-        'LIB/VALUES.PAS': 'unit Values; interface {$I value.inc} implementation end.',
-        'INC/VALUE.INC': '{$IFDEF CUSTOM}const Value=42;{$ELSE}const Value=0;{$ENDIF}',
-      }, unitDirectories: ['LIB'], includeDirectories: ['INC'], defines: ['CUSTOM'],
-    });
+    const { bytecode } = compileProject(
+      'program Main; uses Values; begin WriteLn(Value); end.',
+      'MAIN.PAS',
+      {
+        sources: {
+          'LIB/VALUES.PAS': 'unit Values; interface {$I value.inc} implementation end.',
+          'INC/VALUE.INC': '{$IFDEF CUSTOM}const Value=42;{$ELSE}const Value=0;{$ENDIF}',
+        },
+        unitDirectories: ['LIB'],
+        includeDirectories: ['INC'],
+        defines: ['CUSTOM'],
+      }
+    );
     const machine = new Machine(bytecode);
     machine.run();
     expect(machine.getOutput()).toEqual(['42']);
-    expect(Object.keys(bytecode.sources).sort()).toEqual(['INC/VALUE.INC', 'LIB/VALUES.PAS', 'MAIN.PAS']);
+    expect(Object.keys(bytecode.sources).sort()).toEqual([
+      'INC/VALUE.INC',
+      'LIB/VALUES.PAS',
+      'MAIN.PAS',
+    ]);
   });
   it('reports parsing errors in included files using original filenames and lines', () => {
-    expect(() => compileProject('program Main;\n{$I invalid.inc}\nbegin end.', 'MAIN.PAS', {
-      sources: { 'INVALID.INC': '\nvar X Integer;' },
-    })).toThrow(errorWith({ lineNumber: 2, sourceFile: 'INVALID.INC' }));
+    expect(() =>
+      compileProject('program Main;\n{$I invalid.inc}\nbegin end.', 'MAIN.PAS', {
+        sources: { 'INVALID.INC': '\nvar X Integer;' },
+      })
+    ).toThrow(errorWith({ lineNumber: 2, sourceFile: 'INVALID.INC' }));
   });
   it('reports runtime errors in a unit rather than attributing them to the main file', () => {
     const { bytecode } = compileProject('program Main; uses Broken; begin Run; end.', 'MAIN.PAS', {
-      sources: { 'BROKEN.PAS': 'unit Broken;\ninterface\nprocedure Run;\nimplementation\nprocedure Run;\nvar x:Integer;\nbegin\nx:=0;\nx:=10 div x;\nend;\nend.' },
+      sources: {
+        'BROKEN.PAS':
+          'unit Broken;\ninterface\nprocedure Run;\nimplementation\nprocedure Run;\nvar x:Integer;\nbegin\nx:=0;\nx:=10 div x;\nend;\nend.',
+      },
     });
-    expect(() => { new Machine(bytecode).run(); }).toThrow(errorWith({ lineNumber: 9, sourceFile: 'BROKEN.PAS' }));
+    expect(() => {
+      new Machine(bytecode).run();
+    }).toThrow(errorWith({ lineNumber: 9, sourceFile: 'BROKEN.PAS' }));
   });
   it('names a program without a heading after its file, and the call stack shows that name', () => {
     const { tree, bytecode } = compileProject("begin\n  WriteLn('x');\nend.", 'HELLO.PAS');
@@ -48,15 +67,26 @@ describe('workspace compilation', () => {
     debuggerSession.command('run');
     debuggerSession.runSlice();
     expect(debuggerSession.isPaused()).toBe(true);
-    expect(debuggerSession.frames().map(frame => frame.name)).toEqual(['HELLO']);
+    expect(debuggerSession.frames().map((frame) => frame.name)).toEqual(['HELLO']);
   });
   it('keeps the declared name of a program with a heading', () => {
-    expect(compileProject('program Demo; begin end.', 'HELLO.PAS').tree).toMatchObject({ name: 'Demo' });
+    expect(compileProject('program Demo; begin end.', 'HELLO.PAS').tree).toMatchObject({
+      name: 'Demo',
+    });
   });
   it('distinguishes same-line breakpoints in different units and exposes the actual frame file', () => {
-    const { bytecode } = compileProject('program Main;\nuses One,Two;\nbegin One.Run;Two.Run;end.', 'MAIN.PAS', {
-      sources: Object.fromEntries(['One', 'Two'].map(name => [name + '.pas', `unit ${name};\ninterface procedure Run;\nimplementation procedure Run;\nbegin WriteLn('${name}');end;\nend.`])),
-    });
+    const { bytecode } = compileProject(
+      'program Main;\nuses One,Two;\nbegin One.Run;Two.Run;end.',
+      'MAIN.PAS',
+      {
+        sources: Object.fromEntries(
+          ['One', 'Two'].map((name) => [
+            name + '.pas',
+            `unit ${name};\ninterface procedure Run;\nimplementation procedure Run;\nbegin WriteLn('${name}');end;\nend.`,
+          ])
+        ),
+      }
+    );
     const machine = new Machine(bytecode);
     machine.reset();
     const debuggerSession = new SourceDebugger(machine, bytecode);

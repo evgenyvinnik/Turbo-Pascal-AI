@@ -6,12 +6,7 @@
  */
 
 // P-machine virtual machine
-export {
-  Machine,
-  MachineState,
-  type StackValue,
-  type MachineConfig,
-} from './Machine';
+export { Machine, MachineState, type StackValue, type MachineConfig } from './Machine';
 
 // Native procedure interface
 export {

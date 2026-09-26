@@ -137,10 +137,17 @@ describe('The built-in assembler in the P-machine', () => {
 
   it('takes 80286 opcodes only under {$G+}, as Turbo Pascal does', () => {
     for (const code of ['pusha', 'popa', 'push 5', 'imul ax, bx, 3', 'shl ax, 3', 'rol bl, 2'])
-      expect(() => compile(`program T; begin asm ${code} end end.`)).toThrow(/286\/287 instructions are not enabled/);
-    expect(() => compile('program T; begin asm shl ax, 1; push ax; imul bx end end.')).not.toThrow();
-    expect(output(`program T; {$G+} var r: Word; begin asm mov ax, 3; push 40; pop bx; imul ax, bx, 2; shl ax, 2; mov r, ax end; WriteLn(r) end.`))
-      .toEqual(['320']);
+      expect(() => compile(`program T; begin asm ${code} end end.`)).toThrow(
+        /286\/287 instructions are not enabled/
+      );
+    expect(() =>
+      compile('program T; begin asm shl ax, 1; push ax; imul bx end end.')
+    ).not.toThrow();
+    expect(
+      output(
+        `program T; {$G+} var r: Word; begin asm mov ax, 3; push 40; pop bx; imul ax, bx, 2; shl ax, 2; mov r, ax end; WriteLn(r) end.`
+      )
+    ).toEqual(['320']);
   });
 
   it('checks operands as Turbo Pascal does', () => {

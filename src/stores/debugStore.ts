@@ -66,8 +66,18 @@ interface DebugActions {
   removeWatch: (id: string) => void;
   updateRegisters: (registers: VMRegisters) => void;
   setCurrentPosition: (file: string | null, line: number | null) => void;
-  updateSnapshot: (snapshot: { status: DebugStatus; file: string; line: number; frames: StackFrame[]; registers: VMRegisters; values: Record<string, { value: unknown; type: string }> }) => void;
-  updateBreakpoint: (id: string, update: Partial<Pick<Breakpoint, 'enabled' | 'condition' | 'line' | 'passCount'>>) => void;
+  updateSnapshot: (snapshot: {
+    status: DebugStatus;
+    file: string;
+    line: number;
+    frames: StackFrame[];
+    registers: VMRegisters;
+    values: Record<string, { value: unknown; type: string }>;
+  }) => void;
+  updateBreakpoint: (
+    id: string,
+    update: Partial<Pick<Breakpoint, 'enabled' | 'condition' | 'line' | 'passCount'>>
+  ) => void;
 }
 
 const initialRegisters: VMRegisters = {
@@ -105,7 +115,10 @@ export const useDebugStore = create<DebugState & DebugActions>()(
         state.callStack = [];
         state.currentLine = null;
         state.currentFile = null;
-        for (const watch of state.watches) { watch.value = undefined; watch.type = 'unknown'; }
+        for (const watch of state.watches) {
+          watch.value = undefined;
+          watch.type = 'unknown';
+        }
       });
     },
 
@@ -202,22 +215,26 @@ export const useDebugStore = create<DebugState & DebugActions>()(
       });
     },
 
-    updateSnapshot: (snapshot) => { set((state) => {
-      state.status = snapshot.status;
-      state.currentFile = snapshot.file;
-      state.currentLine = snapshot.line;
-      state.callStack = snapshot.frames;
-      state.registers = snapshot.registers;
-      for (const watch of state.watches) {
-        const result = snapshot.values[watch.expression];
-        watch.value = result?.value;
-        watch.type = result?.type ?? 'unknown';
-      }
-    }); },
+    updateSnapshot: (snapshot) => {
+      set((state) => {
+        state.status = snapshot.status;
+        state.currentFile = snapshot.file;
+        state.currentLine = snapshot.line;
+        state.callStack = snapshot.frames;
+        state.registers = snapshot.registers;
+        for (const watch of state.watches) {
+          const result = snapshot.values[watch.expression];
+          watch.value = result?.value;
+          watch.type = result?.type ?? 'unknown';
+        }
+      });
+    },
 
-    updateBreakpoint: (id, update) => { set((state) => {
-      const breakpoint = state.breakpoints.get(id);
-      if (breakpoint) Object.assign(breakpoint, update);
-    }); },
+    updateBreakpoint: (id, update) => {
+      set((state) => {
+        const breakpoint = state.breakpoints.get(id);
+        if (breakpoint) Object.assign(breakpoint, update);
+      });
+    },
   }))
 );

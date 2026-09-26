@@ -7,8 +7,22 @@ const CELL_H = 16;
 
 /** VGA palette as the reference PNGs store it. */
 export const PALETTE = [
-  '000000', '0000a8', '00a800', '00a8a8', 'a80000', 'a800a8', 'a85700', 'a8a8a8',
-  '575757', '5757ff', '57ff57', '57ffff', 'ff5757', 'ff57ff', 'ffff57', 'ffffff',
+  '000000',
+  '0000a8',
+  '00a800',
+  '00a8a8',
+  'a80000',
+  'a800a8',
+  'a85700',
+  'a8a8a8',
+  '575757',
+  '5757ff',
+  '57ff57',
+  '57ffff',
+  'ff5757',
+  'ff57ff',
+  'ffff57',
+  'ffffff',
 ];
 
 /** One letter per palette entry, for compact reports. */
@@ -103,7 +117,7 @@ export async function ourGrid(page: Page): Promise<Grid> {
       }
       return grid;
     },
-    { palette: PALETTE, cols: COLS, rows: ROWS },
+    { palette: PALETTE, cols: COLS, rows: ROWS }
   );
 }
 
@@ -183,7 +197,7 @@ export async function refGrid(page: Page, png: Buffer): Promise<Grid> {
       }
       return grid;
     },
-    { dataUrl, palette: PALETTE, cols: COLS, rows: ROWS, cw: CELL_W, ch: CELL_H },
+    { dataUrl, palette: PALETTE, cols: COLS, rows: ROWS, cw: CELL_W, ch: CELL_H }
   );
 }
 
@@ -232,7 +246,14 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
       g.box.w = x2 - g.box.x;
       g.box.h = y2 - g.box.y;
     } else {
-      groups.set(key, { kind, ours: o, ref: r, count: 1, box: { x, y, w: 1, h: 1 }, cells: [[x, y]] });
+      groups.set(key, {
+        kind,
+        ours: o,
+        ref: r,
+        count: 1,
+        box: { x, y, w: 1, h: 1 },
+        cells: [[x, y]],
+      });
     }
     count += 1;
   };
@@ -252,7 +273,7 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
 
       if (textOnly) {
         const oBg = o.blank ? o.bg : o.bg;
-        if (oBg !== r.bg && !(!r.blank && (r.fg === oBg))) {
+        if (oBg !== r.bg && !(!r.blank && r.fg === oBg)) {
           note('background', x, y, pair(o.fg, o.bg), pair(r.fg, r.bg));
           line += 'B';
         } else line += '.';
@@ -260,7 +281,13 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
       }
 
       if (o.blank !== r.blank) {
-        note('presence', x, y, o.blank ? `blank ${String(NAMES[o.bg])}` : `'${String(ours.ch[i])}' ${pair(o.fg, o.bg)}`, r.blank ? `blank ${String(NAMES[r.bg])}` : `ink ${pair(r.fg, r.bg)}`);
+        note(
+          'presence',
+          x,
+          y,
+          o.blank ? `blank ${String(NAMES[o.bg])}` : `'${String(ours.ch[i])}' ${pair(o.fg, o.bg)}`,
+          r.blank ? `blank ${String(NAMES[r.bg])}` : `ink ${pair(r.fg, r.bg)}`
+        );
         line += 'P';
       } else if (o.blank) {
         if (o.bg !== r.bg) {
@@ -290,20 +317,25 @@ export function formatReport(name: string, ours: Grid, ref: Grid, diff: DiffResu
     let line = '';
     for (let x = 0; x < COLS; x += 1) {
       const i = y * COLS + x;
-      line += ref.blank[i] ? NAMES[ref.bg[i]!]!.toLowerCase() === NAMES[ref.bg[i]!] ? ' ' : ' ' : '#';
+      line += ref.blank[i]
+        ? NAMES[ref.bg[i]!]!.toLowerCase() === NAMES[ref.bg[i]!]
+          ? ' '
+          : ' '
+        : '#';
     }
     refInk.push(line);
   }
   const pad = (n: number) => String(n).padStart(2);
   const out = [`${name}: ${String(diff.count)} mismatched cells`, ''];
   out.push('    ours'.padEnd(84) + 'diff (P presence, B background, C colour)');
-  for (let y = 0; y < ROWS; y += 1) out.push(`${pad(y)}  ${String(text[y])}  ${String(diff.map[y])}`);
+  for (let y = 0; y < ROWS; y += 1)
+    out.push(`${pad(y)}  ${String(text[y])}  ${String(diff.map[y])}`);
   out.push('', '    reference ink');
   for (let y = 0; y < ROWS; y += 1) out.push(`${pad(y)}  ${String(refInk[y])}`);
   out.push('', 'groups:');
   for (const g of diff.groups.slice(0, 40)) {
     out.push(
-      `  ${String(g.count).padStart(4)} ${g.kind.padEnd(10)} ours ${g.ours.padEnd(16)} ref ${g.ref.padEnd(10)} at x${String(g.box.x)}..${String(g.box.x + g.box.w - 1)} y${String(g.box.y)}..${String(g.box.y + g.box.h - 1)}`,
+      `  ${String(g.count).padStart(4)} ${g.kind.padEnd(10)} ours ${g.ours.padEnd(16)} ref ${g.ref.padEnd(10)} at x${String(g.box.x)}..${String(g.box.x + g.box.w - 1)} y${String(g.box.y)}..${String(g.box.y + g.box.h - 1)}`
     );
   }
   return out.join('\n');

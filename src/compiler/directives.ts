@@ -23,15 +23,33 @@ export interface CompilerSwitches {
 }
 
 export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
-  completeBooleanEvaluation: false, rangeChecking: false, strictVarStrings: true,
-  openStrings: false, ioChecking: true, overflowChecking: false, farCalls: false,
-  numericProcessing: false, extendedSyntax: true, typedPointers: false, alignData: true, instructions286: false,
+  completeBooleanEvaluation: false,
+  rangeChecking: false,
+  strictVarStrings: true,
+  openStrings: false,
+  ioChecking: true,
+  overflowChecking: false,
+  farCalls: false,
+  numericProcessing: false,
+  extendedSyntax: true,
+  typedPointers: false,
+  alignData: true,
+  instructions286: false,
 });
 
 const switchNames: Record<string, keyof CompilerSwitches> = {
-  B: 'completeBooleanEvaluation', R: 'rangeChecking', V: 'strictVarStrings',
-  P: 'openStrings', I: 'ioChecking', Q: 'overflowChecking', F: 'farCalls',
-  N: 'numericProcessing', X: 'extendedSyntax', T: 'typedPointers', A: 'alignData', G: 'instructions286',
+  B: 'completeBooleanEvaluation',
+  R: 'rangeChecking',
+  V: 'strictVarStrings',
+  P: 'openStrings',
+  I: 'ioChecking',
+  Q: 'overflowChecking',
+  F: 'farCalls',
+  N: 'numericProcessing',
+  X: 'extendedSyntax',
+  T: 'typedPointers',
+  A: 'alignData',
+  G: 'instructions286',
 };
 
 /** Apply a switch list such as $B+,R-,I+; include filenames are not switches. */
@@ -46,8 +64,14 @@ export function applyCompilerSwitches(comment: string, switches: CompilerSwitche
   return true;
 }
 
-export interface PascalSource { filename: string; source: string }
-export interface SourceLocation { filename: string; line: number }
+export interface PascalSource {
+  filename: string;
+  source: string;
+}
+export interface SourceLocation {
+  filename: string;
+  line: number;
+}
 export interface PreprocessedSource {
   source: string;
   /** One-based expanded source line to original source file and line. */
@@ -61,13 +85,20 @@ export interface PreprocessorOptions {
 }
 
 /** Conditional compilation and includes, before Pascal tokenization. */
-export function preprocessPascal(source: string, options: PreprocessorOptions = {}): PreprocessedSource {
+export function preprocessPascal(
+  source: string,
+  options: PreprocessorOptions = {}
+): PreprocessedSource {
   const switches = { ...DEFAULT_SWITCHES, ...options.switches };
-  const defines = new Set(['VER70', 'MSDOS', ...(options.defines ?? [])].map(name => name.toUpperCase()));
+  const defines = new Set(
+    ['VER70', 'MSDOS', ...(options.defines ?? [])].map((name) => name.toUpperCase())
+  );
   const frames: Array<{ parent: boolean; condition: boolean; alternate: boolean }> = [];
   const includeStack: string[] = [];
   const locations: SourceLocation[] = [];
-  let output = '', active = true, expandedLine = 1;
+  let output = '',
+    active = true,
+    expandedLine = 1;
   function fail(message: string, file: string, line: number): never {
     const error = new PascalError(message, line);
     Object.assign(error, { sourceFile: file });
@@ -77,7 +108,10 @@ export function preprocessPascal(source: string, options: PreprocessorOptions = 
     for (const char of text) {
       locations[expandedLine] ??= { filename: file, line };
       output += char;
-      if (char === '\n') { expandedLine++; line++; }
+      if (char === '\n') {
+        expandedLine++;
+        line++;
+      }
     }
   }
   const blank = (text: string) => text.replace(/[^\r\n]/g, ' ');
@@ -87,10 +121,13 @@ export function preprocessPascal(source: string, options: PreprocessorOptions = 
     if (includeStack.includes(key)) fail(`Circular include file: ${file}`, file, 1);
     includeStack.push(key);
     const initialDepth = frames.length;
-    let i = 0, line = 1;
+    let i = 0,
+      line = 1;
     while (i < text.length) {
-      const start = i, startLine = line;
-      const brace = text[i] === '{', paren = text.slice(i, i + 2) === '(*';
+      const start = i,
+        startLine = line;
+      const brace = text[i] === '{',
+        paren = text.slice(i, i + 2) === '(*';
       if (brace || paren) {
         const closing = brace ? '}' : '*)';
         const end = text.indexOf(closing, i + (brace ? 1 : 2));
@@ -99,11 +136,14 @@ export function preprocessPascal(source: string, options: PreprocessorOptions = 
         const raw = text.slice(start, i);
         line += (raw.match(/\n/g) ?? []).length;
         const body = raw.slice(brace ? 1 : 2, -closing.length).trim();
-        const directive = /^\$(IFDEF|IFNDEF|IFOPT|ELSE|ENDIF|DEFINE|UNDEF|INCLUDE|I)\b\s*(.*?)\s*$/is.exec(body);
+        const directive =
+          /^\$(IFDEF|IFNDEF|IFOPT|ELSE|ENDIF|DEFINE|UNDEF|INCLUDE|I)\b\s*(.*?)\s*$/is.exec(body);
         if (directive && !/^\$I\s*[+-]/i.test(body)) {
-          const command = directive[1]!.toUpperCase(), value = directive[2]!.trim();
+          const command = directive[1]!.toUpperCase(),
+            value = directive[2]!.trim();
           if (['IFDEF', 'IFNDEF', 'IFOPT'].includes(command)) {
-            if (frames.length >= 64) fail('Too many nested conditional directives', file, startLine);
+            if (frames.length >= 64)
+              fail('Too many nested conditional directives', file, startLine);
             let condition: boolean;
             if (command === 'IFOPT') {
               const match = /^([A-Z])\s*([+-])$/i.exec(value);
@@ -127,7 +167,8 @@ export function preprocessPascal(source: string, options: PreprocessorOptions = 
             active = frames.pop()!.parent;
           } else if (active && ['DEFINE', 'UNDEF'].includes(command)) {
             if (!/^[A-Z_]\w*$/i.test(value)) fail('Conditional symbol expected', file, startLine);
-            if (command === 'DEFINE') defines.add(value.toUpperCase()); else defines.delete(value.toUpperCase());
+            if (command === 'DEFINE') defines.add(value.toUpperCase());
+            else defines.delete(value.toUpperCase());
           } else if (active && (command === 'I' || command === 'INCLUDE')) {
             const name = value.replace(/^(['"])(.*)\1$/, '$2');
             const included = options.resolveInclude?.(name, file);
@@ -154,7 +195,13 @@ export function preprocessPascal(source: string, options: PreprocessorOptions = 
         }
       } else {
         i++;
-        while (i < text.length && text[i] !== '{' && text.slice(i, i + 2) !== '(*' && (!active || text[i] !== "'")) i++;
+        while (
+          i < text.length &&
+          text[i] !== '{' &&
+          text.slice(i, i + 2) !== '(*' &&
+          (!active || text[i] !== "'")
+        )
+          i++;
       }
       const chunk = text.slice(start, i);
       append(active ? chunk : blank(chunk), file, startLine);
@@ -176,13 +223,18 @@ export function restoreSourceLocations(root: Node, source: PreprocessedSource): 
     const node = value as Node;
     if (typeof node.type === 'string' && typeof node.lineNumber === 'number') {
       const location = source.locations[node.lineNumber];
-      if (location) { node.lineNumber = location.line; node.sourceFile = location.filename; }
+      if (location) {
+        node.lineNumber = location.line;
+        node.sourceFile = location.filename;
+      }
       for (const field of ['beginLineNumber', 'endLineNumber']) {
-        if (typeof node[field] === 'number') node[field] = source.locations[node[field]]?.line ?? node[field];
+        if (typeof node[field] === 'number')
+          node[field] = source.locations[node[field]]?.line ?? node[field];
       }
     }
     for (const child of Object.values(value)) {
-      if (Array.isArray(child)) child.forEach(visit); else visit(child);
+      if (Array.isArray(child)) child.forEach(visit);
+      else visit(child);
     }
   }
   visit(root);

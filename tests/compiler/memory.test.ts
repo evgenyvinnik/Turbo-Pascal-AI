@@ -35,11 +35,14 @@ describe('The data segment', () => {
 
   it('lets FillChar, Move and BlockWrite run on past a variable into the next ones', () => {
     const disk = new VirtualFileSystem();
-    const machine = run(`program T; var a: Word; b: Word; c: LongInt; x, y: array[0..1] of Word; f: file;
+    const machine = run(
+      `program T; var a: Word; b: Word; c: LongInt; x, y: array[0..1] of Word; f: file;
       begin a := 1; b := 2; c := 3; FillChar(a, 8, 0); WriteLn(a, b, c);
         x[0] := 5; x[1] := 6; y[0] := 7; y[1] := 8; Move(x, y[1], 2); Move(x[1], y[0], 4); WriteLn(y[0], ' ', y[1]);
         FillChar(a, 2, 1); b := $0302; Assign(f, 'A.DAT'); Rewrite(f, 1); BlockWrite(f, a, 4); Close(f);
-        c := 0; Reset(f, 1); BlockRead(f, b, 4); Close(f); WriteLn(b, ' ', c) end.`, disk);
+        c := 0; Reset(f, 1); BlockRead(f, b, 4); Close(f); WriteLn(b, ' ', c) end.`,
+      disk
+    );
     expect(machine.getOutput()).toEqual(['000', '6 7', '257 770']);
     expect(Array.from(disk.read('A.DAT'), (char) => char.charCodeAt(0))).toEqual([1, 1, 2, 3]);
   });
@@ -54,10 +57,14 @@ describe('The data segment', () => {
   });
 
   it('stops a pointer @ made at the end of its variable, with a run-time error', () => {
-    const machine = new Machine(compile(`program T; type PLong = ^LongInt; TWords = array[0..1] of Word;
+    const machine = new Machine(
+      compile(`program T; type PLong = ^LongInt; TWords = array[0..1] of Word;
       var a: array[0..1] of Byte; b: Word; p: ^TWords;
-      begin a[0] := 1; a[1] := 2; b := $0403; p := @a; WriteLn(p^[0]); WriteLn(p^[1]) end.`));
-    expect(() => { machine.run(); }).toThrow(/Access beyond the variable/);
+      begin a[0] := 1; a[1] := 2; b := $0403; p := @a; WriteLn(p^[0]); WriteLn(p^[1]) end.`)
+    );
+    expect(() => {
+      machine.run();
+    }).toThrow(/Access beyond the variable/);
     expect(machine.getOutput()).toEqual(['513']);
   });
 
@@ -161,7 +168,7 @@ describe('Pointers as bytes', () => {
     ).toEqual(['TRUE TRUE TRUE', '12', '11']);
   });
 
-  it("keep the segment and offset Ptr was given, as Seg, Ofs and comparisons see them", () => {
+  it('keep the segment and offset Ptr was given, as Seg, Ofs and comparisons see them', () => {
     expect(
       output(`program T; type PB = ^Byte; TR = record a, b: Word end; PR = ^TR; PtrRec = record Ofs, Seg: Word end;
       const K = Ptr($1234, $5678);
@@ -173,16 +180,24 @@ describe('Pointers as bytes', () => {
         x := 513; WriteLn(Seg(x), ':', Ofs(x), ' ', MemW[$1235:0]);
         WriteLn(p = Ptr($179B, 8), ' ', p = K, ' ', Ptr($B800, 2) = Ptr($B800, 2), ' ', Seg(Ptr($A000, 5)^), ':', Ofs(Ptr($A000, 5)^))
       end.`)
-    ).toEqual(['4660:22136 4660:22136 7 TRUE', '258 4660 22138 TRUE', '4660:16 513', 'FALSE TRUE TRUE 40960:5']);
+    ).toEqual([
+      '4660:22136 4660:22136 7 TRUE',
+      '258 4660 22138 TRUE',
+      '4660:16 513',
+      'FALSE TRUE TRUE 40960:5',
+    ]);
   });
 
   it('come back as the same pointer from a file', () => {
     const disk = new VirtualFileSystem();
-    const machine = run(`program T; type PNode = ^TNode; TNode = record n: Integer; next: PNode end;
+    const machine = run(
+      `program T; type PNode = ^TNode; TNode = record n: Integer; next: PNode end;
       var a, b, c: PNode; f: file of PNode;
       begin New(a); New(b); a^.n := 1; b^.n := 2; a^.next := b; b^.next := nil;
         Assign(f, 'P.DAT'); Rewrite(f); Write(f, a); Reset(f); Read(f, c); Close(f);
-        WriteLn(c = a, ' ', c^.n, ' ', c^.next^.n, ' ', c^.next^.next = nil) end.`, disk);
+        WriteLn(c = a, ' ', c^.n, ' ', c^.next^.n, ' ', c^.next^.next = nil) end.`,
+      disk
+    );
     expect(machine.getOutput()).toEqual(['TRUE 1 2 TRUE']);
     expect(disk.read('P.DAT')).toHaveLength(4);
   });
@@ -209,7 +224,8 @@ describe('Memory by address', () => {
   });
 
   it('shows mode 13h at $A000, with the VGA palette at ports 3C7h to 3C9h', () => {
-    const machine = run(`program T; uses Dos; var r: Registers; x, y: Integer; red, green, blue: Byte;
+    const machine =
+      run(`program T; uses Dos; var r: Registers; x, y: Integer; red, green, blue: Byte;
       begin r.AX := $13; Intr($10, r);
         for y := 0 to 1 do for x := 0 to 319 do Mem[$A000:y * 320 + x] := (x + y) and 255;
         Port[$3C8] := 1; Port[$3C9] := 63; Port[$3C9] := 32; Port[$3C9] := 0;
@@ -219,10 +235,17 @@ describe('Memory by address', () => {
         WriteLn(Mem[$A000:330], ' ', r.AL, ' ', red, ' ', green, ' ', blue) end.`);
     expect(machine.getOutput()).toEqual(['11 9 42 0 0']);
     const graphics = machine.getGraphics();
-    expect([graphics.initialized, graphics.width, graphics.height, graphics.pixels[5]]).toEqual([true, 320, 200, 5]);
+    expect([graphics.initialized, graphics.width, graphics.height, graphics.pixels[5]]).toEqual([
+      true,
+      320,
+      200,
+      5,
+    ]);
     // The default palette's EGA colors, and the one the program set.
     expect(graphics.colors()?.slice(0, 3)).toEqual([0x000000, 0xff8200, 0x00aa00]);
-    const text = run(`program T; begin asm mov ax, 13h; int 10h; mov ax, 3; int 10h end; Mem[$A000:0] := 7; WriteLn(Mem[$A000:0]) end.`);
+    const text = run(
+      `program T; begin asm mov ax, 13h; int 10h; mov ax, 3; int 10h end; Mem[$A000:0] := 7; WriteLn(Mem[$A000:0]) end.`
+    );
     expect(text.getGraphics().initialized).toBe(false);
     expect(text.getOutput()).toEqual(['7']);
   });

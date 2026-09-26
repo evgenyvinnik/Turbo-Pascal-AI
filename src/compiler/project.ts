@@ -2,7 +2,12 @@ import { Compiler } from './codegen/Compiler';
 import { Lexer, Stream } from './lexer';
 import { Parser, type ParserOptions } from './parser';
 import { PascalError } from './errors';
-import { preprocessPascal, restoreSourceLocations, type PascalSource, type PreprocessedSource } from './directives';
+import {
+  preprocessPascal,
+  restoreSourceLocations,
+  type PascalSource,
+  type PreprocessedSource,
+} from './directives';
 import { NodeType, type ProgramNode, type UnitNode } from './parser/Node';
 
 export interface ProjectOptions extends ParserOptions {
@@ -17,32 +22,50 @@ export { NativePascalRequired } from './errors/NativePascalRequired';
 
 export function sourcePath(name: string): string {
   const parts: string[] = [];
-  for (const part of name.replace(/^[A-Z]:/i, '').replaceAll('\\', '/').split('/')) {
+  for (const part of name
+    .replace(/^[A-Z]:/i, '')
+    .replaceAll('\\', '/')
+    .split('/')) {
     if (!part || part === '.') continue;
-    if (part === '..') parts.pop(); else parts.push(part.toUpperCase());
+    if (part === '..') parts.pop();
+    else parts.push(part.toUpperCase());
   }
   return parts.join('/');
 }
 
 /** Resolves an immutable workspace snapshot; compilation never fetches network files. */
 export function parseProject(source: string, filename: string, options: ProjectOptions = {}) {
-  const files = new Map(Object.entries(options.sources ?? {}).map(([name, text]) => [sourcePath(name), text]));
+  const files = new Map(
+    Object.entries(options.sources ?? {}).map(([name, text]) => [sourcePath(name), text])
+  );
   files.set(sourcePath(filename), source);
   const sources: Record<string, string> = { [filename]: source };
   const sourceDirectory = sourcePath(filename).split('/').slice(0, -1).join('/');
-  function resolve(name: string, from: string, directories: readonly string[] = []): PascalSource | undefined {
+  function resolve(
+    name: string,
+    from: string,
+    directories: readonly string[] = []
+  ): PascalSource | undefined {
     const parent = sourcePath(from).split('/').slice(0, -1).join('/');
     const absolute = /^(?:[A-Z]:|[\\/])/i.test(name);
-    const candidates = absolute ? [name] : [parent + '/' + name, name, ...directories.map(dir => dir + '/' + name)];
+    const candidates = absolute
+      ? [name]
+      : [parent + '/' + name, name, ...directories.map((dir) => dir + '/' + name)];
     for (const candidate of candidates) {
-      const key = sourcePath(candidate), text = files.get(key);
-      if (text !== undefined) { sources[key] = text; return { filename: key, source: text }; }
+      const key = sourcePath(candidate),
+        text = files.get(key);
+      if (text !== undefined) {
+        sources[key] = text;
+        return { filename: key, source: text };
+      }
     }
     return undefined;
   }
   function parse(file: PascalSource, unit?: boolean): ProgramNode | UnitNode {
     const prepared = preprocessPascal(file.source, {
-      filename: file.filename, switches: options, ...(options.defines ? { defines: options.defines } : {}),
+      filename: file.filename,
+      switches: options,
+      ...(options.defines ? { defines: options.defines } : {}),
       resolveInclude: (name, from) => resolve(name, from, options.includeDirectories),
     });
     try {
@@ -58,7 +81,12 @@ export function parseProject(source: string, filename: string, options: ProjectO
   }
   const tree = parse({ filename, source });
   // A program without a heading is named after its file, as Free Pascal names it.
-  if (tree.type === NodeType.PROGRAM && !tree.name) tree.name = sourcePath(filename).split('/').at(-1)?.replace(/\.[^.]*$/, '') ?? '';
+  if (tree.type === NodeType.PROGRAM && !tree.name)
+    tree.name =
+      sourcePath(filename)
+        .split('/')
+        .at(-1)
+        ?.replace(/\.[^.]*$/, '') ?? '';
   const units = new Map<string, UnitNode>();
   return {
     tree,

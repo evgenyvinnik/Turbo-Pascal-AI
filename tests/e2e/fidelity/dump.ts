@@ -29,7 +29,11 @@ for (const name of names) {
     for (let x = 0; x <= COLS; x += 1) {
       const i = y * COLS + x;
       const k =
-        x === COLS ? '' : g.blank[i] ? `_${String(NAMES[g.bg[i]!])}` : `${String(NAMES[g.fg[i]!])}${String(NAMES[g.bg[i]!])}`;
+        x === COLS
+          ? ''
+          : g.blank[i]
+            ? `_${String(NAMES[g.bg[i]!])}`
+            : `${String(NAMES[g.fg[i]!])}${String(NAMES[g.bg[i]!])}`;
       if (x === 0) key = k;
       if (k !== key) {
         runs.push(`${String(start)}-${String(x - 1)}:${key}`);

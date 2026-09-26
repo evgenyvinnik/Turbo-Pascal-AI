@@ -2,7 +2,13 @@ import { currentMenus } from './currentMenus';
 import { Screen, type Rect } from '@/tui/Screen';
 import { SUBMENU_MARK, SINGLE, TEE_LEFT, TEE_RIGHT } from '@/tui/chars';
 import { TP } from '@styles/tpTheme';
-import { isMenuItemDisabled, isSeparator, menuBarPositions, type MenuContext, type MenuNode } from './menuDefs';
+import {
+  isMenuItemDisabled,
+  isSeparator,
+  menuBarPositions,
+  type MenuContext,
+  type MenuNode,
+} from './menuDefs';
 
 export interface MenuPaintState {
   open: boolean;
@@ -37,9 +43,19 @@ export const submenuRect = (items: MenuNode[], parent: Rect, itemIndex: number):
   };
 };
 
-export const popupScrollOffset = (items: readonly MenuNode[], selected: number, visible = 21): number => Math.min(Math.max(0, items.length - visible), Math.max(0, selected - visible + 1));
+export const popupScrollOffset = (
+  items: readonly MenuNode[],
+  selected: number,
+  visible = 21
+): number => Math.min(Math.max(0, items.length - visible), Math.max(0, selected - visible + 1));
 
-export function paintMenuPopup(scr: Screen, items: MenuNode[], box: Rect, selected: number, context?: MenuContext): void {
+export function paintMenuPopup(
+  scr: Screen,
+  items: MenuNode[],
+  box: Rect,
+  selected: number,
+  context?: MenuContext
+): void {
   scr.fill(box, ' ', TP.menu);
   const frame: Rect = { x: box.x + 1, y: box.y, w: box.w - 2, h: box.h };
   scr.frame(frame, TP.menu, false);

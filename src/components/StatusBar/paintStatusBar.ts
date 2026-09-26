@@ -30,7 +30,8 @@ export function paintStatusKeys(scr: Screen, keys: StatusKey[]): StatusHit[] {
     x += entry.key.length + 1;
     scr.write(x, y, entry.label, base);
     x += entry.label.length;
-    if (entry.command && !entry.disabled) hits.push({ from: start, to: x - 1, command: entry.command });
+    if (entry.command && !entry.disabled)
+      hits.push({ from: start, to: x - 1, command: entry.command });
     x += 2;
   }
   return hits;

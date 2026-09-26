@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decodeWorkspace, UnsupportedWorkspaceVersionError, type WorkspaceSnapshot } from '../../src/services/db/workspaceSnapshot';
+import {
+  decodeWorkspace,
+  UnsupportedWorkspaceVersionError,
+  type WorkspaceSnapshot,
+} from '../../src/services/db/workspaceSnapshot';
 
 function fixture(): WorkspaceSnapshot {
   return {
@@ -7,34 +11,71 @@ function fixture(): WorkspaceSnapshot {
     desktop: {
       buffers: {
         b9: {
-          id: 'b9', name: 'NONAME05.PAS', path: 'NONAME05.PAS',
+          id: 'b9',
+          name: 'NONAME05.PAS',
+          path: 'NONAME05.PAS',
           lines: ['program Kept;', 'begin end.'],
-          cursor: { line: 0, col: 3 }, scroll: { line: 0, col: 0 },
-          anchor: { line: 0, col: 0 }, modified: true, insert: false,
+          cursor: { line: 0, col: 3 },
+          scroll: { line: 0, col: 0 },
+          anchor: { line: 0, col: 0 },
+          modified: true,
+          insert: false,
           undo: [{ lines: ['program Before;'], cursor: { line: 0, col: 15 } }],
           redo: [{ lines: ['program After;'], cursor: { line: 0, col: 14 } }],
         },
       },
-      windows: [{
-        id: 'w12', kind: 'edit', num: 1, bufferId: 'b9', title: 'NONAME05.PAS',
-        rect: { x: 70, y: 18, w: 40, h: 12 }, prevRect: { x: 0, y: 1, w: 80, h: 23 },
-        scroll: 0, selected: 0,
-      }],
-      activeId: 'w12', clipboard: 'kept clipboard', seq: 12, untitled: 6,
+      windows: [
+        {
+          id: 'w12',
+          kind: 'edit',
+          num: 1,
+          bufferId: 'b9',
+          title: 'NONAME05.PAS',
+          rect: { x: 70, y: 18, w: 40, h: 12 },
+          prevRect: { x: 0, y: 1, w: 80, h: 23 },
+          scroll: 0,
+          selected: 0,
+        },
+      ],
+      activeId: 'w12',
+      clipboard: 'kept clipboard',
+      seq: 12,
+      untitled: 6,
     },
     ide: {
-      helpTopic: 'contents', destination: 'Memory', primaryFile: '', optionsFile: 'TURBO.TP', directory: 'A:\\',
+      helpTopic: 'contents',
+      destination: 'Memory',
+      primaryFile: '',
+      optionsFile: 'TURBO.TP',
+      directory: 'A:\\',
       compilerOptions: { runtime: [false, true] },
       optionDialogs: { 'env.editor': { tab: '4', editor: [true, false] } },
       tools: [{ title: 'Grep', program: 'GREP.COM', params: '-n' }],
-      programParameters: 'one two', defines: 'DEBUG',
+      programParameters: 'one two',
+      defines: 'DEBUG',
       search: {
-        text: 'Kept', replacement: 'New', caseSensitive: true, wholeWords: false, regularExpression: false,
-        backward: false, selectedOnly: false, entireScope: true, promptOnReplace: true,
+        text: 'Kept',
+        replacement: 'New',
+        caseSensitive: true,
+        wholeWords: false,
+        regularExpression: false,
+        backward: false,
+        selectedOnly: false,
+        entireScope: true,
+        promptOnReplace: true,
       },
     },
     debug: {
-      breakpoints: [{ id: 'bp-1', file: 'NONAME05.PAS', line: 2, enabled: true, condition: 'i = 5', passCount: 2 }],
+      breakpoints: [
+        {
+          id: 'bp-1',
+          file: 'NONAME05.PAS',
+          line: 2,
+          enabled: true,
+          condition: 'i = 5',
+          passCount: 2,
+        },
+      ],
       watches: [{ id: 'watch-1', expression: 'i' }],
     },
     histories: { filename: ['*.PAS', 'KEPT.PAS'] },

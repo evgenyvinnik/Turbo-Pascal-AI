@@ -93,7 +93,14 @@ export class Heap {
       }
       this.np = address;
     }
-    const block: HeapBlock = { start: address, words, linear, bytes, ...(type ? { type } : {}), ...(map !== undefined ? { map } : {}) };
+    const block: HeapBlock = {
+      start: address,
+      words,
+      linear,
+      bytes,
+      ...(type ? { type } : {}),
+      ...(map !== undefined ? { map } : {}),
+    };
     this.generation++;
     this.blocks.set(address, block);
     this.cellBlocks.fill(address + 1, address - this.bottom, address - this.bottom + words);
@@ -112,7 +119,8 @@ export class Heap {
   /** Release: every block whose bytes lie at or above a HeapPtr that Mark
    * recorded, which then becomes the top. */
   release(linear: number): void {
-    if (!Number.isInteger(linear) || linear < 0 || linear > this.size) throw new PascalError('Invalid or disposed pointer');
+    if (!Number.isInteger(linear) || linear < 0 || linear > this.size)
+      throw new PascalError('Invalid or disposed pointer');
     for (const block of [...this.blocks.values()]) if (block.linear >= linear) this.drop(block);
     this.freeBytes = this.freeBytes.filter((range) => range.at + range.bytes <= linear);
     this.top = Math.min(this.top, linear);
@@ -142,7 +150,11 @@ export class Heap {
   blockAtLinear(linear: number): HeapBlock | undefined {
     const start = this.byteBlocks[Math.floor(linear / 8)];
     const block = start ? this.blocks.get(start - 1) : undefined;
-    return block && linear >= block.linear && linear < block.linear + Math.max(8, Math.ceil(block.bytes / 8) * 8) ? block : undefined;
+    return block &&
+      linear >= block.linear &&
+      linear < block.linear + Math.max(8, Math.ceil(block.bytes / 8) * 8)
+      ? block
+      : undefined;
   }
   /** The view map of the block New made that starts at a cell, or -1. */
   mapAt(address: number): number {
@@ -162,8 +174,9 @@ export class Heap {
     this.byteBlocks.fill(0, block.linear / 8, (block.linear + size) / 8);
     this.freeCells.push({ address: block.start, words: block.words });
     this.freeCells.sort((a, b) => a.address - b.address);
-    for (let i = 0; i + 1 < this.freeCells.length;) {
-      const first = this.freeCells[i]!, next = this.freeCells[i + 1]!;
+    for (let i = 0; i + 1 < this.freeCells.length; ) {
+      const first = this.freeCells[i]!,
+        next = this.freeCells[i + 1]!;
       if (first.address + first.words === next.address) {
         first.words += next.words;
         this.freeCells.splice(i + 1, 1);
@@ -191,8 +204,9 @@ export class Heap {
   private giveBytes(at: number, size: number): void {
     this.freeBytes.push({ at, bytes: size });
     this.freeBytes.sort((a, b) => a.at - b.at);
-    for (let i = 0; i + 1 < this.freeBytes.length;) {
-      const first = this.freeBytes[i]!, next = this.freeBytes[i + 1]!;
+    for (let i = 0; i + 1 < this.freeBytes.length; ) {
+      const first = this.freeBytes[i]!,
+        next = this.freeBytes[i + 1]!;
       if (first.at + first.bytes === next.at) {
         first.bytes += next.bytes;
         this.freeBytes.splice(i + 1, 1);

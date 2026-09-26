@@ -140,7 +140,14 @@ begin
   q := StrNew('copy'); WriteLn(StrPas(q), ' ', StrNew('') = nil); StrDispose(q);
   s := StrPas(StrECopy(buf, 'ab') - 2); WriteLn(s)
 end.`,
-    output: ['hello, world 12 world', 'world llo, world ld', 'TRUE TRUE TRUE', 'TRUNCATE truncate', 'copy TRUE', 'ab'],
+    output: [
+      'hello, world 12 world',
+      'world llo, world ld',
+      'TRUE TRUE TRUE',
+      'TRUNCATE truncate',
+      'copy TRUE',
+      'ab',
+    ],
   },
   {
     name: 'system-exitcode-is-the-program-status',

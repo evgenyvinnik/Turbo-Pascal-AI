@@ -25,7 +25,11 @@ function create(sourceText = source): SourceDebugger {
   return new SourceDebugger(machine, bytecode);
 }
 
-function execute(debuggerSession: SourceDebugger, command: Parameters<SourceDebugger['command']>[0], line = 0): void {
+function execute(
+  debuggerSession: SourceDebugger,
+  command: Parameters<SourceDebugger['command']>[0],
+  line = 0
+): void {
   debuggerSession.command(command, line);
   debuggerSession.runSlice(100_000);
 }
@@ -41,12 +45,17 @@ end.`);
     execute(debug, 'entry');
     for (let step = 0; step < 4 && debug.getLine() !== 5; step++) execute(debug, 'over');
     expect(debug.getLine()).toBe(5);
-    expect(['Hi(w)', 'Lo(w)', 'Swap(w)', 'SizeOf(w)', 'SizeOf(a)', 'High(a)', 'Low(a)', 'High(s)'].map((text) => debug.evaluate(text).value))
-      .toEqual([0x12, 0x34, 0x3412, 2, 4, 5, 2, 7]);
+    expect(
+      ['Hi(w)', 'Lo(w)', 'Swap(w)', 'SizeOf(w)', 'SizeOf(a)', 'High(a)', 'Low(a)', 'High(s)'].map(
+        (text) => debug.evaluate(text).value
+      )
+    ).toEqual([0x12, 0x34, 0x3412, 2, 4, 5, 2, 7]);
     // Seg and Ofs are not constant functions; Mem takes constants.
     expect(() => debug.evaluate('Seg(w)')).toThrow(/constant expressions/);
     debug.modify('Mem[$B800:0]', '65');
-    expect([debug.evaluate('Mem[$B800:0]').value, debug.evaluate('MemW[$B800:0]').value]).toEqual([65, 0x0741]);
+    expect([debug.evaluate('Mem[$B800:0]').value, debug.evaluate('MemW[$B800:0]').value]).toEqual([
+      65, 0x0741,
+    ]);
     expect(debug.machine.getConsole().chars[0]).toBe('A');
     expect(debug.evaluate('Ptr($B800, 0) <> nil').value).toBe(true);
   });

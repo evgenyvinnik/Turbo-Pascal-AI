@@ -5,7 +5,13 @@ import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 import { roundReal48, realOperation, formatReal } from '../../src/compiler/codegen/numeric';
 import {
-  Float80, compReal, decodeExtended, encodeExtended, extendedOperation, parseReal, sqrtReal,
+  Float80,
+  compReal,
+  decodeExtended,
+  encodeExtended,
+  extendedOperation,
+  parseReal,
+  sqrtReal,
 } from '../../src/compiler/codegen/float80';
 
 const compile = (source: string) =>
@@ -80,9 +86,9 @@ describe('Turbo Pascal numeric representation', () => {
       begin i:=32767; {$Q-} WriteLn(i+1); {$Q+} WriteLn(i+1)
       end.`)
     );
-    expect(() => { machine.run(); }).toThrowError(
-      errorWith({ message: 'Arithmetic overflow', lineNumber: 2 })
-    );
+    expect(() => {
+      machine.run();
+    }).toThrowError(errorWith({ message: 'Arithmetic overflow', lineNumber: 2 }));
     expect(machine.getOutput()).toEqual(['-32768']);
     expect(
       execute(`program T;var i:Integer;

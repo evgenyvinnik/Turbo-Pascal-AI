@@ -22,7 +22,9 @@ export class PascalError extends Error {
 
     // Maintains proper stack trace for where the error was thrown (only available on V8).
     // Node's types declare it unconditionally, so type it as optional to keep the check.
-    const ErrorWithCapture: { captureStackTrace?: (target: object, constructor: NewableFunction) => void } = Error;
+    const ErrorWithCapture: {
+      captureStackTrace?: (target: object, constructor: NewableFunction) => void;
+    } = Error;
     if (ErrorWithCapture.captureStackTrace) {
       ErrorWithCapture.captureStackTrace(this, PascalError);
     }

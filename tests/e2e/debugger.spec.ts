@@ -14,7 +14,9 @@ begin
   WriteLn(total);
 end.`;
 
-test('source stepping, live watches, call stack and evaluate/modify use the same VM', async ({ page }) => {
+test('source stepping, live watches, call stack and evaluate/modify use the same VM', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource(source);
   await ide.press('F7');
@@ -48,7 +50,9 @@ test('source stepping, live watches, call stack and evaluate/modify use the same
   await expect(ide.row(18)).toContainText('22');
 });
 
-test('go to cursor pauses before execution and a source breakpoint can be removed', async ({ page }) => {
+test('go to cursor pauses before execution and a source breakpoint can be removed', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource(source);
   await ide.moveTo(10, 1);

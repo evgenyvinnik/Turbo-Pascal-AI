@@ -9,7 +9,16 @@
 import { INative } from '../codegen/Bytecode';
 import { BuiltinProcedure } from '../stdlib/builtin';
 import { PascalError } from '../errors/PascalError';
-import { Float80, absReal, extendedOperation, fracReal, intReal, roundReal, sqrtReal, truncReal } from '../codegen/float80';
+import {
+  Float80,
+  absReal,
+  extendedOperation,
+  fracReal,
+  intReal,
+  roundReal,
+  sqrtReal,
+  truncReal,
+} from '../codegen/float80';
 
 /**
  * Native procedure function signature
@@ -240,7 +249,9 @@ export class NativeRegistry implements INative {
       const value = this.toNumber(x);
       return value - Math.trunc(value);
     });
-    this.register(BuiltinProcedure.INT, 'Int', 1, true, (x) => (x instanceof Float80 ? intReal(x) : Math.trunc(this.toNumber(x))));
+    this.register(BuiltinProcedure.INT, 'Int', 1, true, (x) =>
+      x instanceof Float80 ? intReal(x) : Math.trunc(this.toNumber(x))
+    );
 
     // Ordinal functions
     this.register(StandardProcedure.ORD, 'Ord', 1, true, (x) => {
@@ -255,7 +266,8 @@ export class NativeRegistry implements INative {
 
     this.register(StandardProcedure.CHR, 'Chr', 1, true, (x) => {
       const code = this.toNumber(x);
-      if (!Number.isInteger(code) || code < 0 || code > 255) throw new PascalError('Character code out of range');
+      if (!Number.isInteger(code) || code < 0 || code > 255)
+        throw new PascalError('Character code out of range');
       return String.fromCharCode(code);
     });
 

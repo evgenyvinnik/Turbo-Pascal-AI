@@ -78,7 +78,8 @@ export function GraphicsCanvas({ width = 640, height = 480 }: GraphicsCanvasProp
 
     if (!graphics) return;
     const pixels = ctx.createImageData(graphics.width, graphics.height);
-    const colors = graphics.colors ?? EGA_PALETTE.map((color) => Number.parseInt(color.slice(1), 16));
+    const colors =
+      graphics.colors ?? EGA_PALETTE.map((color) => Number.parseInt(color.slice(1), 16));
     for (let index = 0; index < graphics.pixels.length; index += 1) {
       const color = colors[graphics.pixels[index] ?? 0] ?? 0;
       pixels.data[index * 4] = color >> 16;
@@ -101,7 +102,9 @@ export function GraphicsCanvas({ width = 640, height = 480 }: GraphicsCanvasProp
         width={graphics?.width ?? width}
         height={graphics?.height ?? height}
       />
-      <div {...stylex.props(styles.hint)}>{waiting ? `Input: ${input}  [Enter submits; Ctrl+F2 stops]` : 'Press Esc to return to IDE'}</div>
+      <div {...stylex.props(styles.hint)}>
+        {waiting ? `Input: ${input}  [Enter submits; Ctrl+F2 stops]` : 'Press Esc to return to IDE'}
+      </div>
     </div>
   );
 }
@@ -145,7 +148,8 @@ export function createGraphicsAPI(canvas: HTMLCanvasElement): GraphicsAPI {
       const r = data[0] ?? 0;
       const g = data[1] ?? 0;
       const b = data[2] ?? 0;
-      const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+      const hex =
+        `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
       return EGA_PALETTE.indexOf(hex);
     },
 

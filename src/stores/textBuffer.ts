@@ -12,8 +12,7 @@ export const clampPos = (lines: string[], p: Pos): Pos => {
 export const comparePos = (a: Pos, b: Pos): number =>
   a.line !== b.line ? a.line - b.line : a.col - b.col;
 
-export const orderRange = (a: Pos, b: Pos): [Pos, Pos] =>
-  comparePos(a, b) <= 0 ? [a, b] : [b, a];
+export const orderRange = (a: Pos, b: Pos): [Pos, Pos] => (comparePos(a, b) <= 0 ? [a, b] : [b, a]);
 
 export const getRange = (lines: string[], a: Pos, b: Pos): string => {
   const [s, e] = orderRange(a, b);

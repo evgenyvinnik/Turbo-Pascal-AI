@@ -157,7 +157,8 @@ export class DosUnit {
     view.setUint16(0, state.handle, true);
     view.setUint16(2, modes[state.mode], true);
     view.setUint16(4, state.text ? 128 : state.recordSize & 0xffff, true);
-    for (let index = 0; index < Math.min(79, state.name.length); index++) bytes[48 + index] = state.name.charCodeAt(index) & 0xff;
+    for (let index = 0; index < Math.min(79, state.name.length); index++)
+      bytes[48 + index] = state.name.charCodeAt(index) & 0xff;
     decodeBinary(this.memory, record, layout, bytes);
   }
   private layout(value: StackValue | undefined): BinaryCell[] {

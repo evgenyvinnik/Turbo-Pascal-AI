@@ -1,5 +1,16 @@
 import { C, type Attr } from './palette';
-import { DOUBLE, SINGLE, SHADE_DARK, SHADE_MEDIUM, TRI_DOWN, TRI_LEFT, TRI_RIGHT, TRI_UP, BLOCK_SMALL, type BoxChars } from './chars';
+import {
+  DOUBLE,
+  SINGLE,
+  SHADE_DARK,
+  SHADE_MEDIUM,
+  TRI_DOWN,
+  TRI_LEFT,
+  TRI_RIGHT,
+  TRI_UP,
+  BLOCK_SMALL,
+  type BoxChars,
+} from './chars';
 
 export interface Run {
   x: number;
@@ -181,7 +192,7 @@ export class Screen {
     vertical: boolean,
     pos: number,
     max: number,
-    a: Attr,
+    a: Attr
   ): void {
     if (len < 2) return;
     const at = (i: number, ch: string) => {

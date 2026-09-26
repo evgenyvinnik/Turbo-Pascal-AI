@@ -39,9 +39,16 @@ describe('Parameter forms', () => {
       R = record q: PR; ofs: LongInt; a: array[1..2] of Byte; inner: I end;
       procedure P(const r: R); var x: LongInt; begin ${body} end;
       var v, w: R; begin v.q := @w; v.ofs := 4; P(v); WriteLn(w.ofs) end.`;
-    for (const body of ['with r do ofs := ofs + 1', 'with r do Inc(a[1])', 'with r do with inner do n := 1', 'with r do ReadLn(ofs)'])
+    for (const body of [
+      'with r do ofs := ofs + 1',
+      'with r do Inc(a[1])',
+      'with r do with inner do n := 1',
+      'with r do ReadLn(ofs)',
+    ])
       expect(() => compile(source(body))).toThrow(/Constant parameter "r" cannot be modified/);
-    expect(execute(source('with r do begin x := ofs + 1; WriteLn(x) end; with r.q^ do ofs := 9'))).toEqual(['5', '9']);
+    expect(
+      execute(source('with r do begin x := ofs + 1; WriteLn(x) end; with r.q^ do ofs := 9'))
+    ).toEqual(['5', '9']);
   });
 
   it('lets a const pointer parameter write through the pointer', () => {
@@ -87,9 +94,9 @@ describe('Parameter forms', () => {
     expect(() =>
       compile(`program T; procedure P(var a, b: array of Integer); begin a := b end; begin end.`)
     ).toThrow(/Open arrays cannot be assigned as a whole/);
-    expect(() => compile('program T; procedure P(a: array of const); begin end; begin end.')).toThrow(
-      /Array of const is not Turbo Pascal/
-    );
+    expect(() =>
+      compile('program T; procedure P(a: array of const); begin end; begin end.')
+    ).toThrow(/Array of const is not Turbo Pascal/);
   });
 
   it('keeps forward declarations and procedural types strict about parameter modes', () => {

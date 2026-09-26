@@ -342,12 +342,23 @@ export class Asm86 {
           pointer = value;
         } else offset += value;
       }
-    if (!pointer) return this.absolute(operand.kind === 'memory' ? operand.segment ?? (operand.registers.includes('bp') ? 'ss' : 'ds') : 'ds', offset);
+    if (!pointer)
+      return this.absolute(
+        operand.kind === 'memory'
+          ? (operand.segment ?? (operand.registers.includes('bp') ? 'ss' : 'ds'))
+          : 'ds',
+        offset
+      );
     return { ...pointer, offset: pointer.offset + offset };
   }
   /** Memory at a segment register and an offset, as the 8086 addresses it. */
   private absolute(segment: 'es' | 'cs' | 'ss' | 'ds', offset: number): AsmPointer {
-    return { base: 0, layout: undefined, offset: offset & 0xffff, linear: this.state.segments[segment] * 16 };
+    return {
+      base: 0,
+      layout: undefined,
+      offset: offset & 0xffff,
+      linear: this.state.segments[segment] * 16,
+    };
   }
   /** Where a register points: at a variable, or at memory by address. */
   private pointerIn(register: WordRegister, segment: 'es' | 'ds'): AsmPointer {
@@ -355,13 +366,17 @@ export class Asm86 {
     return isPointer(value) ? value : this.absolute(segment, value);
   }
   private readAbsolute(pointer: AsmPointer, size: number): number {
-    const bytes = this.linearHost().readLinear!(((pointer.linear ?? 0) + pointer.offset) % 0x100000, size);
+    const bytes = this.linearHost().readLinear!(
+      ((pointer.linear ?? 0) + pointer.offset) % 0x100000,
+      size
+    );
     let value = 0;
     for (let i = size - 1; i >= 0; i--) value = value * 256 + (bytes[i] ?? 0);
     return value;
   }
   private linearHost(): AsmHost {
-    if (!this.host.readLinear || !this.host.writeLinear) throw new PascalError('Absolute memory addresses are not supported');
+    if (!this.host.readLinear || !this.host.writeLinear)
+      throw new PascalError('Absolute memory addresses are not supported');
     return this.host;
   }
   /** The cells covering `size` bytes at a pointer. */
@@ -392,7 +407,11 @@ export class Asm86 {
       const target = Number(this.host.read(pointer.base + (cell.offset ?? first)) ?? 0);
       return target ? { base: target, layout: pointer.target, offset: 0 } : 0;
     }
-    const bytes = encodeBinary(this.host, this.cellsBase(pointer, first), layout.slice(first, last + 1));
+    const bytes = encodeBinary(
+      this.host,
+      this.cellsBase(pointer, first),
+      layout.slice(first, last + 1)
+    );
     let value = 0;
     for (let i = size - 1; i >= 0; i--)
       value = value * 256 + (bytes[pointer.offset - start + i] ?? 0);
@@ -414,7 +433,10 @@ export class Asm86 {
     if (cell.kind === 'pointer' && first === last) {
       const within = pointer.offset - start;
       if (within >= 2) return;
-      this.host.write(pointer.base + (cell.offset ?? first), isPointer(value) ? this.cellAddress(value) : value);
+      this.host.write(
+        pointer.base + (cell.offset ?? first),
+        isPointer(value) ? this.cellAddress(value) : value
+      );
       return;
     }
     const cells = layout.slice(first, last + 1);
@@ -434,7 +456,7 @@ export class Asm86 {
   /** A pointer as the P-machine stores it: the address of a cell. */
   private cellAddress(pointer: AsmPointer): number {
     if (pointer.linear !== undefined)
-      return this.host.linearPointer?.(((pointer.linear) + pointer.offset) % 0x100000) ?? 0;
+      return this.host.linearPointer?.((pointer.linear + pointer.offset) % 0x100000) ?? 0;
     if (!pointer.layout) return pointer.base;
     const sums = prefixes(pointer.layout);
     const index = sums.indexOf(pointer.offset);
@@ -1147,7 +1169,8 @@ export class Asm86 {
           case 0x0d: {
             const graphics = this.host.graphics;
             if (!graphics?.dac) this.unsupported(number, ah);
-            const x = this.number(r.cx), y = this.number(r.dx);
+            const x = this.number(r.cx),
+              y = this.number(r.dx);
             if (x < graphics.width && y < graphics.height) {
               if (ah === 0x0c) {
                 graphics.pixels[y * graphics.width + x] = al;

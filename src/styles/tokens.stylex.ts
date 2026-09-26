@@ -67,16 +67,11 @@ export const dosFonts = stylex.defineVars({
 
 export const dosShadows = stylex.defineVars({
   // Authentic DOS 3D effects with stronger contrast
-  inset:
-    'inset 1px 1px 0 #000000, inset -1px -1px 0 #FFFFFF',
-  raised:
-    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #545454, 1px 1px 0 #000000',
-  pressed:
-    'inset 1px 1px 0 #545454, inset -1px -1px 0 #FFFFFF',
-  window:
-    'inset 2px 2px 0 #FFFFFF, inset -2px -2px 0 #545454, 2px 2px 0 #000000',
-  panel:
-    'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #545454',
+  inset: 'inset 1px 1px 0 #000000, inset -1px -1px 0 #FFFFFF',
+  raised: 'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #545454, 1px 1px 0 #000000',
+  pressed: 'inset 1px 1px 0 #545454, inset -1px -1px 0 #FFFFFF',
+  window: 'inset 2px 2px 0 #FFFFFF, inset -2px -2px 0 #545454, 2px 2px 0 #000000',
+  panel: 'inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #545454',
 });
 
 export const dosBorders = stylex.defineVars({

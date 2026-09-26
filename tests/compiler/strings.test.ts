@@ -60,21 +60,21 @@ describe('null-terminated strings under {$X+}', () => {
       execute(`{$X+} program T; const Name: array[0..7] of Char = 'AB'; P: PChar = Name;
       begin WriteLn(P, ' ', Ord(Name[2]), Ord(Name[7])) end.`)
     ).toEqual(['AB 00']);
-    expect(() => compile(`{$X-} program T; const Name: array[0..7] of Char = 'AB'; begin end.`)).toThrow(
-      /String constant of length 8 expected/
-    );
-    expect(() => compile(`{$X+} program T; const Name: array[1..8] of Char = 'AB'; begin end.`)).toThrow(
-      /String constant of length 8 expected/
-    );
+    expect(() =>
+      compile(`{$X-} program T; const Name: array[0..7] of Char = 'AB'; begin end.`)
+    ).toThrow(/String constant of length 8 expected/);
+    expect(() =>
+      compile(`{$X+} program T; const Name: array[1..8] of Char = 'AB'; begin end.`)
+    ).toThrow(/String constant of length 8 expected/);
   });
 
   it('keeps PChars out of Write and Val under {$X-}', () => {
     expect(() => compile(`{$X-} program T; var p: PChar; begin WriteLn(p) end.`)).toThrow(
       /Write requires a scalar or string value/
     );
-    expect(() => compile(`{$X-} program T; var p: PChar; i, c: Integer; begin Val(p, i, c) end.`)).toThrow(
-      /Type mismatch/
-    );
+    expect(() =>
+      compile(`{$X-} program T; var p: PChar; i, c: Integer; begin Val(p, i, c) end.`)
+    ).toThrow(/Type mismatch/);
   });
 });
 
@@ -86,7 +86,9 @@ describe('zero-based arrays of Char as PChars', () => {
         WriteLn(q^, ' ', q - ca, ' ', ca - p, ' ', (2 + p)^, ' ', p = ca, ' ', q > ca, ' ', (ca + 1)[1]);
         Inc(p); Inc(p, 2); Dec(q); WriteLn(p^, q^) end.`)
     ).toEqual(['d 3 0 c TRUE TRUE c', 'dc']);
-    expect(() => compile(`{$X-} program T; var p: PChar; begin Inc(p) end.`)).toThrow(/Inc and Dec require an ordinal variable/);
+    expect(() => compile(`{$X-} program T; var p: PChar; begin Inc(p) end.`)).toThrow(
+      /Inc and Dec require an ordinal variable/
+    );
   });
 });
 
@@ -104,7 +106,9 @@ describe('packed string types', () => {
 
   it('compare only with packed strings of the same length, and take no string variable', () => {
     expect(() =>
-      compile(`program T; var a: array[1..3] of Char; b: array[1..4] of Char; begin WriteLn(a = b) end.`)
+      compile(
+        `program T; var a: array[1..3] of Char; b: array[1..4] of Char; begin WriteLn(a = b) end.`
+      )
     ).toThrow(/Type mismatch/);
     expect(() =>
       compile(`program T; var a: array[1..3] of Char; s: string; begin s := 'abc'; a := s end.`)
@@ -121,9 +125,9 @@ describe('address expressions in typed constants', () => {
       const XO: Word = Ofs(x[2]); XS: Word = Seg(x); PA: Pointer = @A; PB: PChar = buf;
       begin WriteLn(XO - Ofs(x), ' ', XS = DSeg, ' ', PA = @A, ' ', PB = @buf) end.`)
     ).toEqual(['4 TRUE TRUE TRUE']);
-    expect(() => compile(`program T; procedure P; var l: Word; const X: Word = Ofs(l); begin end; begin end.`)).toThrow(
-      /Address of a global variable expected/
-    );
+    expect(() =>
+      compile(`program T; procedure P; var l: Word; const X: Word = Ofs(l); begin end; begin end.`)
+    ).toThrow(/Address of a global variable expected/);
   });
 
   it('take the address of a character of a global string or string typed constant', () => {
@@ -132,9 +136,9 @@ describe('address expressions in typed constants', () => {
       var g: string[10]; const pg: ^Char = @g[2];
       begin g := 'hello'; WriteLn(pc[0], pc[1], ' ', pd^, ' ', pg^); s[1] := 'b'; WriteLn(pc^) end.`)
     ).toEqual(['te s e', 'b']);
-    expect(() => compile(`program T; const s: string[4] = 'test'; pc: PChar = @s[9]; begin end.`)).toThrow(
-      /Constant out of range/
-    );
+    expect(() =>
+      compile(`program T; const s: string[4] = 'test'; pc: PChar = @s[9]; begin end.`)
+    ).toThrow(/Constant out of range/);
   });
 });
 
@@ -160,6 +164,8 @@ describe('control characters', () => {
       execute(`program T; type PT = ^T; T = Integer; const S = ^M^J'x'^i; var c: Char; q: PT;
       begin c := ^@; New(q); q^ := 3; WriteLn(Ord(S[1]), Ord(S[2]), S[3], Ord(S[4]), ' ', Ord(c), ' ', q^, ' ', Concat(S[3])) end.`)
     ).toEqual(['1310x9 0 3 x']);
-    expect(() => compile(`program T; var c: Char; begin c := ^ ; end.`)).toThrow(/Unexpected token in expression: '\^'/);
+    expect(() => compile(`program T; var c: Char; begin c := ^ ; end.`)).toThrow(
+      /Unexpected token in expression: '\^'/
+    );
   });
 });

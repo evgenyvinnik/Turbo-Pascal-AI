@@ -22,7 +22,10 @@ const outDir = path.join(here, '..', '..', 'test-results', 'fidelity');
 for (const state of STATES) {
   test(state.name, async ({ page }) => {
     const refFile = path.join(refDir, `${state.ref}.png`);
-    test.skip(!fs.existsSync(refFile), `reference ${state.ref}.png missing; run bun run fidelity:fetch`);
+    test.skip(
+      !fs.existsSync(refFile),
+      `reference ${state.ref}.png missing; run bun run fidelity:fetch`
+    );
 
     const ide = await Ide.open(page);
     await state.drive(ide);
@@ -33,11 +36,14 @@ for (const state of STATES) {
     const diff = diffGrids(ours, ref, state.ignore);
 
     fs.mkdirSync(outDir, { recursive: true });
-    fs.writeFileSync(path.join(outDir, `${state.name}.txt`), formatReport(state.name, ours, ref, diff));
+    fs.writeFileSync(
+      path.join(outDir, `${state.name}.txt`),
+      formatReport(state.name, ours, ref, diff)
+    );
     console.log(`${state.name.padEnd(28)} ${String(diff.count).padStart(5)} cells`);
 
     expect(diff.count, `see test-results/fidelity/${state.name}.txt`).toBeLessThanOrEqual(
-      state.budget ?? 0,
+      state.budget ?? 0
     );
   });
 }
@@ -48,19 +54,42 @@ for (const state of STATES) {
  * reference files are deliberately separate from updateable visual snapshots.
  */
 test.describe('exact gallery pixels', () => {
-  const names = ['main-view', 'menu-file', 'menu-edit', 'menu-search', 'menu-run',
-    'menu-compile', 'menu-debug', 'menu-tools', 'menu-options', 'menu-window', 'menu-help'];
+  const names = [
+    'main-view',
+    'menu-file',
+    'menu-edit',
+    'menu-search',
+    'menu-run',
+    'menu-compile',
+    'menu-debug',
+    'menu-tools',
+    'menu-options',
+    'menu-window',
+    'menu-help',
+  ];
   for (const name of names) {
     const state = STATES.find((candidate) => candidate.name === name)!;
     test(name, async ({ page }, testInfo) => {
       const refFile = path.join(refDir, `${state.ref}.png`);
-      test.skip(!fs.existsSync(refFile), `reference ${state.ref}.png missing; run bun run fidelity:fetch`);
+      test.skip(
+        !fs.existsSync(refFile),
+        `reference ${state.ref}.png missing; run bun run fidelity:fetch`
+      );
       const ide = await Ide.open(page);
       await state.drive(ide);
-      const masks: RasterMask[] = name === 'main-view' ? [{
-        x: 32, y: 1, w: 16, h: 1,
-        reason: 'The bundled square example is named SQUARE.PAS; the gallery calls this file HELLO.PAS.',
-      }] : [];
+      const masks: RasterMask[] =
+        name === 'main-view'
+          ? [
+              {
+                x: 32,
+                y: 1,
+                w: 16,
+                h: 1,
+                reason:
+                  'The bundled square example is named SQUARE.PAS; the gallery calls this file HELLO.PAS.',
+              },
+            ]
+          : [];
       const actual = await page.screenshot({ animations: 'disabled', caret: 'hide' });
       const reference = fs.readFileSync(refFile);
       const diff = await compareRaster(page, actual, reference, masks);
@@ -70,7 +99,10 @@ test.describe('exact gallery pixels', () => {
       if (diff.pixels) {
         await testInfo.attach('gallery-reference', { body: reference, contentType: 'image/png' });
         await testInfo.attach('rendered-screen', { body: actual, contentType: 'image/png' });
-        await testInfo.attach('pixel-diff', { body: Buffer.from(diff.image, 'base64'), contentType: 'image/png' });
+        await testInfo.attach('pixel-diff', {
+          body: Buffer.from(diff.image, 'base64'),
+          contentType: 'image/png',
+        });
         await testInfo.attach('pixel-report', { body: report, contentType: 'text/plain' });
       }
       expect(diff.pixels, `see test-results/fidelity/${name}-pixels.txt`).toBe(0);
@@ -95,7 +127,10 @@ test.describe('exact gallery pixels', () => {
 
   test('a single call frame has the original disabled scrollbar', async ({ page }, testInfo) => {
     const refFile = path.join(refDir, 'Call-stack-3.png');
-    test.skip(!fs.existsSync(refFile), 'reference Call-stack-3.png missing; run bun run fidelity:fetch');
+    test.skip(
+      !fs.existsSync(refFile),
+      'reference Call-stack-3.png missing; run bun run fidelity:fetch'
+    );
     const ide = await Ide.open(page);
     await ide.press('Alt+F3');
     await ide.openFile('HELLO.PAS');
@@ -112,16 +147,25 @@ test.describe('exact gallery pixels', () => {
     if (diff.pixels) {
       await testInfo.attach('gallery-reference', { body: reference, contentType: 'image/png' });
       await testInfo.attach('rendered-screen', { body: actual, contentType: 'image/png' });
-      await testInfo.attach('pixel-diff', { body: Buffer.from(diff.image, 'base64'), contentType: 'image/png' });
+      await testInfo.attach('pixel-diff', {
+        body: Buffer.from(diff.image, 'base64'),
+        contentType: 'image/png',
+      });
     }
-    expect(diff.pixels, 'The complete single-frame Call Stack screen must match the original pixels').toBe(0);
+    expect(
+      diff.pixels,
+      'The complete single-frame Call Stack screen must match the original pixels'
+    ).toBe(0);
   });
 
   for (const name of ['address-not-found', 'procedure-not-found']) {
     test(`${name} uses the original error dialog`, async ({ page }, testInfo) => {
       const state = REPORT_STATES.find((candidate) => candidate.name === name)!;
       const refFile = path.join(refDir, `${state.ref}.png`);
-      test.skip(!fs.existsSync(refFile), `reference ${state.ref}.png missing; run bun run fidelity:fetch`);
+      test.skip(
+        !fs.existsSync(refFile),
+        `reference ${state.ref}.png missing; run bun run fidelity:fetch`
+      );
       const ide = await Ide.open(page);
       await state.drive(ide);
       const actual = await page.screenshot({ animations: 'disabled', caret: 'hide' });
@@ -130,25 +174,41 @@ test.describe('exact gallery pixels', () => {
       if (diff.pixels) {
         await testInfo.attach('gallery-reference', { body: reference, contentType: 'image/png' });
         await testInfo.attach('rendered-screen', { body: actual, contentType: 'image/png' });
-        await testInfo.attach('pixel-diff', { body: Buffer.from(diff.image, 'base64'), contentType: 'image/png' });
+        await testInfo.attach('pixel-diff', {
+          body: Buffer.from(diff.image, 'base64'),
+          contentType: 'image/png',
+        });
       }
-      expect(diff.pixels, 'The complete error screen must match the original, including wording and punctuation').toBe(0);
+      expect(
+        diff.pixels,
+        'The complete error screen must match the original, including wording and punctuation'
+      ).toBe(0);
     });
   }
 });
 
 test('editor Help continuation uses the full document scroll range', async ({ page }, testInfo) => {
   const referenceFile = path.join(refDir, 'Help-2.png');
-  test.skip(!fs.existsSync(referenceFile), 'reference Help-2.png missing; run bun run fidelity:fetch');
+  test.skip(
+    !fs.existsSync(referenceFile),
+    'reference Help-2.png missing; run bun run fidelity:fetch'
+  );
   const ide = await Ide.open(page);
-  await ide.press('F1'); await ide.press('PageDown');
+  await ide.press('F1');
+  await ide.press('PageDown');
   const actual = await page.screenshot({ animations: 'disabled', caret: 'hide' });
   const reference = fs.readFileSync(referenceFile);
   const diff = await compareRaster(page, actual, reference, []);
   if (diff.pixels) {
     await testInfo.attach('gallery-reference', { body: reference, contentType: 'image/png' });
     await testInfo.attach('rendered-screen', { body: actual, contentType: 'image/png' });
-    await testInfo.attach('pixel-diff', { body: Buffer.from(diff.image, 'base64'), contentType: 'image/png' });
+    await testInfo.attach('pixel-diff', {
+      body: Buffer.from(diff.image, 'base64'),
+      contentType: 'image/png',
+    });
   }
-  expect(diff.pixels, 'The complete editor Help continuation must match the original without masks').toBe(0);
+  expect(
+    diff.pixels,
+    'The complete editor Help continuation must match the original without masks'
+  ).toBe(0);
 });

@@ -37,7 +37,10 @@ export class Graph3 implements TextCanvas {
   private window = { left: 0, top: 0, right: 319, bottom: 199 };
   private turtle = { x: 0, y: 0, heading: 0, pen: true, color: 3, visible: false, wrap: false };
   delay = 0;
-  constructor(private g: GraphicsRuntime, private console?: TextConsole) {}
+  constructor(
+    private g: GraphicsRuntime,
+    private console?: TextConsole
+  ) {}
 
   reset(): void {
     this.mode = null;
@@ -93,11 +96,15 @@ export class Graph3 implements TextCanvas {
   drawCell(index: number): void {
     const console = this.console;
     if (!console || !this.active) return;
-    const g = this.g, x = (index % console.cols) * 8, y = Math.floor(index / console.cols) * 8;
-    const code = glyphCode(console.chars[index] ?? ' '), color = (console.attributes[index] ?? 7) & (this.mode === 'hires' ? 1 : 3);
+    const g = this.g,
+      x = (index % console.cols) * 8,
+      y = Math.floor(index / console.cols) * 8;
+    const code = glyphCode(console.chars[index] ?? ' '),
+      color = (console.attributes[index] ?? 7) & (this.mode === 'hires' ? 1 : 3);
     for (let row = 0; row < 8; row++) {
       const bits = BGI_FONT[code * 8 + row] ?? 0;
-      for (let col = 0; col < 8; col++) g.pixels[(y + row) * g.width + x + col] = bits & (128 >>> col) ? color : 0;
+      for (let col = 0; col < 8; col++)
+        g.pixels[(y + row) * g.width + x + col] = bits & (128 >>> col) ? color : 0;
     }
     g.revision++;
   }
@@ -106,7 +113,8 @@ export class Graph3 implements TextCanvas {
     if (!this.active) return;
     const g = this.g;
     for (let row = 0; row < 8; row++) {
-      const source = (from * 8 + row) * g.width, target = (to * 8 + row) * g.width;
+      const source = (from * 8 + row) * g.width,
+        target = (to * 8 + row) * g.width;
       g.pixels.copyWithin(target + left * 8, source + left * 8, source + (right + 1) * 8);
     }
     g.revision++;
@@ -114,7 +122,8 @@ export class Graph3 implements TextCanvas {
   clearCells(row: number, start: number, end: number): void {
     if (!this.active) return;
     const g = this.g;
-    for (let line = row * 8; line < row * 8 + 8; line++) g.pixels.fill(0, line * g.width + start * 8, line * g.width + (end + 1) * 8);
+    for (let line = row * 8; line < row * 8 + 8; line++)
+      g.pixels.fill(0, line * g.width + start * 8, line * g.width + (end + 1) * 8);
     g.revision++;
   }
   /** TextMode leaves graphics. */

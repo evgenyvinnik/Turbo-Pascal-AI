@@ -81,7 +81,8 @@ export class VirtualFileSystem {
   write(name: string, content: string): void {
     const path = this.normalize(name);
     if (isNullDevice(path)) return;
-    if ((this.attributes.get(path) ?? 0) & READ_ONLY) throw new PascalError(`File access denied: ${name}`);
+    if ((this.attributes.get(path) ?? 0) & READ_ONLY)
+      throw new PascalError(`File access denied: ${name}`);
     if (this.used - (this.files.get(path)?.length ?? 0) + content.length > this.capacity)
       throw new PascalError('Disk full');
     if (!this.files.has(path)) this.made.set(path, this.made.size);
@@ -91,7 +92,8 @@ export class VirtualFileSystem {
   }
   remove(name: string): void {
     const path = this.normalize(name);
-    if (isNullDevice(path) || (this.attributes.get(path) ?? 0) & READ_ONLY) throw new PascalError(`File access denied: ${name}`);
+    if (isNullDevice(path) || (this.attributes.get(path) ?? 0) & READ_ONLY)
+      throw new PascalError(`File access denied: ${name}`);
     if (!this.files.delete(path)) throw new PascalError(`File not found: ${name}`);
     this.times.delete(path);
     this.attributes.delete(path);
@@ -125,7 +127,10 @@ export class VirtualFileSystem {
    * were made, with DOS's names, sizes, times and attributes. */
   list(directory: string): { name: string; size: number; time: number; attributes: number }[] {
     const prefix = directory ? `${directory}/` : '';
-    const entries = new Map<string, { name: string; size: number; time: number; attributes: number; order: number }>();
+    const entries = new Map<
+      string,
+      { name: string; size: number; time: number; attributes: number; order: number }
+    >();
     for (const [path, content] of this.files) {
       if (!path.startsWith(prefix)) continue;
       const [first, ...rest] = path.slice(prefix.length).split('/');
@@ -151,19 +156,30 @@ export class VirtualFileSystem {
     for (const path of this.directories) {
       if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) continue;
       const name = path.slice(prefix.length);
-      if (name && !entries.has(name)) entries.set(name, { name, size: 0, time: this.times.get(path) ?? 0, attributes: DIRECTORY, order: this.made.get(path) ?? 0 });
+      if (name && !entries.has(name))
+        entries.set(name, {
+          name,
+          size: 0,
+          time: this.times.get(path) ?? 0,
+          attributes: DIRECTORY,
+          order: this.made.get(path) ?? 0,
+        });
     }
-    return [...entries.values()].sort((a, b) => a.order - b.order).map(({ order: _order, ...entry }) => entry);
+    return [...entries.values()]
+      .sort((a, b) => a.order - b.order)
+      .map(({ order: _order, ...entry }) => entry);
   }
   /** A directory name a program gives, as a path from the root. */
   directoryPath(name: string): string {
     return this.resolve(name, this.current);
   }
   rename(from: string, to: string): void {
-    if (isNullDevice(this.normalize(from)) || isNullDevice(this.normalize(to))) throw new PascalError(`File access denied: ${from}`);
+    if (isNullDevice(this.normalize(from)) || isNullDevice(this.normalize(to)))
+      throw new PascalError(`File access denied: ${from}`);
     if (this.exists(to)) throw new PascalError(`File already exists: ${to}`);
     // A renamed file keeps its time and attributes, read-only or not.
-    const source = this.normalize(from), target = this.normalize(to);
+    const source = this.normalize(from),
+      target = this.normalize(to);
     const value = this.read(from);
     this.files.delete(source);
     this.files.set(target, value);
@@ -186,7 +202,8 @@ export class VirtualFileSystem {
     const path = this.resolveName(name);
     const parent = path.split('/').slice(0, -1).join('/');
     if (!this.isDirectory(parent)) throw new PascalError(`Path not found: ${name}`);
-    if (this.isDirectory(path) || this.files.has(path)) throw new PascalError(`File access denied: ${name}`);
+    if (this.isDirectory(path) || this.files.has(path))
+      throw new PascalError(`File access denied: ${name}`);
     this.directories.add(path);
     this.made.set(path, this.made.size);
     this.times.set(path, packDosTime(new Date()));
@@ -199,7 +216,8 @@ export class VirtualFileSystem {
   }
   removeDirectory(name: string): void {
     const path = this.resolveName(name);
-    if (!this.directories.has(path) && !this.isDirectory(path)) throw new PascalError(`Path not found: ${name}`);
+    if (!this.directories.has(path) && !this.isDirectory(path))
+      throw new PascalError(`Path not found: ${name}`);
     // DOS refuses a directory that holds files, or the current one.
     if (path === this.current || [...this.files.keys()].some((file) => file.startsWith(`${path}/`)))
       throw new PascalError(`File access denied: ${name}`);

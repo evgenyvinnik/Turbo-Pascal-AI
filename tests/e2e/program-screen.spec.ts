@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
 
-test('CRT video memory renders colors, cursor positions and interactive input', async ({ page }) => {
+test('CRT video memory renders colors, cursor positions and interactive input', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource(`program ConsoleDemo;
 uses Crt;
@@ -44,7 +46,13 @@ end.`);
   await ide.press('Enter');
   const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
   await expect(canvas).toBeVisible();
-  await expect.poll(() => canvas.evaluate((element: HTMLCanvasElement) => Array.from(element.getContext('2d')!.getImageData(10, 10, 1, 1).data))).toEqual([170, 0, 0, 255]);
+  await expect
+    .poll(() =>
+      canvas.evaluate((element: HTMLCanvasElement) =>
+        Array.from(element.getContext('2d')!.getImageData(10, 10, 1, 1).data)
+      )
+    )
+    .toEqual([170, 0, 0, 255]);
   await ide.press('Enter');
   await expect(canvas).toHaveCount(0);
 });
@@ -93,7 +101,12 @@ end.`);
   await expect(canvas).toBeVisible();
   await expect(canvas).toHaveAttribute('width', '320');
   await expect(canvas).toHaveAttribute('height', '200');
-  const pixel = (x: number, y: number) => canvas.evaluate((element: HTMLCanvasElement, [px, py]) => Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data), [x, y]);
+  const pixel = (x: number, y: number) =>
+    canvas.evaluate(
+      (element: HTMLCanvasElement, [px, py]) =>
+        Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data),
+      [x, y]
+    );
   // Palette 2: color 3 is yellow and color 2 light red; the turtle walks east from the middle.
   await expect.poll(() => pixel(0, 0)).toEqual([255, 255, 85, 255]);
   await expect.poll(() => pixel(200, 100)).toEqual([255, 85, 85, 255]);
@@ -120,7 +133,12 @@ end.`);
   const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
   await expect(canvas).toBeVisible();
   await expect(canvas).toHaveAttribute('width', '320');
-  const pixel = (x: number, y: number) => canvas.evaluate((element: HTMLCanvasElement, [px, py]) => Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data), [x, y]);
+  const pixel = (x: number, y: number) =>
+    canvas.evaluate(
+      (element: HTMLCanvasElement, [px, py]) =>
+        Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data),
+      [x, y]
+    );
   // Color 4 of the default palette is the EGA's red; 200 is what the program set.
   await expect.poll(() => pixel(9, 0)).toEqual([170, 0, 0, 255]);
   await expect.poll(() => pixel(0, 1)).toEqual([255, 130, 0, 255]);
@@ -166,7 +184,9 @@ end.`);
   await ide.press('Control+F9');
   await ide.waitForDialog('Compiling');
   await ide.press('Enter');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('turbo-pascal.virtual-disk.v1'))).toContain('Saved by Pascal');
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('turbo-pascal.virtual-disk.v1')))
+    .toContain('Saved by Pascal');
   ide = await Ide.open(page);
   await ide.openMenu('F');
   await ide.chooseItem('n');
@@ -204,7 +224,9 @@ end.`);
   expect((await ide.screenText()).slice(18, 23).join('\n')).not.toContain('After delay');
 });
 
-test('KeyPressed polling receives live typing and ReadKey receives Escape and DOS arrow codes', async ({ page }) => {
+test('KeyPressed polling receives live typing and ReadKey receives Escape and DOS arrow codes', async ({
+  page,
+}) => {
   const ide = await Ide.open(page);
   await ide.typeSource(`program KeyboardDemo;
 uses Crt;

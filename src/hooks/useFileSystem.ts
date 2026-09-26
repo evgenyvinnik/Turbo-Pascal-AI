@@ -252,19 +252,12 @@ export function useRenameNode() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      path,
-      newName,
-    }: {
-      path: string;
-      newName: string;
-    }): Promise<void> => {
+    mutationFn: async ({ path, newName }: { path: string; newName: string }): Promise<void> => {
       return renameNode(path, newName);
     },
     onSuccess: (_, variables) => {
       // Get parent path
-      const parentPath =
-        variables.path.substring(0, variables.path.lastIndexOf('/')) || '/';
+      const parentPath = variables.path.substring(0, variables.path.lastIndexOf('/')) || '/';
       // Invalidate parent directory
       void queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(parentPath),
@@ -320,8 +313,7 @@ export function useFileSystem() {
     renameNodeError: renameNodeMutation.error,
 
     // Utilities
-    invalidateAll: () =>
-      queryClient.invalidateQueries({ queryKey: fileSystemKeys.all }),
+    invalidateAll: () => queryClient.invalidateQueries({ queryKey: fileSystemKeys.all }),
     invalidateDirectory: (path: string) =>
       queryClient.invalidateQueries({
         queryKey: fileSystemKeys.directory(path),

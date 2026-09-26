@@ -185,8 +185,12 @@ it('fills a packed string type from a string constant of its length', () => {
     begin n := K; z := 'abcd'; Show('pqr'); WriteLn(n[2], z[0], z[3]) end.`).getOutput()
   ).toEqual(['pr yad']);
   // Only one of exactly as many characters, as the Language Guide defines it.
-  expect(() => compile("program T; var z: array[1..4] of Char; begin z := 'ab' end.")).toThrow(/Type mismatch/);
-  expect(() => compile("program T; var z: array[0..2] of Char; begin z := 'abcd' end.")).toThrow(/Type mismatch/);
+  expect(() => compile("program T; var z: array[1..4] of Char; begin z := 'ab' end.")).toThrow(
+    /Type mismatch/
+  );
+  expect(() => compile("program T; var z: array[0..2] of Char; begin z := 'abcd' end.")).toThrow(
+    /Type mismatch/
+  );
 });
 
 it('reads hexadecimal integers and adjacent Pascal character-code strings', () => {

@@ -1,6 +1,23 @@
 import { PascalError } from '../errors/PascalError';
-import { EMPTY_SEGMENT, sameShape, shapeBytes, shapeCell, shapeSize, type Bytecode, type SegmentLayout, type ViewShape } from '../codegen/Bytecode';
-import { cellAtByte, decodeBinary, encodeBinary, layoutSize, readBytes, writeBytes, type BinaryCell } from './BinaryCodec';
+import {
+  EMPTY_SEGMENT,
+  sameShape,
+  shapeBytes,
+  shapeCell,
+  shapeSize,
+  type Bytecode,
+  type SegmentLayout,
+  type ViewShape,
+} from '../codegen/Bytecode';
+import {
+  cellAtByte,
+  decodeBinary,
+  encodeBinary,
+  layoutSize,
+  readBytes,
+  writeBytes,
+  type BinaryCell,
+} from './BinaryCodec';
 import type { MemoryAccess } from './FileRuntime';
 import type { Heap, HeapBlock } from './Heap';
 import { BIOS_DATA, VIDEO_TEXT, type LowMemory } from './LowMemory';
@@ -53,11 +70,13 @@ const RAW_SEGMENT = 0xf000;
  * segments, and elsewhere a normalized pointer, as Turbo Pascal's heap
  * gives one. */
 export function splitLinear(linear: number): { segment: number; offset: number } {
-  const within = (segment: number, size: number) => linear >= segment * 16 && linear < segment * 16 + size;
+  const within = (segment: number, size: number) =>
+    linear >= segment * 16 && linear < segment * 16 + size;
   for (const segment of [DATA_SEGMENT, STACK_SEGMENT])
     if (within(segment, 0x10000)) return { segment, offset: linear - segment * 16 };
   if (within(BIOS_DATA >> 4, 0x100)) return { segment: BIOS_DATA >> 4, offset: linear - BIOS_DATA };
-  if (within(VIDEO_TEXT >> 4, 0x8000)) return { segment: VIDEO_TEXT >> 4, offset: linear - VIDEO_TEXT };
+  if (within(VIDEO_TEXT >> 4, 0x8000))
+    return { segment: VIDEO_TEXT >> 4, offset: linear - VIDEO_TEXT };
   return { segment: linear >> 4, offset: linear & 15 };
 }
 /** Ptr(S, O) as an address: linear where S:O is how Seg and Ofs name its
@@ -153,7 +172,9 @@ export interface SpaceHost {
   routine(base: number): number;
   /** Where a frame's bytes start on the stack, which the call recorded. */
   frameLinear(base: number): number;
-  stringCharacter(reference: number): { address: number; index: number; capacity: number } | undefined;
+  stringCharacter(
+    reference: number
+  ): { address: number; index: number; capacity: number } | undefined;
 }
 
 /** Turbo Pascal's memory as the P-machine keeps it. Each variable holds a
@@ -170,7 +191,10 @@ export class AddressSpace {
    * a routine's address: their bytes name them by number instead. */
   private rawPointers: StackValue[] = [];
   private rawIds = new Map<StackValue, number>();
-  private refreshRanges = new WeakMap<Region['refresh'], { part: number; offset: number; from: number; to: number }[]>();
+  private refreshRanges = new WeakMap<
+    Region['refresh'],
+    { part: number; offset: number; from: number; to: number }[]
+  >();
   private dataRegion: Region | undefined;
   private regions = new Map<string, Region>();
   private frameRegions = new Map<number, Region>();
@@ -212,11 +236,22 @@ export class AddressSpace {
     return id < 0 ? [] : (this.host.bytecode.variantRefreshes[id] ?? []);
   }
 
-  private segmentRegion(key: string, target: number, segment: SegmentLayout, linear: number | undefined): Region {
+  private segmentRegion(
+    key: string,
+    target: number,
+    segment: SegmentLayout,
+    linear: number | undefined
+  ): Region {
     let region = this.regions.get(key);
     if (!region) {
       region = {
-        key, target, layout: segment.layout, shape: segment.shape, refresh: this.refreshList(segment.refresh), variantCells: segment.variantCells, variables: true,
+        key,
+        target,
+        layout: segment.layout,
+        shape: segment.shape,
+        refresh: this.refreshList(segment.refresh),
+        variantCells: segment.variantCells,
+        variables: true,
         ...(linear !== undefined ? { linear } : {}),
       };
       this.regions.set(key, region);
@@ -225,17 +260,28 @@ export class AddressSpace {
   }
   /** The data segment: the globals and typed constants. */
   private dataSegment(): Region {
-    this.dataRegion ??= this.segmentRegion('ds', this.host.globalBase, this.host.bytecode.dataSegment, DATA_SEGMENT * 16);
+    this.dataRegion ??= this.segmentRegion(
+      'ds',
+      this.host.globalBase,
+      this.host.bytecode.dataSegment,
+      DATA_SEGMENT * 16
+    );
     return this.dataRegion;
   }
   /** The frames on the stack, innermost first, each with where it lies,
    * until `stop` accepts one. */
-  private frame(stop: (frame: { base: number; linear: number; segment: SegmentLayout }) => boolean):
-    { base: number; routine: number; linear: number; segment: SegmentLayout } | undefined {
+  private frame(
+    stop: (frame: { base: number; linear: number; segment: SegmentLayout }) => boolean
+  ): { base: number; routine: number; linear: number; segment: SegmentLayout } | undefined {
     let { base } = this.host.frame();
     while (base > this.host.globalBase) {
       const routine = this.host.routine(base);
-      const frame = { base, routine, linear: this.host.frameLinear(base), segment: this.host.bytecode.frames[routine] ?? EMPTY_SEGMENT };
+      const frame = {
+        base,
+        routine,
+        linear: this.host.frameLinear(base),
+        segment: this.host.bytecode.frames[routine] ?? EMPTY_SEGMENT,
+      };
       if (stop(frame)) return frame;
       const caller = this.host.caller(base);
       if (caller >= base) break;
@@ -243,13 +289,24 @@ export class AddressSpace {
     }
     return undefined;
   }
-  private frameRegion(frame: { base: number; routine: number; segment: SegmentLayout; linear: number }): Region {
+  private frameRegion(frame: {
+    base: number;
+    routine: number;
+    segment: SegmentLayout;
+    linear: number;
+  }): Region {
     const known = this.frameRegions.get(frame.base);
     if (known?.routine === frame.routine && known.linear === frame.linear) return known;
     const region: Region = {
-      key: `frame:${String(frame.base)}:${String(frame.routine)}:${String(frame.linear)}`, target: frame.base,
-      layout: frame.segment.layout, shape: frame.segment.shape, linear: frame.linear, refresh: this.refreshList(frame.segment.refresh),
-      variantCells: frame.segment.variantCells, routine: frame.routine, variables: true,
+      key: `frame:${String(frame.base)}:${String(frame.routine)}:${String(frame.linear)}`,
+      target: frame.base,
+      layout: frame.segment.layout,
+      shape: frame.segment.shape,
+      linear: frame.linear,
+      refresh: this.refreshList(frame.segment.refresh),
+      variantCells: frame.segment.variantCells,
+      routine: frame.routine,
+      variables: true,
     };
     this.frameRegions.set(frame.base, region);
     return region;
@@ -262,8 +319,13 @@ export class AddressSpace {
     let region = this.blockRegions.get(block);
     if (!region) {
       region = {
-        key: `heap:${String(this.blockCount++)}`, target: block.start, layout: type.layout, shape: type.shape,
-        linear: HEAP_START + block.linear, refresh: type.refresh, variantCells: type.variantCells,
+        key: `heap:${String(this.blockCount++)}`,
+        target: block.start,
+        layout: type.layout,
+        shape: type.shape,
+        linear: HEAP_START + block.linear,
+        refresh: type.refresh,
+        variantCells: type.variantCells,
       };
       this.blockRegions.set(block, region);
     }
@@ -290,17 +352,23 @@ export class AddressSpace {
   }
   /** The region holding a byte of memory, and the byte there. */
   private placeAt(linear: number): Place {
-    const data = DATA_SEGMENT * 16, stack = STACK_SEGMENT * 16, heap = this.host.heap;
+    const data = DATA_SEGMENT * 16,
+      stack = STACK_SEGMENT * 16,
+      heap = this.host.heap;
     if (linear >= data && linear < data + this.host.bytecode.dataSegment.bytes)
       return { region: this.dataSegment(), byte: linear - data };
     if (linear >= stack && linear < stack + 0x10000) {
-      const frame = this.frame((candidate) => linear >= candidate.linear && linear < candidate.linear + candidate.segment.bytes);
+      const frame = this.frame(
+        (candidate) =>
+          linear >= candidate.linear && linear < candidate.linear + candidate.segment.bytes
+      );
       if (frame) return { region: this.frameRegion(frame), byte: linear - frame.linear };
     }
     if (linear >= HEAP_START && linear < HEAP_START + heap.size) {
       const block = heap.blockAtLinear(linear - HEAP_START);
       const region = block && this.blockRegion(block);
-      if (block && region && linear - HEAP_START - block.linear < block.bytes) return { region, byte: linear - HEAP_START - block.linear };
+      if (block && region && linear - HEAP_START - block.linear < block.bytes)
+        return { region, byte: linear - HEAP_START - block.linear };
     }
     return { linear };
   }
@@ -308,7 +376,8 @@ export class AddressSpace {
    * or a linear address. */
   private placeOf(address: number): Place | undefined {
     if (!Number.isFinite(address) || address < 0) return undefined;
-    if (address >= LINEAR_BASE && address < PORT_BASE) return this.placeAt((address - LINEAR_BASE) % MEGABYTE);
+    if (address >= LINEAR_BASE && address < PORT_BASE)
+      return this.placeAt((address - LINEAR_BASE) % MEGABYTE);
     const far = this.farParts(address);
     if (far) return this.placeAt((far.segment * 16 + far.offset) % MEGABYTE);
     if (address >= this.viewBase) {
@@ -323,7 +392,10 @@ export class AddressSpace {
       if (!character) return undefined;
       const place = this.placeOfCell(character.address);
       if (place) return { region: place.region, byte: place.byte + character.index };
-      return { region: this.stringRegion(character.address, character.capacity), byte: character.index };
+      return {
+        region: this.stringRegion(character.address, character.capacity),
+        byte: character.index,
+      };
     }
     return this.placeOfCell(address);
   }
@@ -333,7 +405,14 @@ export class AddressSpace {
     let region = this.regions.get(key);
     if (!region) {
       const cell: BinaryCell = { kind: 'string', bytes: capacity + 1, offset: 0 };
-      region = { key, target: address, layout: [cell], shape: { kind: 'cell', cell }, refresh: [], variantCells: [] };
+      region = {
+        key,
+        target: address,
+        layout: [cell],
+        shape: { kind: 'cell', cell },
+        refresh: [],
+        variantCells: [],
+      };
       this.regions.set(key, region);
     }
     return region;
@@ -404,8 +483,10 @@ export class AddressSpace {
   /** A pointer from its bytes. */
   pointerValue(bits: number): StackValue {
     if (!bits) return 0;
-    const segment = Math.floor(bits / 0x10000) & 0xffff, offset = bits & 0xffff;
-    if (segment === RAW_SEGMENT && offset < this.rawPointers.length) return this.rawPointers[offset] ?? 0;
+    const segment = Math.floor(bits / 0x10000) & 0xffff,
+      offset = bits & 0xffff;
+    if (segment === RAW_SEGMENT && offset < this.rawPointers.length)
+      return this.rawPointers[offset] ?? 0;
     return this.pointer(segment, offset);
   }
 
@@ -414,7 +495,7 @@ export class AddressSpace {
   /** Bytes of memory, from whichever variables and devices hold them. */
   readLinear(linear: number, length: number): Uint8Array {
     const bytes = new Uint8Array(Math.max(0, length));
-    for (let index = 0; index < bytes.length;) {
+    for (let index = 0; index < bytes.length; ) {
       const place = this.placeAt((linear + index) % MEGABYTE);
       if ('linear' in place) {
         bytes[index] = this.host.low.read(place.linear);
@@ -422,13 +503,16 @@ export class AddressSpace {
         continue;
       }
       const count = Math.min(bytes.length - index, layoutSize(place.region.layout) - place.byte);
-      bytes.set(readBytes(this.host.memory, place.region.target, place.region.layout, place.byte, count), index);
+      bytes.set(
+        readBytes(this.host.memory, place.region.target, place.region.layout, place.byte, count),
+        index
+      );
       index += count;
     }
     return bytes;
   }
   writeLinear(linear: number, bytes: Uint8Array): void {
-    for (let index = 0; index < bytes.length;) {
+    for (let index = 0; index < bytes.length; ) {
       const place = this.placeAt((linear + index) % MEGABYTE);
       if ('linear' in place) {
         this.host.low.write(place.linear, bytes[index] ?? 0);
@@ -447,14 +531,23 @@ export class AddressSpace {
       this.host.variants.refresh(region.target + offset, part);
   }
   /** The variant parts of a region whose bytes a change touches. */
-  private refreshesWithin(region: Region, start: number, length: number): { part: number; offset: number }[] {
+  private refreshesWithin(
+    region: Region,
+    start: number,
+    length: number
+  ): { part: number; offset: number }[] {
     if (!region.refresh.length) return [];
     let ranges = this.refreshRanges.get(region.refresh);
     if (!ranges) {
       ranges = region.refresh.map(({ part, offset }) => {
         const info = this.host.bytecode.variantParts[part];
         const from = info ? shapeCell(region.shape, offset + info.shadow)?.byte : undefined;
-        return { part, offset, from: from ?? 0, to: from === undefined ? Infinity : from + (info?.bytes ?? 0) };
+        return {
+          part,
+          offset,
+          from: from ?? 0,
+          to: from === undefined ? Infinity : from + (info?.bytes ?? 0),
+        };
       });
       this.refreshRanges.set(region.refresh, ranges);
     }
@@ -469,7 +562,13 @@ export class AddressSpace {
     if (linear !== undefined) return this.readLinear(linear, length);
     const place = this.placeOf(address);
     if (place && 'region' in place && place.byte + length <= layoutSize(place.region.layout))
-      return readBytes(this.host.memory, place.region.target, place.region.layout, place.byte, length);
+      return readBytes(
+        this.host.memory,
+        place.region.target,
+        place.region.layout,
+        place.byte,
+        length
+      );
     const bytes = new Uint8Array(length);
     bytes.set(encodeBinary(this.host.memory, address, layout).subarray(0, length));
     return bytes;
@@ -498,7 +597,9 @@ export class AddressSpace {
     const linear = this.linearOf(address);
     if (linear !== undefined) return MEGABYTE - linear;
     const place = this.placeOf(address);
-    return place && 'region' in place ? layoutSize(place.region.layout) - place.byte : layoutSize(layout);
+    return place && 'region' in place
+      ? layoutSize(place.region.layout) - place.byte
+      : layoutSize(layout);
   }
 
   // ---------- Views ----------
@@ -516,13 +617,26 @@ export class AddressSpace {
   }
   /** A region shown as its own variables, as @ gives addresses in it. */
   private identity(region: Region): number {
-    region.identity ??= this.viewId(`identity:${region.key}`, () => ({ region, shape: region.shape, start: 0, syncs: [], identity: true }));
+    region.identity ??= this.viewId(`identity:${region.key}`, () => ({
+      region,
+      shape: region.shape,
+      start: 0,
+      syncs: [],
+      identity: true,
+    }));
     return this.viewAddress(region.identity);
   }
   /** A region shown as its own variables, as @ gives addresses in it: a
    * pointer of another type that holds one reaches only its variable. */
   private boundedIdentity(region: Region): number {
-    region.boundedIdentity ??= this.viewId(`bounded:${region.key}`, () => ({ region, shape: region.shape, start: 0, syncs: [], identity: true, bounded: true }));
+    region.boundedIdentity ??= this.viewId(`bounded:${region.key}`, () => ({
+      region,
+      shape: region.shape,
+      start: 0,
+      syncs: [],
+      identity: true,
+      bounded: true,
+    }));
     return this.viewAddress(region.boundedIdentity);
   }
   /** The bytes, in its region, of the variable holding a cell: one of a
@@ -530,14 +644,33 @@ export class AddressSpace {
   private variableBytes(region: Region, cell: number): [number, number] {
     const whole: [number, number] = [0, layoutSize(region.layout)];
     if (!region.variables || region.shape.kind !== 'record') return whole;
-    const field = region.shape.fields.find((candidate) => cell >= candidate.offset && cell < candidate.offset + candidate.cells);
+    const field = region.shape.fields.find(
+      (candidate) => cell >= candidate.offset && cell < candidate.offset + candidate.cells
+    );
     return field ? [field.byte, field.byte + (field.bytes ?? shapeBytes(field.shape))] : whole;
   }
   /** Memory shown as a type from a linear address. */
   private rawView(linear: number, shape: ViewShape, map: number, segment?: number): number {
-    const region: Region = { key: `raw:${String(linear)}`, target: 0, layout: [], shape, linear, refresh: [], variantCells: [] };
-    return this.viewAddress(this.viewId(`raw:${String(linear)}:${String(map)}:${String(segment ?? '')}`,
-      () => ({ region, shape, start: 0, syncs: [], identity: false, raw: true, ...(segment === undefined ? {} : { segment }) })));
+    const region: Region = {
+      key: `raw:${String(linear)}`,
+      target: 0,
+      layout: [],
+      shape,
+      linear,
+      refresh: [],
+      variantCells: [],
+    };
+    return this.viewAddress(
+      this.viewId(`raw:${String(linear)}:${String(map)}:${String(segment ?? '')}`, () => ({
+        region,
+        shape,
+        start: 0,
+        syncs: [],
+        identity: false,
+        raw: true,
+        ...(segment === undefined ? {} : { segment }),
+      }))
+    );
   }
   /** Which view an address lies in, and its cell offset there. */
   private viewAt(address: number): { id: number; view: View; offset: number } | undefined {
@@ -561,7 +694,8 @@ export class AddressSpace {
    * cell wanted. A view of a variable with a place in memory shows the
    * bytes there, so reading past the variable reads what follows it. */
   view(args: number[]): number {
-    const [target = 0, layoutId = 0, map = 0, start = 0, refresh = -1, identity = 0, count = 0] = args;
+    const [target = 0, layoutId = 0, map = 0, start = 0, refresh = -1, identity = 0, count = 0] =
+      args;
     const syncs = Array.from({ length: count }, (_, index) => ({
       base: args[7 + index * 3] ?? 0,
       part: args[8 + index * 3] ?? 0,
@@ -574,17 +708,40 @@ export class AddressSpace {
       if (place) return this.boundedIdentity(place.region) + (cell - place.region.target);
     }
     const place = identity !== 0 ? undefined : this.placeOf(target);
-    if (place && 'linear' in place) return this.rawView(place.linear + start, shape, map, this.farParts(target)?.segment) + (cell - target);
+    if (place && 'linear' in place)
+      return (
+        this.rawView(place.linear + start, shape, map, this.farParts(target)?.segment) +
+        (cell - target)
+      );
     if (place) {
       const key = `view:${place.region.key}:${String(map)}:${String(place.byte + start)}:${JSON.stringify(syncs)}`;
-      return this.viewAddress(this.viewId(key, () => ({ region: place.region, shape, start: place.byte + start, syncs, identity: false })), cell - target);
+      return this.viewAddress(
+        this.viewId(key, () => ({
+          region: place.region,
+          shape,
+          start: place.byte + start,
+          syncs,
+          identity: false,
+        })),
+        cell - target
+      );
     }
     // A variable with no place in memory, such as a temporary: its own bytes.
     const layout = this.host.bytecode.layouts[layoutId] ?? [];
     const key = JSON.stringify(args.slice(0, 7 + count * 3));
     const id = this.viewId(key, () => ({
-      region: { key, target, layout, shape, refresh: this.refreshList(refresh), variantCells: refresh >= 0 ? [[0, Infinity]] : [] },
-      shape, start, syncs, identity: identity !== 0,
+      region: {
+        key,
+        target,
+        layout,
+        shape,
+        refresh: this.refreshList(refresh),
+        variantCells: refresh >= 0 ? [[0, Infinity]] : [],
+      },
+      shape,
+      start,
+      syncs,
+      identity: identity !== 0,
     }));
     return this.viewAddress(id, cell - target);
   }
@@ -614,7 +771,11 @@ export class AddressSpace {
       if (block?.map !== map || block.start !== pointer) {
         const place = this.placeOfCell(pointer);
         if (!place) return pointer;
-        result = this.retypeView(this.identity(place.region) + (pointer - place.region.target), map, shape);
+        result = this.retypeView(
+          this.identity(place.region) + (pointer - place.region.target),
+          map,
+          shape
+        );
         if (!block && place.region !== this.dataRegion) return result;
       }
       if (key >= 0) this.plainRetypes.set(key, result);
@@ -626,18 +787,25 @@ export class AddressSpace {
     if (character && shape.kind === 'cell' && shape.cell.kind === 'char') return pointer;
     const place = this.placeOf(pointer);
     if (!place) return pointer;
-    if ('linear' in place) return this.rawView(place.linear, shape, map, this.farParts(pointer)?.segment);
+    if ('linear' in place)
+      return this.rawView(place.linear, shape, map, this.farParts(pointer)?.segment);
     // A byte where a cell of the region starts is that cell.
     const at = cellAtByte(place.region.layout, place.byte);
     const cell = at && place.region.layout[at.index];
     if (at?.at === place.byte && cell && cell.kind !== 'gap' && !character) {
       const address = place.region.target + (cell.offset ?? at.index);
       if (shapeCell(place.region.shape, address - place.region.target))
-        return this.retypeView(this.identity(place.region) + (address - place.region.target), map, shape);
+        return this.retypeView(
+          this.identity(place.region) + (address - place.region.target),
+          map,
+          shape
+        );
     }
     const region = place.region;
     const key = `retype:${region.key}:${String(place.byte)}:${String(map)}`;
-    return this.viewAddress(this.viewId(key, () => ({ region, shape, start: place.byte, syncs: [], identity: false })));
+    return this.viewAddress(
+      this.viewId(key, () => ({ region, shape, start: place.byte, syncs: [], identity: false }))
+    );
   }
   private retypeView(pointer: number, map: number, shape: ViewShape): number {
     const at = this.viewAt(pointer);
@@ -645,7 +813,8 @@ export class AddressSpace {
     const entry = shapeCell(at.view.shape, at.offset);
     if (!entry) return pointer;
     let byOffset = this.shapeMatches.get(at.id * 65536 + map);
-    if (!byOffset) this.shapeMatches.set(at.id * 65536 + map, (byOffset = new Map<number, boolean>()));
+    if (!byOffset)
+      this.shapeMatches.set(at.id * 65536 + map, (byOffset = new Map<number, boolean>()));
     let matches = byOffset.get(at.offset);
     if (matches === undefined) {
       matches = sameShape(at.view.shape, at.offset, shape);
@@ -654,20 +823,30 @@ export class AddressSpace {
     const { view } = at;
     // Past the variable @ took the address of, the type is a view of bytes
     // that stops where the variable does.
-    const bound = view.bound ?? (view.bounded ? this.variableBytes(view.region, at.offset) : undefined);
-    if (matches && view.bounded && bound && view.start + entry.byte + shapeBytes(shape) > bound[1]) matches = false;
+    const bound =
+      view.bound ?? (view.bounded ? this.variableBytes(view.region, at.offset) : undefined);
+    if (matches && view.bounded && bound && view.start + entry.byte + shapeBytes(shape) > bound[1])
+      matches = false;
     if (matches) {
       // The variable's own cell, unless it lies in a record with variant
       // parts that the type covers only part of: stores into such a record's
       // cases are followed by the rest only when they name its fields, or go
       // through its bytes.
       const end = at.offset + shapeSize(shape);
-      const plain = view.identity &&
-        view.region.variantCells.every(([from, to]) => to <= at.offset || from >= end || (from >= at.offset && to <= end));
+      const plain =
+        view.identity &&
+        view.region.variantCells.every(
+          ([from, to]) => to <= at.offset || from >= end || (from >= at.offset && to <= end)
+        );
       return plain ? view.region.target + at.offset : pointer;
     }
     const id = this.viewId(`retype:${String(at.id)}:${String(at.offset)}:${String(map)}`, () => ({
-      region: view.region, shape, start: view.start + entry.byte, syncs: view.syncs, identity: false, ...(view.raw ? { raw: true } : {}),
+      region: view.region,
+      shape,
+      start: view.start + entry.byte,
+      syncs: view.syncs,
+      identity: false,
+      ...(view.raw ? { raw: true } : {}),
       ...(bound ? { bound } : {}),
     }));
     return this.viewAddress(id);
@@ -694,8 +873,18 @@ export class AddressSpace {
     const direct = this.directCell(view, byte, cell, false);
     if (direct !== undefined) return this.host.memory.read(direct);
     let value: StackValue = 0;
-    decodeBinary({ read: () => 0, write: (_, decoded) => { value = decoded; }, pointerValue: (bits) => this.pointerValue(bits) },
-      0, [{ ...cell, offset: 0 }], this.viewBytes(view, byte, cell.bytes));
+    decodeBinary(
+      {
+        read: () => 0,
+        write: (_, decoded) => {
+          value = decoded;
+        },
+        pointerValue: (bits) => this.pointerValue(bits),
+      },
+      0,
+      [{ ...cell, offset: 0 }],
+      this.viewBytes(view, byte, cell.bytes)
+    );
     return value;
   }
   /** Stores into a cell of a view: encoded into the bytes it shows. A
@@ -710,7 +899,15 @@ export class AddressSpace {
       for (const sync of view.syncs) this.host.variants.sync(sync.base, sync.part, sync.case);
       return true;
     }
-    const bytes = encodeBinary({ read: () => value, write: () => undefined, pointerBits: (pointer) => this.pointerBits(pointer) }, 0, [{ ...cell, offset: 0 }]);
+    const bytes = encodeBinary(
+      {
+        read: () => value,
+        write: () => undefined,
+        pointerBits: (pointer) => this.pointerBits(pointer),
+      },
+      0,
+      [{ ...cell, offset: 0 }]
+    );
     const used = cell.kind === 'string' ? (bytes[0] ?? 0) + 1 : bytes.length;
     this.putViewBytes(view, byte, bytes.subarray(0, used));
     for (const sync of view.syncs) this.host.variants.sync(sync.base, sync.part, sync.case);
@@ -720,24 +917,43 @@ export class AddressSpace {
    * the same type: then a load or store needs no bytes, as a pointer into a
    * GetMem block larger than a PByteArray's elements shows. A store into a
    * variant part's bytes still goes through them, so its cases follow. */
-  private directCell(view: View, byte: number, cell: BinaryCell, store: boolean): number | undefined {
+  private directCell(
+    view: View,
+    byte: number,
+    cell: BinaryCell,
+    store: boolean
+  ): number | undefined {
     if (view.raw) return undefined;
-    const start = view.start + byte, region = view.region;
+    const start = view.start + byte,
+      region = view.region;
     const at = cellAtByte(region.layout, start);
     if (at?.at !== start) return undefined;
     const found = region.layout[at.index]!;
-    if (found.kind !== cell.kind || found.bytes !== cell.bytes || Boolean(found.signed) !== Boolean(cell.signed) ||
-      (found.setByteOffset ?? 0) !== (cell.setByteOffset ?? 0) || found.kind === 'gap') return undefined;
+    if (
+      found.kind !== cell.kind ||
+      found.bytes !== cell.bytes ||
+      Boolean(found.signed) !== Boolean(cell.signed) ||
+      (found.setByteOffset ?? 0) !== (cell.setByteOffset ?? 0) ||
+      found.kind === 'gap'
+    )
+      return undefined;
     this.beyond(view, start, cell.bytes);
-    if (store && region.refresh.length && (region.linear === undefined || this.refreshesWithin(region, start, cell.bytes).length)) return undefined;
+    if (
+      store &&
+      region.refresh.length &&
+      (region.linear === undefined || this.refreshesWithin(region, start, cell.bytes).length)
+    )
+      return undefined;
     return region.target + (found.offset ?? at.index);
   }
   /** Whether bytes from `start` lie outside the variable a view is bound to. */
   private beyond(view: View, start: number, length: number): void {
-    if (view.bound && (start < view.bound[0] || start + length > view.bound[1])) throw new PascalError('Access beyond the variable');
+    if (view.bound && (start < view.bound[0] || start + length > view.bound[1]))
+      throw new PascalError('Access beyond the variable');
   }
   private viewBytes(view: View, byte: number, length: number): Uint8Array {
-    const start = view.start + byte, region = view.region;
+    const start = view.start + byte,
+      region = view.region;
     this.beyond(view, start, length);
     if (view.raw) return this.readLinear((region.linear ?? 0) + start, length);
     if (start >= 0 && start + length <= layoutSize(region.layout))
@@ -746,7 +962,8 @@ export class AddressSpace {
     return this.readLinear(region.linear + start, length);
   }
   private putViewBytes(view: View, byte: number, bytes: Uint8Array): void {
-    const start = view.start + byte, region = view.region;
+    const start = view.start + byte,
+      region = view.region;
     this.beyond(view, start, bytes.length);
     if (view.raw) {
       this.writeLinear((region.linear ?? 0) + start, bytes);
@@ -756,7 +973,8 @@ export class AddressSpace {
       if (region.linear === undefined) {
         // A variable's own bytes: all its variant parts follow.
         writeBytes(this.host.memory, region.target, region.layout, start, bytes);
-        for (const { part, offset } of region.refresh) this.host.variants.refresh(region.target + offset, part);
+        for (const { part, offset } of region.refresh)
+          this.host.variants.refresh(region.target + offset, part);
       } else this.writeRegion(region, start, bytes);
       return;
     }
@@ -782,7 +1000,8 @@ export class AddressSpace {
   blockStart(address: number): number {
     if (address < this.host.cells) return address;
     const linear = this.linearOf(address);
-    const block = linear === undefined ? undefined : this.host.heap.blockAtLinear(linear - HEAP_START);
+    const block =
+      linear === undefined ? undefined : this.host.heap.blockAtLinear(linear - HEAP_START);
     return block && linear === HEAP_START + block.linear ? block.start : address;
   }
   /** A pointer to a byte of the heap, as HeapOrg, HeapPtr and HeapEnd are. */

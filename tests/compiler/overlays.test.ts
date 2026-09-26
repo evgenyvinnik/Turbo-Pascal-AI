@@ -209,14 +209,24 @@ describe('Pointers of another type', () => {
 describe('Reading past the variable through a pointer', () => {
   const failure = (source: string) => {
     const machine = new Machine(compile(source), { maxInstructions: 2_000_000 });
-    expect(() => { machine.run(); }).toThrow(/Access beyond the variable/);
+    expect(() => {
+      machine.run();
+    }).toThrow(/Access beyond the variable/);
     expect(machine.getState()).toBe(MachineState.ERROR);
     return machine.getOutput();
   };
 
   it('is a run-time error rather than the memory that follows', () => {
-    expect(failure(`program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; WriteLn(pl^) end.`)).toEqual([]);
-    expect(failure(`program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; pl^ := 7 end.`)).toEqual([]);
+    expect(
+      failure(
+        `program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; WriteLn(pl^) end.`
+      )
+    ).toEqual([]);
+    expect(
+      failure(
+        `program T; var w, x: Word; pl: ^LongInt; begin w := 1; x := 2; pl := @w; pl^ := 7 end.`
+      )
+    ).toEqual([]);
     expect(
       failure(`program T; type T8 = array[0..7] of Byte; var l, x: LongInt; p: ^T8;
       begin l := 1; x := 5; p := @l; WriteLn(p^[3]); WriteLn(p^[4]) end.`)
@@ -278,8 +288,13 @@ describe('Structure sizes', () => {
       begin FillChar(b, SizeOf(b), 2); c := 5; b[60000] := 3; WriteLn(b[0] + b[59999] + b[60000], ' ', c) end.`)
     ).toEqual(['7 5']);
     // So may a program's code, past 32K instructions.
-    const lines = Array.from({ length: 4000 }, (_, i) => `if a > ${String(i)} then b := b + 1;`).join('\n');
-    expect(output(`program T; var a, b: LongInt; begin a := 5000; b := 0;\n${lines}\nWriteLn(b) end.`)).toEqual(['4000']);
+    const lines = Array.from(
+      { length: 4000 },
+      (_, i) => `if a > ${String(i)} then b := b + 1;`
+    ).join('\n');
+    expect(
+      output(`program T; var a, b: LongInt; begin a := 5000; b := 0;\n${lines}\nWriteLn(b) end.`)
+    ).toEqual(['4000']);
     expect(() => compile('program T; type R = Integer; var r: R; begin end.')).toThrow(
       /Duplicate identifier/
     );

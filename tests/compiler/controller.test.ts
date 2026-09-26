@@ -5,17 +5,20 @@ import { Parser } from '../../src/compiler/parser';
 import { ExecutionController, ExecutionEvent } from '../../src/compiler/runtime/Control';
 import { MachineState } from '../../src/compiler/runtime/Machine';
 
-const controllerFor = (source: string) => new ExecutionController(
-  new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse()),
-  { maxInstructions: 1000 },
-);
+const controllerFor = (source: string) =>
+  new ExecutionController(
+    new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse()),
+    { maxInstructions: 1000 }
+  );
 
 afterEach(() => vi.useRealTimers());
 
 describe('execution controller', () => {
   it('waits for Delay before resuming and does not emit a premature STOP', () => {
     vi.useFakeTimers();
-    const controller = controllerFor("program T; uses Crt; begin WriteLn('before'); Delay(250); WriteLn('after') end.");
+    const controller = controllerFor(
+      "program T; uses Crt; begin WriteLn('before'); Delay(250); WriteLn('after') end."
+    );
     const events: ExecutionEvent[] = [];
     controller.addEventListener((event) => events.push(event));
     controller.run();
@@ -30,7 +33,9 @@ describe('execution controller', () => {
   });
   it('starts from READY, emits input requests, and resumes after input', () => {
     vi.useFakeTimers();
-    const controller = controllerFor('program T; var n: Integer; begin ReadLn(n); WriteLn(n * 2) end.');
+    const controller = controllerFor(
+      'program T; var n: Integer; begin ReadLn(n); WriteLn(n * 2) end.'
+    );
     const events: ExecutionEvent[] = [];
     controller.addEventListener((event) => events.push(event));
     controller.run();
