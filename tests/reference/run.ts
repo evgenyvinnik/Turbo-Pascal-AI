@@ -74,7 +74,10 @@ function localResult(subject: ReferenceCase) {
   }
   let machine: Machine | undefined;
   try {
-    machine = new Machine(bytecode, { maxInstructions: 100_000 });
+    machine = new Machine(bytecode, {
+      maxInstructions: 100_000,
+      programArguments: subject.arguments ?? [],
+    });
     machine.setInput(subject.input ? subject.input.replace(/\n$/, '').split('\n') : []);
     machine.run();
     if (machine.getState() !== MachineState.STOPPED)
@@ -148,7 +151,7 @@ async function compare(subject: ReferenceCase) {
       const run = await new Promise<{ stdout: string; exitCode: number }>((resolve, reject) => {
         const child = execFile(
           executable,
-          [],
+          subject.arguments ?? [],
           { cwd: directory, timeout: 5000, maxBuffer: 1024 * 1024 },
           (error, stdout) => {
             // A nonzero exit is a result to compare, not a failure of the run.
@@ -188,6 +191,7 @@ async function compare(subject: ReferenceCase) {
     sourceHash: createHash('sha256')
       .update(subject.source)
       .update(JSON.stringify(subject.units ?? {}))
+      .update(JSON.stringify(subject.arguments ?? []))
       .digest('hex'),
     expected: subject.reject
       ? 'compile rejection'
@@ -234,7 +238,7 @@ try {
     sourceHashEnd,
     sourceChangedDuringRun: sourceHashStart !== sourceHashEnd,
     scope:
-      'Portable language semantics, typed input and text files; compares output lines with normalized line endings, and exit codes. Excludes DOS/hardware, Real48 ABI and unsupported dialect extensions.',
+      'Portable language semantics, command-line arguments, typed input and text files; compares output lines with normalized line endings, and exit codes. Excludes DOS/hardware, Real48 ABI and unsupported dialect extensions.',
     passed: results.filter((result) => result.passed).length,
     failed: results.filter((result) => !result.passed).length,
     results,

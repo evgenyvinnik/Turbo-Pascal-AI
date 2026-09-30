@@ -16,8 +16,10 @@ import {
 import { useDebugStore } from '@stores/debugStore';
 import { bufferText } from '@stores/desktopStore';
 import { useProgramScreenStore } from '@stores/programScreenStore';
+import { useIdeStore } from '@stores/ideStore';
 import { decodeDosText } from '@compiler/encoding';
 import { programDisk as disk, persistProgramFiles } from './programFiles';
+import { parseProgramParameters } from './programParameters';
 export { virtualFiles, readVirtualFile, writeVirtualFile } from './programFiles';
 
 interface Session {
@@ -546,6 +548,7 @@ export function startProgram(
     maxInstructions: 5_000_000,
     fileSystem: disk,
     onSound: sound,
+    programArguments: parseProgramParameters(useIdeStore.getState().programParameters),
   });
   machine.reset();
   const source = useDesktopStore.getState().buffers[bufferId];

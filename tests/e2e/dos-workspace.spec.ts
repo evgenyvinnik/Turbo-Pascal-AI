@@ -28,6 +28,14 @@ test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 regi
   // bytes and the debugger's register/disassembly output after reloading the IDE.
   await page.keyboard.type('type x86test.txt', { delay: 60 });
   await page.keyboard.press('Enter');
+  // DOSBox emits DEBUG's writes to the transcript even while redirecting them.
+  // A register value alone can appear before Q closes the redirected file.
+  // Wait for a subsequent shell command to finish before saving the drive.
+  await page.keyboard.type('echo debug-finished', { delay: 60 });
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('DOS output')).toContainText(/(?:^|\n)debug-finished\r?\n/, {
+    timeout: 20_000,
+  });
   await expect(page.getByLabel('DOS output')).toContainText('AX=1236', { timeout: 20_000 });
   await workspace.getByRole('button', { name: 'Return to IDE', exact: true }).click();
   await expect(workspace).toBeHidden({ timeout: 20_000 });
