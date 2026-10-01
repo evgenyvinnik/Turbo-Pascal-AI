@@ -10,6 +10,7 @@ import { memoryCases } from './memory-corpus';
 import { systemCases } from './system-corpus';
 import { diagnosticCases } from './diagnostic-corpus';
 import { stringCases } from './string-corpus';
+import { defined } from '../../src/utils/defined';
 /** Portable TP-mode programs, checked against an independent Free Pascal run. */
 export interface ReferenceCase {
   name: string;
@@ -163,7 +164,11 @@ export const rejectedCases: ReferenceCase[] = [
     'overlapping-case-labels',
     'var n:Integer;begin n:=2;case n of 1..3:WriteLn(1);3..5:WriteLn(2)end end.',
   ],
-].map(([name, body]) => ({ name: name!, source: `program T;${String(body)}`, reject: true }));
+].map(([name, body]) => ({
+  name: defined(name),
+  source: `program T;${String(body)}`,
+  reject: true,
+}));
 
 /** Independent expected results use JS sorting/set operations, not Pascal VM code. */
 export function generatedCases(count = 32): ReferenceCase[] {

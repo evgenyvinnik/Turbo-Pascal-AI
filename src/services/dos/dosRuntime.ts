@@ -1,5 +1,6 @@
 import type { CommandInterface, Emulators, InitFsEntry } from 'emulators';
 import { bytesToString, dosPath, stringToBytes, type DosFiles } from './dosFiles';
+import { defined } from '../../utils/defined';
 
 const assetRoot = `${import.meta.env.BASE_URL}dos/`;
 let loading: Promise<Emulators> | null = null;
@@ -188,7 +189,7 @@ export async function typeDosCommand(ci: CommandInterface, command: string): Pro
   for (const character of `${command}\n`) {
     const index = shifted.indexOf(character);
     const shift = index >= 0 || /[A-Z]/.test(character);
-    const base = index >= 0 ? plain[index]! : character;
+    const base = index >= 0 ? defined(plain[index]) : character;
     const key = character === '\n' ? 257 : base.toUpperCase().charCodeAt(0);
     if (shift) ci.sendKeyEvent(340, true);
     ci.sendKeyEvent(key, true);

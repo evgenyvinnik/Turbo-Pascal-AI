@@ -37,6 +37,7 @@ import {
 } from './AddressSpace';
 import { Heap, type BlockType } from './Heap';
 import { LowMemory, Ports } from './LowMemory';
+import { defined } from '../../utils/defined';
 
 /** How many 8086 instructions an asm block runs before the machine lets
  * the rest of the program, and the page, have a turn. */
@@ -243,7 +244,7 @@ export class Machine {
 
     // Copy typed constants to the beginning of dstore
     for (let i = 0; i < bytecode.typedConstants.length; i++) {
-      this.dstore[i] = bytecode.typedConstants[i]!;
+      this.dstore[i] = defined(bytecode.typedConstants[i]);
     }
     this.pc = bytecode.startAddress;
     this.mp = bytecode.typedConstants.length;
@@ -347,7 +348,7 @@ export class Machine {
     // Re-initialize dstore
     this.dstore.fill(0);
     for (let i = 0; i < this.bytecode.typedConstants.length; i++) {
-      this.dstore[i] = this.bytecode.typedConstants[i]!;
+      this.dstore[i] = defined(this.bytecode.typedConstants[i]);
     }
     // The System unit's variables start again with their own values.
     for (const standard of this.bytecode.standardVariables)
@@ -407,7 +408,7 @@ export class Machine {
     )
       this.timerTick();
 
-    const instruction = this.bytecode.istore[this.pc]!;
+    const instruction = defined(this.bytecode.istore[this.pc]);
     const opcode = inst.getOpcode(instruction);
     const p = inst.getOperand1(instruction);
     const q = inst.getOperand2(instruction);
@@ -1363,7 +1364,7 @@ export class Machine {
     if (procedureIndex === (InternalProcedure.STORE_C_STRING as number)) {
       const text = String(args[0] ?? '').slice(0, Math.max(0, Number(args[2]))),
         address = Number(args[1]);
-      for (let at = 0; at < text.length; at++) this.poke(address + at, text[at]!);
+      for (let at = 0; at < text.length; at++) this.poke(address + at, defined(text[at]));
       this.poke(address + text.length, '\0');
       return;
     }
@@ -1445,7 +1446,7 @@ export class Machine {
         for (;;) {
           const line = this.input[this.inputPos];
           if (line === undefined) break;
-          while (this.inputColumn < line.length && /[ \t]/.test(line[this.inputColumn]!))
+          while (this.inputColumn < line.length && /[ \t]/.test(defined(line[this.inputColumn])))
             this.inputColumn++;
           if (!seekEof || this.inputColumn < line.length) break;
           this.inputPos++;
@@ -1690,8 +1691,15 @@ export class Machine {
     if (this.config.maxInstructions > 0 && this.instructionCount > this.config.maxInstructions)
       throw new PascalError('Maximum instruction count exceeded');
     const suspend = (key = false) => {
-      this.assemblyResume = { pc: call, sp: this.sp, state: cpu.state, key };
+      const resume: NonNullable<Machine['assemblyResume']> = {
+        pc: call,
+        sp: this.sp,
+        state: cpu.state,
+        key,
+      };
+      this.assemblyResume = resume;
       this.pc = call;
+      return resume;
     };
     switch (outcome.kind) {
       case 'done':
@@ -1717,11 +1725,11 @@ export class Machine {
         return;
       case 'interrupt': {
         const registers = cpu.registerValues();
-        suspend();
-        const mp = this.callInterrupt(outcome.number, call, registers)!;
-        this.assemblyResume!.handler = {
+        const resume = suspend();
+        const mp = defined(this.callInterrupt(outcome.number, call, registers));
+        resume.handler = {
           mp,
-          parameters: this.handler(outcome.number)!.parameters,
+          parameters: defined(this.handler(outcome.number)).parameters,
           registers,
         };
       }

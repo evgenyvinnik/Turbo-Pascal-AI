@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { defined } from '../../src/utils/defined';
 
 /** Where a compiler reports an error. */
 export interface ErrorSite {
@@ -12,8 +13,8 @@ export function firstError(output: string): { message: string; site?: ErrorSite 
   const located = /^(.+?)\((\d+)(?:,\d+)?\) (?:Error|Fatal): (.*)$/m.exec(output);
   if (located)
     return {
-      message: located[3]!.trim(),
-      site: { file: path.basename(located[1]!), line: Number(located[2]) },
+      message: defined(located[3]).trim(),
+      site: { file: path.basename(defined(located[1])), line: Number(located[2]) },
     };
   return {
     message: (

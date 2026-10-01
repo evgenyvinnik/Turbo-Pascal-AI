@@ -1,15 +1,16 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
+import { defined } from '../../src/utils/defined';
 
 /** Import actual browser Files through the same drop event as a user. */
 async function importProject(ide: Ide, files: Record<string, string>, main: string): Promise<void> {
   const entries = [
     ...Object.entries(files).filter(([name]) => name !== main),
-    [main, files[main]!],
+    [main, defined(files[main])],
   ];
   await ide.page.evaluate((sources) => {
     const transfer = new DataTransfer();
-    for (const [name, source] of sources) transfer.items.add(new File([source!], name!));
+    for (const [name, source] of sources) transfer.items.add(new File([source ?? ''], name ?? ''));
     document.dispatchEvent(
       new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
     );

@@ -1,6 +1,7 @@
 import { PascalError } from '../errors/PascalError';
 import type { ViewShape } from '../codegen/Bytecode';
 import type { BinaryCell } from './BinaryCodec';
+import { defined } from '../../utils/defined';
 
 /** What a heap block holds: its type's cells and bytes, as New and a typed
  * GetMem give it. A block without one keeps a value per byte. */
@@ -80,7 +81,7 @@ export class Heap {
     let address: number;
     const free = this.freeCells.findIndex((block) => block.words >= words);
     if (free >= 0) {
-      const block = this.freeCells[free]!;
+      const block = defined(this.freeCells[free]);
       address = block.address;
       block.address += words;
       block.words -= words;
@@ -175,8 +176,8 @@ export class Heap {
     this.freeCells.push({ address: block.start, words: block.words });
     this.freeCells.sort((a, b) => a.address - b.address);
     for (let i = 0; i + 1 < this.freeCells.length; ) {
-      const first = this.freeCells[i]!,
-        next = this.freeCells[i + 1]!;
+      const first = defined(this.freeCells[i]),
+        next = defined(this.freeCells[i + 1]);
       if (first.address + first.words === next.address) {
         first.words += next.words;
         this.freeCells.splice(i + 1, 1);
@@ -189,7 +190,7 @@ export class Heap {
   private takeBytes(size: number): number {
     const free = this.freeBytes.findIndex((range) => range.bytes >= size);
     if (free >= 0) {
-      const range = this.freeBytes[free]!;
+      const range = defined(this.freeBytes[free]);
       const at = range.at;
       range.at += size;
       range.bytes -= size;
@@ -205,8 +206,8 @@ export class Heap {
     this.freeBytes.push({ at, bytes: size });
     this.freeBytes.sort((a, b) => a.at - b.at);
     for (let i = 0; i + 1 < this.freeBytes.length; ) {
-      const first = this.freeBytes[i]!,
-        next = this.freeBytes[i + 1]!;
+      const first = defined(this.freeBytes[i]),
+        next = defined(this.freeBytes[i + 1]);
       if (first.at + first.bytes === next.at) {
         first.bytes += next.bytes;
         this.freeBytes.splice(i + 1, 1);

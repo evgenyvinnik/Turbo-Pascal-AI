@@ -5,6 +5,7 @@ import { type HelpLink } from './helpTopics';
 import { getHelpDocument, helpLinkAt, identifierTopic, REFERENCE_TOPICS } from './helpDocuments';
 import { REFERENCE_HELP_EMPHASIS } from './referenceHelp';
 import type { DialogDef } from '@components/Dialogs/types';
+import { defined } from '../../utils/defined';
 
 const TOPICS = REFERENCE_TOPICS;
 const CONTEXTS: Record<string, string> = {
@@ -145,8 +146,8 @@ export function navigateHelp(key: string, pageSize: number): boolean {
               ? (position + links.length - 1) % links.length
               : Math.max(0, links.filter((entry) => entry.row < cursor).length - 1)
           ];
-    cursor = entry!.row;
-    selectedCol = entry!.col;
+    cursor = defined(entry).row;
+    selectedCol = defined(entry).col;
   } else if (key === 'ArrowLeft' || key === 'ArrowRight') {
     const links = document.links.filter((entry) => entry.row === cursor);
     const current = Math.max(

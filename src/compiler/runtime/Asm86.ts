@@ -6,6 +6,7 @@ import type { MemoryAccess } from './FileRuntime';
 import type { TextConsole } from './TextConsole';
 import type { GraphicsRuntime } from './GraphicsRuntime';
 import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
+import { defined } from '../../utils/defined';
 
 /** An address the P-machine can follow: a variable's cells, a byte offset
  * into them, and the layout that turns those cells into bytes. */
@@ -186,7 +187,7 @@ const SHIFTED = '!@#$%^&*()_+QWERTYUIOP{}ASDFGHJKL:"~|ZXCVBNM<>?';
 const UNSHIFTED = "1234567890-=qwertyuiop[]asdfghjkl;'`\\zxcvbnm,./";
 export function scanCode(char: string): number {
   const shifted = SHIFTED.indexOf(char);
-  return SCAN_CODES[shifted >= 0 ? UNSHIFTED[shifted]! : char.toLowerCase()] ?? 0;
+  return SCAN_CODES[shifted >= 0 ? defined(UNSHIFTED[shifted]) : char.toLowerCase()] ?? 0;
 }
 
 const prefixCache = new WeakMap<BinaryCell[], number[]>();
@@ -194,7 +195,7 @@ function prefixes(layout: BinaryCell[]): number[] {
   let sums = prefixCache.get(layout);
   if (!sums) {
     sums = [0];
-    for (const cell of layout) sums.push(sums.at(-1)! + cell.bytes);
+    for (const cell of layout) sums.push(defined(sums.at(-1)) + cell.bytes);
     prefixCache.set(layout, sums);
   }
   return sums;
@@ -228,7 +229,7 @@ export class Asm86 {
     const instructions = this.block.instructions;
     while (this.state.index < instructions.length) {
       if (this.executed >= budget) return { kind: 'yield' };
-      const instruction = instructions[this.state.index]!;
+      const instruction = defined(instructions[this.state.index]);
       try {
         const outcome = this.execute(instruction);
         if (outcome) return outcome;
@@ -326,8 +327,13 @@ export class Asm86 {
     }
   }
   private variable(index: number): AsmPointer {
-    const variable = this.block.variables[index]!;
-    return { base: this.args[index]!, layout: variable.layout, offset: 0, target: variable.target };
+    const variable = defined(this.block.variables[index]);
+    return {
+      base: defined(this.args[index]),
+      layout: variable.layout,
+      offset: 0,
+      target: variable.target,
+    };
   }
   /** Where a memory operand points. */
   private address(operand: Extract<Operand, { kind: 'memory' | 'address' }>): AsmPointer {
@@ -366,10 +372,9 @@ export class Asm86 {
     return isPointer(value) ? value : this.absolute(segment, value);
   }
   private readAbsolute(pointer: AsmPointer, size: number): number {
-    const bytes = this.linearHost().readLinear!(
-      ((pointer.linear ?? 0) + pointer.offset) % 0x100000,
-      size
-    );
+    const host = this.linearHost();
+    if (!host.readLinear) throw new Error('Internal error: no linear memory');
+    const bytes = host.readLinear(((pointer.linear ?? 0) + pointer.offset) % 0x100000, size);
     let value = 0;
     for (let i = size - 1; i >= 0; i--) value = value * 256 + (bytes[i] ?? 0);
     return value;
@@ -387,18 +392,18 @@ export class Asm86 {
     const layout = pointer.layout;
     if (!layout) throw new PascalError('The type this address points at is not known');
     const sums = prefixes(layout);
-    if (pointer.offset < 0 || pointer.offset + size > sums.at(-1)!)
+    if (pointer.offset < 0 || pointer.offset + size > defined(sums.at(-1)))
       throw new PascalError('Memory access outside the variable');
     let first = 0;
-    while (sums[first + 1]! <= pointer.offset) first++;
+    while (defined(sums[first + 1]) <= pointer.offset) first++;
     let last = first;
-    while (sums[last + 1]! < pointer.offset + size) last++;
-    return { first, last, start: sums[first]!, sums, layout };
+    while (defined(sums[last + 1]) < pointer.offset + size) last++;
+    return { first, last, start: defined(sums[first]), sums, layout };
   }
   private read(pointer: AsmPointer, size: number): AsmValue {
     if (pointer.linear !== undefined) return this.readAbsolute(pointer, size);
     const { first, last, start, layout } = this.span(pointer, size);
-    const cell = layout[first]!;
+    const cell = defined(layout[first]);
     // A pointer cell reads as an address the assembler can follow, with
     // segment zero.
     if (cell.kind === 'pointer' && first === last) {
@@ -425,11 +430,13 @@ export class Asm86 {
         bytes[i] = number & 0xff;
         number = Math.floor(number / 256);
       }
-      this.linearHost().writeLinear!(((pointer.linear ?? 0) + pointer.offset) % 0x100000, bytes);
+      const host = this.linearHost();
+      if (!host.writeLinear) throw new Error('Internal error: no linear memory');
+      host.writeLinear(((pointer.linear ?? 0) + pointer.offset) % 0x100000, bytes);
       return;
     }
     const { first, last, start, layout } = this.span(pointer, size);
-    const cell = layout[first]!;
+    const cell = defined(layout[first]);
     if (cell.kind === 'pointer' && first === last) {
       const within = pointer.offset - start;
       if (within >= 2) return;
@@ -603,26 +610,26 @@ export class Asm86 {
         return undefined;
       case 'mov': {
         const size = this.size(instruction);
-        this.set(a!, size, this.get(b!, size));
+        this.set(defined(a), size, this.get(defined(b), size));
         return undefined;
       }
       case 'xchg': {
         const size = this.size(instruction);
-        const first = this.get(a!, size),
-          second = this.get(b!, size);
-        this.set(a!, size, second);
-        this.set(b!, size, first);
+        const first = this.get(defined(a), size),
+          second = this.get(defined(b), size);
+        this.set(defined(a), size, second);
+        this.set(defined(b), size, first);
         return undefined;
       }
       case 'lea':
         if (b?.kind !== 'memory') throw new PascalError('Memory operand expected');
-        this.set(a!, 2, this.address(b));
+        this.set(defined(a), 2, this.address(b));
         return undefined;
       case 'les':
       case 'lds': {
         if (b?.kind !== 'memory') throw new PascalError('Memory operand expected');
         const pointer = this.address(b);
-        this.set(a!, 2, this.read(pointer, 2));
+        this.set(defined(a), 2, this.read(pointer, 2));
         this.setRegister(mnemonic === 'les' ? 'es' : 'ds', 0);
         return undefined;
       }
@@ -632,11 +639,11 @@ export class Asm86 {
       case 'sbb':
       case 'cmp': {
         const size = this.size(instruction);
-        const x = this.get(a!, size),
-          y = this.get(b!, size);
+        const x = this.get(defined(a), size),
+          y = this.get(defined(b), size);
         const moved = this.pointerArithmetic(mnemonic, x, y);
         if (moved !== undefined) {
-          if (mnemonic !== 'cmp') this.set(a!, size, moved);
+          if (mnemonic !== 'cmp') this.set(defined(a), size, moved);
           return undefined;
         }
         const carry = (mnemonic === 'adc' || mnemonic === 'sbb') && this.flag('cf') ? 1 : 0;
@@ -644,19 +651,22 @@ export class Asm86 {
           mnemonic === 'add' || mnemonic === 'adc'
             ? this.add(this.number(x), this.number(y), carry, size)
             : this.subtract(this.number(x), this.number(y), carry, size);
-        if (mnemonic !== 'cmp') this.set(a!, size, result);
+        if (mnemonic !== 'cmp') this.set(defined(a), size, result);
         return undefined;
       }
       case 'inc':
       case 'dec': {
         const size = this.size(instruction);
-        const value = this.get(a!, size);
+        const value = this.get(defined(a), size);
         if (isPointer(value)) {
-          this.set(a!, size, { ...value, offset: value.offset + (mnemonic === 'inc' ? 1 : -1) });
+          this.set(defined(a), size, {
+            ...value,
+            offset: value.offset + (mnemonic === 'inc' ? 1 : -1),
+          });
           return undefined;
         }
         this.set(
-          a!,
+          defined(a),
           size,
           mnemonic === 'inc'
             ? this.add(value, 1, 0, size, true)
@@ -666,14 +676,18 @@ export class Asm86 {
       }
       case 'neg': {
         const size = this.size(instruction);
-        const value = this.number(this.get(a!, size));
-        this.set(a!, size, this.subtract(0, value, 0, size));
+        const value = this.number(this.get(defined(a), size));
+        this.set(defined(a), size, this.subtract(0, value, 0, size));
         this.setFlag('cf', value !== 0);
         return undefined;
       }
       case 'not': {
         const size = this.size(instruction);
-        this.set(a!, size, ~this.number(this.get(a!, size)) & (size === 1 ? 0xff : 0xffff));
+        this.set(
+          defined(a),
+          size,
+          ~this.number(this.get(defined(a), size)) & (size === 1 ? 0xff : 0xffff)
+        );
         return undefined;
       }
       case 'and':
@@ -681,11 +695,11 @@ export class Asm86 {
       case 'xor':
       case 'test': {
         const size = this.size(instruction);
-        const x = this.get(a!, size),
-          y = this.get(b!, size);
+        const x = this.get(defined(a), size),
+          y = this.get(defined(b), size);
         const kept = this.pointerArithmetic(mnemonic, x, y);
         if (kept !== undefined) {
-          if (mnemonic !== 'test') this.set(a!, size, kept);
+          if (mnemonic !== 'test') this.set(defined(a), size, kept);
           return undefined;
         }
         const p = this.number(x),
@@ -694,7 +708,7 @@ export class Asm86 {
           mnemonic === 'or' ? p | q : mnemonic === 'xor' ? p ^ q : p & q,
           size
         );
-        if (mnemonic !== 'test') this.set(a!, size, result);
+        if (mnemonic !== 'test') this.set(defined(a), size, result);
         return undefined;
       }
       case 'shl':
@@ -709,7 +723,7 @@ export class Asm86 {
         const bits = size * 8,
           mask = size === 1 ? 0xff : 0xffff;
         const count = (b ? this.number(this.get(b, 1)) : 1) & 0x1f;
-        let value = this.number(this.get(a!, size));
+        let value = this.number(this.get(defined(a), size));
         if (count === 0) return undefined;
         let carry = this.flag('cf');
         for (let i = 0; i < count; i++) {
@@ -747,7 +761,7 @@ export class Asm86 {
               break;
           }
         }
-        this.set(a!, size, value);
+        this.set(defined(a), size, value);
         this.setFlag('cf', carry);
         const top = ((value >> (bits - 1)) & 1) === 1;
         if (['shl', 'sal', 'rol', 'rcl'].includes(mnemonic)) this.setFlag('of', top !== carry);
@@ -762,16 +776,16 @@ export class Asm86 {
           // The 286's IMUL reg, r/m, immediate.
           const size = 2;
           const product =
-            this.signed(this.number(this.get(c ? b : a!, size)), 2) *
+            this.signed(this.number(this.get(c ? b : defined(a), size)), 2) *
             this.signed(this.number(this.get(c ?? b, size)), 2);
-          this.set(a!, size, product & 0xffff);
+          this.set(defined(a), size, product & 0xffff);
           const overflow = product !== this.signed(product & 0xffff, 2);
           this.setFlag('cf', overflow);
           this.setFlag('of', overflow);
           return undefined;
         }
         const size = this.size(instruction);
-        const source = this.number(this.get(a!, size));
+        const source = this.number(this.get(defined(a), size));
         if (size === 1) {
           const al = this.number(this.register('al'));
           const product =
@@ -797,7 +811,7 @@ export class Asm86 {
       case 'div':
       case 'idiv': {
         const size = this.size(instruction);
-        const divisor = this.number(this.get(a!, size));
+        const divisor = this.number(this.get(defined(a), size));
         const signedDivision = mnemonic === 'idiv';
         const d = signedDivision ? this.signed(divisor, size) : divisor;
         if (d === 0) throw new PascalError('Division by zero');
@@ -819,7 +833,8 @@ export class Asm86 {
             : signedDivision
               ? [-32768, 32767]
               : [0, 65535];
-        if (quotient < limit[0]! || quotient > limit[1]!) throw new PascalError('Division by zero');
+        if (quotient < defined(limit[0]) || quotient > defined(limit[1]))
+          throw new PascalError('Division by zero');
         if (size === 1) r.ax = ((remainder & 0xff) << 8) | (quotient & 0xff);
         else {
           r.ax = quotient & 0xffff;
@@ -834,13 +849,14 @@ export class Asm86 {
         r.dx = this.number(r.ax) & 0x8000 ? 0xffff : 0;
         return undefined;
       case 'push': {
-        const value = a!.kind === 'immediate' ? a!.value & 0xffff : this.get(a!, 2);
+        const operand = defined(a, 'operand');
+        const value = operand.kind === 'immediate' ? operand.value & 0xffff : this.get(operand, 2);
         this.state.stack.push(value);
         return undefined;
       }
       case 'pop': {
         if (!this.state.stack.length) throw new PascalError('Stack underflow in assembler');
-        this.set(a!, 2, this.state.stack.pop()!);
+        this.set(defined(a), 2, defined(this.state.stack.pop()));
         return undefined;
       }
       case 'pushf':
@@ -924,7 +940,7 @@ export class Asm86 {
           this.state.index = this.block.instructions.length;
           return undefined;
         }
-        this.state.index = this.state.calls.pop()!;
+        this.state.index = defined(this.state.calls.pop());
         return undefined;
       case 'xlat':
       case 'xlatb': {
@@ -935,18 +951,20 @@ export class Asm86 {
         );
         return undefined;
       }
-      case 'in':
+      case 'in': {
+        const target = defined(a, 'operand');
         this.setRegister(
-          a!.kind === 'register' ? a!.register : 'al',
-          this.port(this.number(this.get(b!, 2)))
+          target.kind === 'register' ? target.register : 'al',
+          this.port(this.number(this.get(defined(b), 2)))
         );
         return undefined;
+      }
       case 'out':
-        this.out(this.number(this.get(a!, 2)), this.number(this.get(b!, 1)));
+        this.out(this.number(this.get(defined(a), 2)), this.number(this.get(defined(b), 1)));
         return undefined;
       case 'int':
         return this.interrupt(
-          a?.kind === 'immediate' ? a.value & 0xff : this.number(this.get(a!, 1))
+          a?.kind === 'immediate' ? a.value & 0xff : this.number(this.get(defined(a), 1))
         );
       case 'into':
         return this.flag('of') ? this.interrupt(4) : undefined;

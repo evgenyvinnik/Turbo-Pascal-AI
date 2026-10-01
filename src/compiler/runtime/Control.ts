@@ -8,6 +8,7 @@
 import { Machine, MachineState, StackValue, MachineConfig } from './Machine';
 import { Bytecode } from '../codegen/Bytecode';
 import { inst } from '../types/inst';
+import { defined } from '../../utils/defined';
 
 /**
  * Breakpoint definition
@@ -413,7 +414,7 @@ export class ExecutionController {
     if (pc < 0 || pc >= this.bytecode.istore.length) {
       return '';
     }
-    const instruction = this.bytecode.istore[pc]!;
+    const instruction = defined(this.bytecode.istore[pc]);
     return inst.disassemble(instruction);
   }
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { defined } from '../../src/utils/defined';
 
 const diskKey = 'turbo-pascal.virtual-disk.v1';
 async function diskWith(initial: Record<string, string>, failWrites = false) {
@@ -27,7 +28,7 @@ describe('atomic browser file imports', () => {
       ])
     );
     expect(disk.programDisk.snapshot()).toEqual({ 'KEPT.BIN': 'expanded' });
-    expect(JSON.parse(disk.values.get(diskKey)!)).toEqual({ 'KEPT.BIN': 'expanded' });
+    expect(JSON.parse(defined(disk.values.get(diskKey)))).toEqual({ 'KEPT.BIN': 'expanded' });
   });
 
   it('keeps all DOS changes uncommitted when browser storage rejects them', async () => {
@@ -51,7 +52,9 @@ describe('atomic browser file imports', () => {
       ])
     ).rejects.toThrow(/Browser storage/);
     expect(disk.programDisk.snapshot()).toEqual({ 'KEPT.TXT': 'previous contents' });
-    expect(JSON.parse(disk.values.get(diskKey)!)).toEqual({ 'KEPT.TXT': 'previous contents' });
+    expect(JSON.parse(defined(disk.values.get(diskKey)))).toEqual({
+      'KEPT.TXT': 'previous contents',
+    });
   });
 
   it('counts existing disk contents when enforcing the eight MiB capacity', async () => {

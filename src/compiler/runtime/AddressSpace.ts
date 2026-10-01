@@ -23,6 +23,7 @@ import type { Heap, HeapBlock } from './Heap';
 import { BIOS_DATA, VIDEO_TEXT, type LowMemory } from './LowMemory';
 import type { StackValue } from './Machine';
 import type { VariantRuntime } from './Variants';
+import { defined } from '../../utils/defined';
 
 /** The segments Turbo Pascal's program lives in: CSeg, DSeg and SSeg, and
  * the heap from HeapOrg to HeapEnd. */
@@ -930,7 +931,7 @@ export class AddressSpace {
       region = view.region;
     const at = cellAtByte(region.layout, start);
     if (at?.at !== start) return undefined;
-    const found = region.layout[at.index]!;
+    const found = defined(region.layout[at.index]);
     if (
       found.kind !== cell.kind ||
       found.bytes !== cell.bytes ||

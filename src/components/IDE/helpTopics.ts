@@ -1,4 +1,5 @@
 import { COMPILER_ERROR_MESSAGES, RUNTIME_ERROR_MESSAGES } from '../../compiler/errors/diagnostics';
+import { defined } from '../../utils/defined';
 
 export interface HelpLink {
   row: number;
@@ -19,8 +20,13 @@ export function helpTopic(title: string, paragraphs: string[]): HelpTopic {
   for (const paragraph of paragraphs) {
     const markup = /^\[\[([^|]+)\|([^\]]+)\]\]$/.exec(paragraph);
     if (markup) {
-      links.push({ row: lines.length, col: 1, length: markup[1]!.length, target: markup[2]! });
-      lines.push(` ${markup[1]!}`);
+      links.push({
+        row: lines.length,
+        col: 1,
+        length: defined(markup[1]).length,
+        target: defined(markup[2]),
+      });
+      lines.push(` ${defined(markup[1])}`);
     } else if (!paragraph || /^ /.test(paragraph)) lines.push(paragraph);
     else {
       let remaining = paragraph;
@@ -642,7 +648,7 @@ const routines: [string, string, string[], string[]][] = [
 ];
 for (const [name, syntax, body, related] of routines)
   HELP_TOPICS[name] = topic(
-    `${name[0]!.toUpperCase()}${name.slice(1)} routine`,
+    `${defined(name[0]).toUpperCase()}${name.slice(1)} routine`,
     [syntax, '', ...body],
     related.map((name) => link(name, name))
   );
@@ -810,7 +816,7 @@ const unitDescriptions: Record<string, string> = {
 };
 for (const [name, body] of Object.entries(unitDescriptions))
   HELP_TOPICS[name] = topic(
-    `${name[0]!.toUpperCase()}${name.slice(1)} unit`,
+    `${defined(name[0]).toUpperCase()}${name.slice(1)} unit`,
     [body],
     [
       link('Standard units', 'units'),

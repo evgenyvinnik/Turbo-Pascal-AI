@@ -1,2 +1,3 @@
-export { GraphicsCanvas, createGraphicsAPI, EGA_PALETTE } from './GraphicsCanvas';
-export type { GraphicsAPI } from './GraphicsCanvas';
+export { GraphicsCanvas } from './GraphicsCanvas';
+export { createGraphicsAPI, EGA_PALETTE } from './graphicsApi';
+export type { GraphicsAPI } from './graphicsApi';

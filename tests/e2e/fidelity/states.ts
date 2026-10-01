@@ -1,5 +1,6 @@
 import type { Ide } from '../ide';
 import type { Ignore } from './grid';
+import { defined } from '../../../src/utils/defined';
 
 /**
  * Each state drives the IDE into the situation one reference screenshot of
@@ -62,7 +63,7 @@ export const STATES: FidelityState[] = [
   ).map(
     ([name, key]): FidelityState => ({
       name: `menu-${name}`,
-      ref: `Context-menu-${name[0]!.toUpperCase()}${name.slice(1)}`,
+      ref: `Context-menu-${defined(name[0]).toUpperCase()}${name.slice(1)}`,
       drive: (ide) => ide.openMenu(key),
       ignore: [TITLE],
     })

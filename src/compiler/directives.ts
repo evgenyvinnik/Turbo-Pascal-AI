@@ -1,5 +1,6 @@
 import { PascalError } from './errors/PascalError';
 import type { Node } from './parser/Node';
+import { defined } from '../utils/defined';
 
 export interface CompilerSwitches {
   completeBooleanEvaluation: boolean;
@@ -124,8 +125,8 @@ export function applyCompilerSwitches(comment: string, switches: CompilerSwitche
   const text = comment.trim().replace(/^\$/, '');
   if (!/^[A-Z]\s*[+-](?:\s*,\s*[A-Z]\s*[+-])*\s*$/i.test(text)) return false;
   for (const option of text.split(',')) {
-    const match = /^\s*([A-Z])\s*([+-])\s*$/i.exec(option)!;
-    const key = switchNames[match[1]!.toUpperCase()];
+    const match = defined(/^\s*([A-Z])\s*([+-])\s*$/i.exec(option));
+    const key = switchNames[defined(match[1]).toUpperCase()];
     if (key) switches[key] = match[2] === '+';
   }
   return true;
@@ -206,17 +207,19 @@ export function preprocessPascal(
         const directive =
           /^\$(IFDEF|IFNDEF|IFOPT|ELSE|ENDIF|DEFINE|UNDEF|INCLUDE|I)\b\s*(.*?)\s*$/is.exec(body);
         if (directive && !/^\$I\s*[+-]/i.test(body)) {
-          const command = directive[1]!.toUpperCase(),
-            value = directive[2]!.trim();
+          const command = defined(directive[1]).toUpperCase(),
+            value = defined(directive[2]).trim();
           if (['IFDEF', 'IFNDEF', 'IFOPT'].includes(command)) {
             if (frames.length >= 64)
               fail('Too many nested conditional directives', file, startLine);
             let condition: boolean;
             if (command === 'IFOPT') {
               const match = /^([A-Z])\s*([+-])$/i.exec(value);
-              if (!match || !switchNames[match[1]!.toUpperCase()])
+              if (!match || !switchNames[defined(match[1]).toUpperCase()])
                 fail(`Invalid compiler switch in IFOPT: ${value}`, file, startLine);
-              condition = switches[switchNames[match[1]!.toUpperCase()]!] === (match[2] === '+');
+              condition =
+                switches[defined(switchNames[defined(match[1]).toUpperCase()])] ===
+                (match[2] === '+');
             } else {
               if (!/^[A-Z_]\w*$/i.test(value)) fail('Conditional symbol expected', file, startLine);
               condition = defines.has(value.toUpperCase()) === (command === 'IFDEF');
@@ -231,7 +234,7 @@ export function preprocessPascal(
             active = frame.parent && !frame.condition;
           } else if (command === 'ENDIF') {
             if (frames.length <= initialDepth) fail('Unexpected ENDIF directive', file, startLine);
-            active = frames.pop()!.parent;
+            active = defined(frames.pop()).parent;
           } else if (active && ['DEFINE', 'UNDEF'].includes(command)) {
             if (!/^[A-Z_]\w*$/i.test(value)) fail('Conditional symbol expected', file, startLine);
             if (command === 'DEFINE') defines.add(value.toUpperCase());

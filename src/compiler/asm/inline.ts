@@ -7,6 +7,7 @@ import {
   type SegmentRegister,
   type WordRegister,
 } from './types';
+import { defined } from '../../utils/defined';
 
 /** One byte of inline code. A variable reference marks its first byte:
  * the offset it stands for is that variable's, plus a displacement. */
@@ -111,7 +112,7 @@ export function decodeInline(
   };
   const register = (index: number, wide: boolean): Operand => ({
     kind: 'register',
-    register: wide ? WORD_REGISTERS[index]! : BYTE_REGISTERS[index]!,
+    register: wide ? defined(WORD_REGISTERS[index]) : defined(BYTE_REGISTERS[index]),
   });
   /** The current instruction's segment prefix, as ES: is. */
   let override: SegmentRegister | undefined;
@@ -132,7 +133,7 @@ export function decodeInline(
         ...(override ? { segment: override } : {}),
       };
     }
-    const bases = MEMORY_BASES[rmField]!;
+    const bases = defined(MEMORY_BASES[rmField]);
     const address = mod === 0 ? { displacement: 0 } : reference(mod === 1 ? 1 : 2);
     // [bp+x] is the local variable or parameter x.
     const registers =
@@ -188,17 +189,19 @@ export function decodeInline(
       const modrm = byte();
       const toRegister = (opcode & 2) !== 0;
       const operands = [rm(modrm, wide), register((modrm >> 3) & 7, wide)];
-      emit(ALU[opcode >> 3]!, toRegister ? operands.reverse() : operands);
+      emit(defined(ALU[opcode >> 3]), toRegister ? operands.reverse() : operands);
     } else if (opcode < 0x40 && (opcode & 7) < 6) {
-      emit(ALU[opcode >> 3]!, [register(0, wide), immediate(wide)]);
+      emit(defined(ALU[opcode >> 3]), [register(0, wide), immediate(wide)]);
     } else if ([0x06, 0x0e, 0x16, 0x1e].includes(opcode)) {
-      emit('push', [{ kind: 'register', register: SEGMENT_REGISTERS[opcode >> 3]! }]);
+      emit('push', [{ kind: 'register', register: defined(SEGMENT_REGISTERS[opcode >> 3]) }]);
     } else if ([0x07, 0x17, 0x1f].includes(opcode)) {
-      emit('pop', [{ kind: 'register', register: SEGMENT_REGISTERS[opcode >> 3]! }]);
+      emit('pop', [{ kind: 'register', register: defined(SEGMENT_REGISTERS[opcode >> 3]) }]);
     } else if (opcode >= 0x40 && opcode < 0x60) {
-      emit(['inc', 'dec', 'push', 'pop'][(opcode - 0x40) >> 3]!, [register(opcode & 7, true)]);
+      emit(defined(['inc', 'dec', 'push', 'pop'][(opcode - 0x40) >> 3]), [
+        register(opcode & 7, true),
+      ]);
     } else if (SIMPLE[opcode]) {
-      emit(SIMPLE[opcode]!);
+      emit(defined(SIMPLE[opcode]));
     } else if (opcode === 0x68 || opcode === 0x6a) {
       emit('push', [
         { kind: 'immediate', value: opcode === 0x68 ? word() : signed8(byte()) & 0xffff },
@@ -213,12 +216,12 @@ export function decodeInline(
       ]);
     } else if (opcode >= 0x70 && opcode < 0x80) {
       const displacement = signed8(byte());
-      jump(JCC[opcode - 0x70]!, displacement);
+      jump(defined(JCC[opcode - 0x70]), displacement);
     } else if (opcode >= 0x80 && opcode <= 0x83) {
       const modrm = byte();
       const target = rm(modrm, opcode !== 0x80 && opcode !== 0x82);
       const value = opcode === 0x81 ? word() : opcode === 0x83 ? signed8(byte()) & 0xffff : byte();
-      emit(ALU[(modrm >> 3) & 7]!, [target, { kind: 'immediate', value }]);
+      emit(defined(ALU[(modrm >> 3) & 7]), [target, { kind: 'immediate', value }]);
     } else if (opcode >= 0x84 && opcode <= 0x8b) {
       const modrm = byte();
       const operands = [rm(modrm, wide), register((modrm >> 3) & 7, wide)];
@@ -226,7 +229,10 @@ export function decodeInline(
       emit(mnemonic, opcode >= 0x8a ? operands.reverse() : operands);
     } else if (opcode === 0x8c || opcode === 0x8e) {
       const modrm = byte();
-      const segment: Operand = { kind: 'register', register: SEGMENT_REGISTERS[(modrm >> 3) & 3]! };
+      const segment: Operand = {
+        kind: 'register',
+        register: defined(SEGMENT_REGISTERS[(modrm >> 3) & 3]),
+      };
       const other = rm(modrm, true);
       emit('mov', opcode === 0x8c ? [other, segment] : [segment, other]);
     } else if (opcode === 0x8d || opcode === 0xc4 || opcode === 0xc5) {
@@ -264,7 +270,7 @@ export function decodeInline(
           : opcode >= 0xd2
             ? [{ kind: 'register', register: 'cl' }]
             : [];
-      emit(SHIFTS[(modrm >> 3) & 7]!, [target, ...count]);
+      emit(defined(SHIFTS[(modrm >> 3) & 7]), [target, ...count]);
     } else if (opcode === 0xc2 || opcode === 0xca) {
       word();
       emit(opcode === 0xc2 ? 'ret' : 'retf');
@@ -276,7 +282,7 @@ export function decodeInline(
       emit('int', [{ kind: 'immediate', value: byte() }]);
     } else if (opcode >= 0xe0 && opcode <= 0xe3) {
       const displacement = signed8(byte());
-      jump(['loopne', 'loope', 'loop', 'jcxz'][opcode - 0xe0]!, displacement);
+      jump(defined(['loopne', 'loope', 'loop', 'jcxz'][opcode - 0xe0]), displacement);
     } else if (opcode === 0xe4 || opcode === 0xe5) {
       emit('in', [register(0, wide), { kind: 'immediate', value: byte() }]);
     } else if (opcode === 0xe6 || opcode === 0xe7) {
@@ -294,13 +300,13 @@ export function decodeInline(
       const operation = (modrm >> 3) & 7;
       if (operation === 1) unsupported(`Machine code ${hex(opcode)}`);
       if (operation === 0) emit('test', [target, immediate(wide)]);
-      else emit(['', '', 'not', 'neg', 'mul', 'imul', 'div', 'idiv'][operation]!, [target]);
+      else emit(defined(['', '', 'not', 'neg', 'mul', 'imul', 'div', 'idiv'][operation]), [target]);
     } else if (opcode === 0xfe || opcode === 0xff) {
       const modrm = byte();
       const operation = (modrm >> 3) & 7;
       if (operation > 1 && !(opcode === 0xff && operation === 6))
         unsupported(`Machine code ${hex(opcode)}`);
-      emit(['inc', 'dec', '', '', '', '', 'push'][operation]!, [rm(modrm, wide)]);
+      emit(defined(['inc', 'dec', '', '', '', '', 'push'][operation]), [rm(modrm, wide)]);
     } else unsupported(`Machine code ${hex(opcode)}`);
   }
   // Jumps land on instructions, or just past the last.

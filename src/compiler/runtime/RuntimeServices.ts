@@ -16,6 +16,7 @@ import type { ViewShape } from '../codegen/Bytecode';
 import type { BlockType } from './Heap';
 import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
 import { compReal, parseReal } from '../codegen/float80';
+import { defined } from '../../utils/defined';
 
 const BYTE_CELL: BinaryCell = { kind: 'integer', bytes: 1, signed: false };
 
@@ -155,7 +156,7 @@ export class RuntimeServices {
   private putCString(address: number, text: string): void {
     if (!address) throw new PascalError('Nil pointer dereference');
     for (let index = 0; index < text.length; index++)
-      this.host.write(address + index, text[index]!);
+      this.host.write(address + index, defined(text[index]));
     this.host.write(address + text.length, '\0');
   }
   /** Turbo Pascal's Strings unit. Comparisons give the difference of the

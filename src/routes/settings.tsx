@@ -4,6 +4,6 @@ export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 });
 
-function SettingsPage() {
+export function SettingsPage() {
   return <div>Settings Page - Coming Soon</div>;
 }

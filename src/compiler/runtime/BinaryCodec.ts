@@ -8,6 +8,7 @@ import {
 } from '../codegen/float80';
 import type { StackValue } from './Machine';
 import type { MemoryAccess } from './FileRuntime';
+import { defined } from '../../utils/defined';
 
 export interface BinaryCell {
   /** A value's kind; a `gap` is bytes between variables, which hold
@@ -49,7 +50,7 @@ export function encodeBinary(
       for (const member of JSON.parse(String(value)) as number[]) {
         const byte = (member >>> 3) - baseByte;
         if (member >= 0 && byte >= 0 && byte < cell.bytes)
-          bytes[offset + byte]! |= 1 << (member & 7);
+          bytes[offset + byte] = (bytes[offset + byte] ?? 0) | (1 << (member & 7));
       }
     } else if (cell.kind === 'comp') {
       bytes.set(encodeComp(value instanceof Float80 ? value : Number(value)), offset);
@@ -75,7 +76,7 @@ export function encodeBinary(
           bytes[offset + 1 + i] = fraction % 256;
           fraction = Math.floor(fraction / 256);
         }
-        if (number < 0) bytes[offset + 5]! |= 128;
+        if (number < 0) bytes[offset + 5] = (bytes[offset + 5] ?? 0) | 128;
       }
     } else {
       const number = Math.trunc(
@@ -180,7 +181,7 @@ function cellStarts(layout: BinaryCell[]): Float64Array {
   if (!sums) {
     sums = new Float64Array(layout.length + 1);
     layout.forEach((cell, index) => {
-      sums![index + 1] = sums![index]! + cell.bytes;
+      defined(sums)[index + 1] = defined(defined(sums)[index]) + cell.bytes;
     });
     starts.set(layout, sums);
   }
@@ -188,7 +189,7 @@ function cellStarts(layout: BinaryCell[]): Float64Array {
 }
 /** How many bytes a layout holds. */
 export function layoutSize(layout: BinaryCell[]): number {
-  return cellStarts(layout)[layout.length]!;
+  return defined(cellStarts(layout)[layout.length]);
 }
 /** The cell of a layout that holds a byte, and the byte it starts at. */
 export function cellAtByte(
@@ -196,15 +197,15 @@ export function cellAtByte(
   byte: number
 ): { index: number; at: number } | undefined {
   const sums = cellStarts(layout);
-  if (byte < 0 || byte >= sums[layout.length]!) return undefined;
+  if (byte < 0 || byte >= defined(sums[layout.length])) return undefined;
   let low = 0,
     high = layout.length - 1;
   while (low < high) {
     const middle = (low + high + 1) >> 1;
-    if (sums[middle]! <= byte) low = middle;
+    if (defined(sums[middle]) <= byte) low = middle;
     else high = middle - 1;
   }
-  return { index: low, at: sums[low]! };
+  return { index: low, at: defined(sums[low]) };
 }
 const placed = new WeakMap<BinaryCell[], BinaryCell[]>();
 /** A layout whose every cell says where it lies, so a slice of it does. */
@@ -226,12 +227,12 @@ function span(
   length: number
 ): { cells: BinaryCell[]; from: number } {
   const sums = cellStarts(layout);
-  if (start < 0 || start + length > sums[layout.length]!)
+  if (start < 0 || start + length > defined(sums[layout.length]))
     throw new PascalError('Access beyond the variable');
   if (length <= 0) return { cells: [], from: start };
-  const first = cellAtByte(layout, start)!.index,
-    last = cellAtByte(layout, start + length - 1)!.index;
-  return { cells: withOffsets(layout).slice(first, last + 1), from: sums[first]! };
+  const first = defined(cellAtByte(layout, start)).index,
+    last = defined(cellAtByte(layout, start + length - 1)).index;
+  return { cells: withOffsets(layout).slice(first, last + 1), from: defined(sums[first]) };
 }
 
 /** Some of a variable's bytes, encoding only the cells that hold them. */

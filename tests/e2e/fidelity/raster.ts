@@ -74,11 +74,11 @@ export async function compareRaster(
           if (!masked) compared += 1;
           if (different) {
             pixels += 1;
-            counts[row * 80 + col]! += 1;
+            counts[row * 80 + col] = (counts[row * 80 + col] ?? 0) + 1;
           }
-          image.data[offset] = different ? 255 : reference.data[referenceOffset]! / 3;
-          image.data[offset + 1] = different ? 48 : reference.data[referenceOffset + 1]! / 3;
-          image.data[offset + 2] = different ? 96 : reference.data[referenceOffset + 2]! / 3;
+          image.data[offset] = different ? 255 : (reference.data[referenceOffset] ?? 0) / 3;
+          image.data[offset + 1] = different ? 48 : (reference.data[referenceOffset + 1] ?? 0) / 3;
+          image.data[offset + 2] = different ? 96 : (reference.data[referenceOffset + 2] ?? 0) / 3;
           image.data[offset + 3] = 255;
         }
       }
@@ -100,7 +100,7 @@ export async function compareRaster(
             .map((n) => (n ? '#' : '.'))
             .join('')
         ),
-        image: canvas.toDataURL('image/png').split(',')[1]!,
+        image: canvas.toDataURL('image/png').split(',')[1] ?? '',
       };
     },
     {

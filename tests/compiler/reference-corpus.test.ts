@@ -5,6 +5,7 @@ import { Parser } from '../../src/compiler/parser';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 import { PascalError } from '../../src/compiler/errors';
 import { generatedCases, referenceCases } from '../reference/corpus';
+import { defined } from '../../src/utils/defined';
 
 describe('independent Pascal reference corpus', () => {
   it.each(referenceCases)(
@@ -41,7 +42,7 @@ describe('independent Pascal reference corpus', () => {
   );
 
   it('keeps generated set coverage diverse, including overlapping and disjoint inputs', () => {
-    const cardinalities = generatedCases().map((subject) => subject.output![2]!);
+    const cardinalities = generatedCases().map((subject) => defined(defined(subject.output)[2]));
     const intersections = cardinalities.map((line) => Number(line.split(',')[1]));
     expect(new Set(cardinalities).size).toBeGreaterThan(8);
     expect(intersections.some((count) => count === 0)).toBe(true);

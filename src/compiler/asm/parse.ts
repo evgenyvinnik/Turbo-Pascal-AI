@@ -1,5 +1,6 @@
 import { PascalError } from '../errors/PascalError';
 import { BYTE_REGISTERS, SEGMENT_REGISTERS, WORD_REGISTERS, type Register } from './types';
+import { defined } from '../../utils/defined';
 
 /** An expression in an operand, before names are resolved. */
 export type AsmExpression =
@@ -43,7 +44,7 @@ function tokenize(text: string, line: number): Token[] {
   const tokens: Token[] = [];
   let at = 0;
   while (at < text.length) {
-    const char = text[at]!;
+    const char = defined(text[at]);
     if (/\s/.test(char)) {
       at++;
       continue;
@@ -134,11 +135,11 @@ class StatementParser {
     private line: number
   ) {}
   private get current(): Token {
-    return this.tokens[this.at]!;
+    return defined(this.tokens[this.at]);
   }
   /** The current token's kind, read afresh after the parser moves on. */
   private kind(): Token['kind'] {
-    return this.tokens[this.at]!.kind;
+    return defined(this.tokens[this.at]).kind;
   }
   private is(text: string): boolean {
     return this.current.kind !== 'string' && this.current.text.toLowerCase() === text;
@@ -207,7 +208,7 @@ class StatementParser {
       size === undefined
     ) {
       const register = this.current.text.toLowerCase() as Register;
-      const next = this.tokens[this.at + 1]!;
+      const next = defined(this.tokens[this.at + 1]);
       if (next.kind === 'end' || next.text === ',') {
         this.at++;
         return { kind: 'register', register };
@@ -301,7 +302,7 @@ class StatementParser {
     }
     if (token.kind === 'number') {
       this.at++;
-      return { kind: 'number', value: token.value! };
+      return { kind: 'number', value: defined(token.value) };
     }
     if (token.kind === 'string') {
       this.at++;
@@ -316,7 +317,7 @@ class StatementParser {
       this.at++;
       const path = [token.text];
       while (this.is('.') && this.tokens[this.at + 1]?.kind === 'name') {
-        path.push(this.tokens[this.at + 1]!.text);
+        path.push(defined(this.tokens[this.at + 1]).text);
         this.at += 2;
       }
       return { kind: 'name', path };

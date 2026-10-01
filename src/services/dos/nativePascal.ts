@@ -3,6 +3,7 @@ import { useIdeStore } from '../../stores/ideStore';
 import { programDisk } from '../../components/IDE/programFiles';
 import { dosPath, type DosFiles } from './dosFiles';
 import { closeDosSession, openDosSession, useDosStore } from './dosSession';
+import { defined } from '../../utils/defined';
 
 export function nativePascalBatch(
   path: string,
@@ -13,10 +14,7 @@ export function nativePascalBatch(
   const source = dosPath(path).replaceAll('/', '\\');
   if (!/\.(pas|pp)$/i.test(source))
     throw new Error('Save the source with a .PAS or .PP extension first.');
-  const name = source
-    .split('\\')
-    .at(-1)!
-    .replace(/\.(pas|pp)$/i, '');
+  const name = defined(source.split('\\').at(-1)).replace(/\.(pas|pp)$/i, '');
   if (name.length > 8) throw new Error('Native DOS compilation requires an 8.3 source filename.');
   return [
     '@echo off',

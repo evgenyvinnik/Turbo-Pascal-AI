@@ -44,7 +44,7 @@ bun run test:visual
 # Refresh the pixel snapshot baselines
 bun run test:e2e:update
 
-# Lint (fails on errors and on more warnings than the --max-warnings cap)
+# Lint (fails on any error or warning)
 bun run lint
 
 # Format code, and check it as CI does

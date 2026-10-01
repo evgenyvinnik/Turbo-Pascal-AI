@@ -20,6 +20,7 @@ import { useIdeStore } from '@stores/ideStore';
 import { decodeDosText } from '@compiler/encoding';
 import { programDisk as disk, persistProgramFiles } from './programFiles';
 import { parseProgramParameters } from './programParameters';
+import { defined } from '../../utils/defined';
 export { virtualFiles, readVirtualFile, writeVirtualFile } from './programFiles';
 
 interface Session {
@@ -148,7 +149,7 @@ export function resumeProgram(action: DebugAction, bufferId?: string, targetLine
   }
   if (
     Object.values(useDesktopStore.getState().buffers).some((candidate) => {
-      const original = current!.sources[sourcePath(candidate.path)];
+      const original = defined(current).sources[sourcePath(candidate.path)];
       return original !== undefined && original !== bufferText(candidate);
     })
   ) {

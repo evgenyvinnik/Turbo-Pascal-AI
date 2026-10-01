@@ -471,7 +471,7 @@ Ctrl+Break does, with exit code 255.
 ```bash
 bun run typecheck       # TypeScript, including the tests
 bun run format:check    # Prettier, over src and tests (`bun run format` fixes)
-bun run lint            # ESLint: no errors, and no more warnings than its cap
+bun run lint            # ESLint: no errors and no warnings
 bun run test -- --run   # Vitest unit tests once (plain `bun run test` watches)
 bun run test:reference  # Independent Free Pascal comparison (requires fpc)
 bun run fpc-suite:fetch # Download Free Pascal's own test suite (pinned release)
@@ -566,9 +566,9 @@ Contributions are welcome.
 3. Make your changes
 4. Run `bun run format`, `bun run typecheck`, `bun run lint` and
    `bun run test -- --run`, and `bun run test:reference` if you change the
-   compiler. CI rejects unformatted code and any rise in lint warnings; when
-   you remove warnings, lower the `--max-warnings` cap in `package.json` to
-   match. `git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the
+   compiler. CI rejects unformatted code and any lint warning. Where a value
+   is certain but its type does not say so, write `defined(value)` from
+   `src/utils/defined.ts`, which checks, rather than `value!`. `git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the
    formatting-only commits from `git blame`.
 5. Submit a pull request
 

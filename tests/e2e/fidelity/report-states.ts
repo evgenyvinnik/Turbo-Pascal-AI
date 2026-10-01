@@ -1,5 +1,6 @@
 import type { Ide } from '../ide';
 import { STATES, type FidelityState } from './states';
+import { defined } from '../../../src/utils/defined';
 
 export interface ReportState extends FidelityState {
   /** A related current screen is useful evidence, but is not equivalent coverage. */
@@ -609,7 +610,7 @@ REPORT_STATES.push(
       ref,
       note: 'The current context-help topic is opened from the corresponding dialog. Original documentation text and its wrapping are compared without exclusions.',
       drive: async (ide) => {
-        const base = REPORT_STATES.find((state) => state.name === source)!;
+        const base = defined(REPORT_STATES.find((state) => state.name === source));
         await base.drive(ide);
         await ide.press('F1');
         await ide.waitForDialog('Turbo Help');

@@ -5,6 +5,7 @@
  * a directive, and scanning stops at the first line not starting with `{`.
  * Names are uppercased; a directive without `=` has the value ''.
  */
+import { defined } from '../../src/utils/defined';
 export function readHeader(source: string): Map<string, string> {
   const directives = new Map<string, string>();
   for (const raw of source.replace(/^\uFEFF/, '').split(/\r?\n/)) {
@@ -14,7 +15,7 @@ export function readHeader(source: string): Map<string, string> {
     const body = line.slice(1).trimStart();
     if (!body.startsWith('%')) continue;
     const match = /^%([A-Za-z]+)\s*(?:=([^}]*))?/.exec(body);
-    if (match) directives.set(match[1]!.toUpperCase(), (match[2] ?? '').trim());
+    if (match) directives.set(defined(match[1]).toUpperCase(), (match[2] ?? '').trim());
   }
   return directives;
 }

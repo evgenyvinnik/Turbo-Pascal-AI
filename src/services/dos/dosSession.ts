@@ -13,6 +13,7 @@ import {
   type DosFiles,
 } from './dosFiles';
 import { DOS_EXIT_SIGNAL, readDosFiles, startDosRuntime, typeDosCommand } from './dosRuntime';
+import { defined } from '../../utils/defined';
 
 interface DosState {
   visible: boolean;
@@ -119,9 +120,9 @@ export async function openDosSession(
       if (rgba) pixels.set(rgba.subarray(0, pixels.length));
       else
         for (let i = 0, j = 0; i < source.length && j < pixels.length; i += 3, j += 4) {
-          pixels[j] = source[i]!;
-          pixels[j + 1] = source[i + 1]!;
-          pixels[j + 2] = source[i + 2]!;
+          pixels[j] = defined(source[i]);
+          pixels[j + 1] = defined(source[i + 1]);
+          pixels[j + 2] = defined(source[i + 2]);
           pixels[j + 3] = 255;
         }
       useDosStore.setState({
@@ -245,7 +246,7 @@ export function syncDosFiles(): Promise<number> {
     if (!machine && !pendingFiles) return 0;
     useDosStore.setState({ status: 'saving', error: null });
     try {
-      const result = machine ? await readDosFiles(machine) : pendingFiles!;
+      const result = machine ? await readDosFiles(machine) : defined(pendingFiles);
       const count = commitDosFiles(result);
       useDosStore.setState({ status: machine ? 'running' : 'closed' });
       return count;

@@ -10,6 +10,7 @@ import type { AsmBlock } from '../asm/types';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { Float80 } from './float80';
 import { DEFAULT_MEMORY_SIZES, type MemorySizes } from '../directives';
+import { defined } from '../../utils/defined';
 
 /** How a type's cells lie in its bytes: one cell, an array of elements that
  * are `cells` cells and `bytes` bytes each, or a record's fields, each at a
@@ -58,7 +59,7 @@ function fieldAt(shape: RecordShape, offset: number): RecordShape['fields'][numb
     high = fields.length - 1;
   while (low < high) {
     const middle = (low + high + 1) >> 1;
-    if (fields[middle]!.offset <= offset) low = middle;
+    if (defined(fields[middle]).offset <= offset) low = middle;
     else high = middle - 1;
   }
   const field = fields[low];
@@ -343,7 +344,7 @@ export class Bytecode {
    * @param operand2 - The new value for operand2
    */
   setOperand2(address: number, operand2: number): void {
-    const instruction = this.istore[address]!;
+    const instruction = defined(this.istore[address]);
     const newInstruction = inst.make(
       inst.getOpcode(instruction),
       inst.getOperand1(instruction),
@@ -412,7 +413,7 @@ export class Bytecode {
   printIstore(): string {
     const lines: string[] = [];
     for (let address = 0; address < this.istore.length; address++) {
-      const instruction = this.istore[address]!;
+      const instruction = defined(this.istore[address]);
       let line =
         this.rightAlign(address, 4) + ': ' + this.leftAlign(inst.disassemble(instruction), 11);
       const comment = this.comments[address];
@@ -452,7 +453,7 @@ export class Bytecode {
    * @returns The encoded instruction
    */
   getInstruction(address: number): number {
-    return this.istore[address]!;
+    return defined(this.istore[address]);
   }
 
   /**
@@ -469,7 +470,7 @@ export class Bytecode {
    * @returns The constant value
    */
   getConstant(index: number): number | string | boolean | null | Float80 {
-    return this.constants[index]!;
+    return defined(this.constants[index]);
   }
 
   /**

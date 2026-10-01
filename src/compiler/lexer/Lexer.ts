@@ -3,6 +3,7 @@ import { PascalError } from '../errors/PascalError';
 import { Stream } from './Stream';
 import { Token } from './Token';
 import { encodeDosText } from '../encoding';
+import { defined } from '../../utils/defined';
 
 /**
  * Lexer for Pascal source code
@@ -181,7 +182,7 @@ export class Lexer {
       if (ch === null) {
         // Push back what we read and return null
         for (let j = chars.length - 1; j >= 0; j--) {
-          this.stream.pushBack(chars[j]!);
+          this.stream.pushBack(defined(chars[j]));
         }
         return null;
       }
@@ -193,7 +194,7 @@ export class Lexer {
 
     // Push back all characters in reverse order
     for (let i = chars.length - 1; i >= 0; i--) {
-      this.stream.pushBack(chars[i]!);
+      this.stream.pushBack(defined(chars[i]));
     }
 
     return result;
@@ -484,7 +485,7 @@ export class Lexer {
       if (ch === null) {
         // Push back what we read
         for (let j = chars.length - 1; j >= 0; j--) {
-          this.stream.pushBack(chars[j]!);
+          this.stream.pushBack(defined(chars[j]));
         }
         return false;
       }
@@ -492,7 +493,7 @@ export class Lexer {
       if (ch !== symbol[i]) {
         // Push back what we read
         for (let j = chars.length - 1; j >= 0; j--) {
-          this.stream.pushBack(chars[j]!);
+          this.stream.pushBack(defined(chars[j]));
         }
         return false;
       }

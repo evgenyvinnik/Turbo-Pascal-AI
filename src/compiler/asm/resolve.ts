@@ -10,6 +10,7 @@ import {
   type SegmentRegister,
   type WordRegister,
 } from './types';
+import { defined } from '../../utils/defined';
 
 /** What a name in an operand means. A variable is identified by `key`, so
  * each is passed to the block once. */
@@ -277,7 +278,7 @@ export function assemble(
         case 'number':
           return { constant: expression.value };
         case 'name': {
-          const first = expression.path[0]!.toLowerCase();
+          const first = defined(expression.path[0]).toLowerCase();
           if (first.startsWith('@') && first !== '@result' && expression.path.length === 1)
             return { constant: 0, label: first };
           const name = context.resolve(expression.path, at);
@@ -391,7 +392,7 @@ export function assemble(
       if (value.label) {
         const target = labels.get(value.label);
         if (target === undefined) fail(`Unknown label "${value.label}"`);
-        return { kind: 'label', target: target! };
+        return { kind: 'label', target: defined(target) };
       }
       if (value.variable && value.address) {
         return {
@@ -440,7 +441,8 @@ export function assemble(
       );
       if (
         registers.length === 2 &&
-        registerSize(registers[0]!.register) !== registerSize(registers[1]!.register)
+        registerSize(defined(registers[0]).register) !==
+          registerSize(defined(registers[1]).register)
       )
         fail('Operand size mismatch');
     }

@@ -2,6 +2,7 @@ import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { StackValue } from './Machine';
 import type { FileRuntime, MemoryAccess } from './FileRuntime';
 import { DIRECTORY, type VirtualFileSystem } from './VirtualFileSystem';
+import { defined } from '../../utils/defined';
 
 const HIDDEN = 0x02,
   SYSTEM = 0x04,
@@ -115,7 +116,7 @@ export class DosUnit {
         // The P-machine cannot load another program: DOS answers as it does
         // for a Turbo Pascal program whose heap took all memory.
         const path = text(args[0]);
-        const found = path.toUpperCase() === ENVIRONMENT[0]![1] || this.exists(path);
+        const found = path.toUpperCase() === defined(ENVIRONMENT[0])[1] || this.exists(path);
         return { dosError: found ? 8 : 2 };
       }
       case 325:

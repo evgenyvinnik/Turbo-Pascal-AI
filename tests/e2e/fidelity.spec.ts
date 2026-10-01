@@ -7,6 +7,7 @@ import { diffGrids, formatReport, ourGrid, refGrid } from './fidelity/grid';
 import { STATES } from './fidelity/states';
 import { REPORT_STATES } from './fidelity/report-states';
 import { compareRaster, rasterReport, type RasterMask } from './fidelity/raster';
+import { defined } from '../../src/utils/defined';
 
 /**
  * Cell-attribute comparison against the Turbo Pascal 7.1 reference gallery.
@@ -68,7 +69,7 @@ test.describe('exact gallery pixels', () => {
     'menu-help',
   ];
   for (const name of names) {
-    const state = STATES.find((candidate) => candidate.name === name)!;
+    const state = defined(STATES.find((candidate) => candidate.name === name));
     test(name, async ({ page }, testInfo) => {
       const refFile = path.join(refDir, `${state.ref}.png`);
       test.skip(
@@ -160,7 +161,7 @@ test.describe('exact gallery pixels', () => {
 
   for (const name of ['address-not-found', 'procedure-not-found']) {
     test(`${name} uses the original error dialog`, async ({ page }, testInfo) => {
-      const state = REPORT_STATES.find((candidate) => candidate.name === name)!;
+      const state = defined(REPORT_STATES.find((candidate) => candidate.name === name));
       const refFile = path.join(refDir, `${state.ref}.png`);
       test.skip(
         !fs.existsSync(refFile),

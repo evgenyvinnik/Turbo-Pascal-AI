@@ -11,6 +11,7 @@ import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
 import { PascalError } from '../../src/compiler/errors';
 import { describePascalDiagnostic } from '../../src/compiler/errors/diagnostics';
 import { referenceCases, type ReferenceCase } from './corpus';
+import { defined } from '../../src/utils/defined';
 
 const execute = promisify(execFile);
 const compiler = process.env.FPC_BIN ?? 'fpc';
@@ -19,7 +20,9 @@ const reportPath = path.resolve(
 );
 const startedAt = new Date().toISOString();
 const selectedCases = process.env.PASCAL_REFERENCE_FILTER
-  ? referenceCases.filter((subject) => subject.name.includes(process.env.PASCAL_REFERENCE_FILTER!))
+  ? referenceCases.filter((subject) =>
+      subject.name.includes(defined(process.env.PASCAL_REFERENCE_FILTER))
+    )
   : referenceCases;
 await mkdir(path.dirname(reportPath), { recursive: true });
 // An interrupted or unavailable reference run must not leave an old success

@@ -16,6 +16,7 @@ import { compareRaster, type RasterMask } from './raster';
 import { ourGrid, refGrid, diffGrids, formatReport } from './grid';
 import { renderReport } from './report-template';
 import { coverageMarkdown } from './report-manifest';
+import { defined } from '../../../src/utils/defined';
 
 /** Match the gallery's example filename through Save As, using only real UI actions. */
 class GalleryIde extends Ide {
@@ -172,7 +173,7 @@ try {
   for (const item of gallery.screenshots) {
     const state = REPORT_STATES.find((candidate) => candidate.ref === item.ref);
     if (prior && !filter.has(item.ref) && !filter.has(state?.name ?? '')) {
-      const retained = prior.entries.find((entry) => entry.ref === item.ref)!;
+      const retained = defined(prior.entries.find((entry) => entry.ref === item.ref));
       data.entries.push({
         ...retained,
         captureDriverHash: retained.captureDriverHash ?? prior.driverHash,
@@ -204,7 +205,7 @@ try {
     const reference = fs.readFileSync(refFile);
     entry.referenceHash = hash(reference);
     entry.images = { reference: `images/${item.ref}-reference.png` };
-    fs.writeFileSync(path.join(output, entry.images.reference!), reference);
+    fs.writeFileSync(path.join(output, defined(entry.images.reference)), reference);
     if (!state) {
       saveManifest();
       continue;
