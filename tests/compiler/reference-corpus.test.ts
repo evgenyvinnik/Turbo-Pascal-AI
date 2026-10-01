@@ -7,32 +7,38 @@ import { PascalError } from '../../src/compiler/errors';
 import { generatedCases, referenceCases } from '../reference/corpus';
 
 describe('independent Pascal reference corpus', () => {
-  it.each(referenceCases)('$name', ({ source, input, output, exitCode, reject, units }) => {
-    const compile = () =>
-      new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse(), {
-        resolveUnit: (name) =>
-          Object.entries(units ?? {}).find(
-            ([key]) => key.toLowerCase() === name.toLowerCase()
-          )?.[1],
+  it.each(referenceCases)(
+    '$name',
+    ({ source, input, output, exitCode, reject, units, arguments: programArguments }) => {
+      const compile = () =>
+        new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse(), {
+          resolveUnit: (name) =>
+            Object.entries(units ?? {}).find(
+              ([key]) => key.toLowerCase() === name.toLowerCase()
+            )?.[1],
+        });
+      if (reject) {
+        expect(compile).toThrow(PascalError);
+        return;
+      }
+      const machine = new Machine(compile(), {
+        maxInstructions: 100_000,
+        programArguments: programArguments ?? [],
       });
-    if (reject) {
-      expect(compile).toThrow(PascalError);
-      return;
+      machine.setInput(input ? input.replace(/\n$/, '').split('\n') : []);
+      let failed = false;
+      try {
+        machine.run();
+      } catch (error) {
+        // Only a case expecting a nonzero exit may end in a run-time error.
+        if (!exitCode) throw error;
+        failed = true;
+      }
+      if (!failed) expect(machine.getState()).toBe(MachineState.STOPPED);
+      expect(machine.getOutput()).toEqual(output);
+      expect(machine.getExitCode()).toBe(exitCode ?? 0);
     }
-    const machine = new Machine(compile(), { maxInstructions: 100_000 });
-    machine.setInput(input ? input.replace(/\n$/, '').split('\n') : []);
-    let failed = false;
-    try {
-      machine.run();
-    } catch (error) {
-      // Only a case expecting a nonzero exit may end in a run-time error.
-      if (!exitCode) throw error;
-      failed = true;
-    }
-    if (!failed) expect(machine.getState()).toBe(MachineState.STOPPED);
-    expect(machine.getOutput()).toEqual(output);
-    expect(machine.getExitCode()).toBe(exitCode ?? 0);
-  });
+  );
 
   it('keeps generated set coverage diverse, including overlapping and disjoint inputs', () => {
     const cardinalities = generatedCases().map((subject) => subject.output![2]!);

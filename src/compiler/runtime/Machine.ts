@@ -81,6 +81,8 @@ export interface MachineConfig {
   debug?: boolean;
   /** Limit captured console output to keep runaway programs bounded. */
   maxOutputChars?: number;
+  /** Tokenized browser text, captured for this run and converted to DOS bytes. */
+  programArguments?: readonly string[];
   fileSystem?: VirtualFileSystem;
   onSound?: (frequency: number) => void;
 }
@@ -215,6 +217,9 @@ export class Machine {
       maxInstructions: config.maxInstructions ?? 0,
       debug: config.debug ?? false,
       maxOutputChars: config.maxOutputChars ?? 1_048_576,
+      programArguments: (config.programArguments ?? []).map((argument) =>
+        encodeDosText(argument).slice(0, 255)
+      ),
       fileSystem: config.fileSystem ?? new VirtualFileSystem(),
       onSound: config.onSound ?? (() => undefined),
     };
@@ -270,7 +275,8 @@ export class Machine {
         segmentOf: (address) => this.space.segmentOf(address),
         pointer: (segment, offset) => this.space.pointer(segment, offset),
       },
-      this.config.fileSystem
+      this.config.fileSystem,
+      this.config.programArguments
     );
     this.low = new LowMemory({
       console: this.services.console,

@@ -5,6 +5,18 @@ import type { ReferenceCase } from './corpus';
  * type, while in Turbo Pascal it is an 8087 real. */
 export const systemCases: ReferenceCase[] = [
   {
+    name: 'system-command-line-arguments',
+    arguments: ['', 'alpha', 'two words', 'C:\\DATA\\A.PAS'],
+    source: `program Args; var i:Integer;
+begin
+  WriteLn(ParamCount);
+  for i:=1 to ParamCount do WriteLn('[',ParamStr(i),']');
+  WriteLn(Length(ParamStr(0))>0);
+  WriteLn(Length(ParamStr(ParamCount+1)))
+end.`,
+    output: ['4', '[]', '[alpha]', '[two words]', '[C:\\DATA\\A.PAS]', 'TRUE', '0'],
+  },
+  {
     name: 'system-functions-in-constant-expressions',
     source: `program T;
 var tb: Byte;

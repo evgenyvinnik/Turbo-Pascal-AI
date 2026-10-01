@@ -94,6 +94,10 @@ window displays the P-machine instruction stream and registers. The DOS workspac
 has a separate CPU debugger for actual x86 code. Editing source
 invalidates its paused session so subsequent runs compile the current buffer.
 
+Run → Parameters supplies `ParamCount` and `ParamStr` on the next run. Separate
+arguments with spaces; double quotes keep multiword or empty arguments together.
+`ParamStr(0)` names the program, and missing arguments return an empty string.
+
 Alt+F10 or a right-click opens the editor's local menu. In an input with a
 history arrow, press Down or click the arrow to recall previous entries.
 Shift+F2 opens Grep's argument dialog: enter a regular expression and filename

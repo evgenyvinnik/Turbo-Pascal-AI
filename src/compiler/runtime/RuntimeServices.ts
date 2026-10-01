@@ -69,7 +69,8 @@ export class RuntimeServices {
   readonly vectors = new Map<number, number>();
   constructor(
     private host: Host,
-    private disk: VirtualFileSystem
+    private disk: VirtualFileSystem,
+    private programArguments: readonly string[] = []
   ) {
     this.files = new FileRuntime(host, disk, (value) => this.layoutOf(value));
     this.dos = new DosUnit(host, disk, this.files);
@@ -435,9 +436,9 @@ export class RuntimeServices {
         this.host.releaseHeap(Number(this.host.read(a)));
         return {};
       case 89:
-        return { result: 0 };
+        return { result: this.programArguments.length };
       case 90:
-        return { result: a === 0 ? String(args[1]) : '' };
+        return { result: a === 0 ? String(args[1]) : (this.programArguments[a - 1] ?? '') };
       case 34: {
         const text = readString(a);
         if (b >= 1 && c > 0) this.host.write(a, text.slice(0, b - 1) + text.slice(b - 1 + c));
