@@ -262,6 +262,10 @@ export class Machine {
         stackPointer: () => this.space.stackPointer(),
         heapTop: () => this.space.heapPointer(this.heap.pointer),
         heapEmpty: () => this.heap.pointer === 0,
+        readLinear: (linear, length) => this.space.readLinear(linear, length),
+        writeLinear: (linear, bytes) => {
+          this.space.writeLinear(linear, bytes);
+        },
         releaseHeap: (address) => {
           this.releaseHeap(address);
         },

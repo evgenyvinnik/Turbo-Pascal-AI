@@ -95,7 +95,7 @@ describe('BGI driver files', () => {
       begin d := InstallUserDriver('SVGA256', nil); Write(d, ' ', InstallUserDriver('svga256.bgi', nil), ' ');
         Write(InstallUserDriver('EGAVGA', nil), ' '); m := 0; InitGraph(d, m, ''); WriteLn(GraphResult) end.`;
     expect(run(source)).toEqual(['11 11 3 -3']);
-    // Its file is found and read, but its code is not run.
+    // Its file is found and its code run; this one's is no driver's.
     expect(run(source, { 'SVGA256.BGI': driverFile('SVGA256') })).toEqual(['11 11 3 -4']);
   });
 

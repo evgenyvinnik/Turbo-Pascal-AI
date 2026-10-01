@@ -9,6 +9,7 @@ import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont, type StrokeFont } from './StrokeFont';
 import { BGI_HEADER_BYTES, parseBgiDriver } from './BgiDriver';
+import { BgiDriverBackend, DriverRefused } from './BgiKernel';
 import { decodeOverlayFile, overlaySize, type OverlayUnit } from './OverlayFile';
 import { roundReal48 } from '../codegen/numeric';
 import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
@@ -38,6 +39,9 @@ interface Host extends MemoryAccess {
   heapTop(): number;
   /** Whether nothing has been allocated: HeapPtr is still HeapOrg. */
   heapEmpty?(): boolean;
+  /** Memory by linear address, which a loaded graphics driver reaches. */
+  readLinear?(linear: number, length: number): Uint8Array;
+  writeLinear?(linear: number, bytes: Uint8Array): void;
   releaseHeap(address: number): void;
   sound(frequency: number): void;
   /** A layout by its number, as an untyped parameter's caller passes it. */
@@ -111,7 +115,10 @@ export class RuntimeServices {
   /** Drivers InstallUserDriver added, numbered from 11, and the drivers and
    * fonts RegisterBGIdriver and RegisterBGIfont took from memory. */
   private userDrivers: string[] = [];
-  private registeredDrivers = new Set<string>();
+  /** Registered drivers' code, by name. */
+  private registeredDrivers = new Map<string, Uint8Array>();
+  /** The code and number of the driver InitGraph loaded, for SetGraphMode. */
+  private loadedDriver: { code: Uint8Array; number: number } | undefined;
   private userFonts: string[] = [];
   private registeredFonts = new Map<number, StrokeFont>();
   /** The name of the driver InitGraph loaded. */
@@ -928,6 +935,7 @@ export class RuntimeServices {
     if (driver === 0) [driver, mode] = [9, 2];
     const name = driver >= 11 ? this.userDrivers[driver - 11] : STANDARD_DRIVERS[driver];
     const fail = (code: number) => {
+      g.detach();
       g.initialized = false;
       g.result = code;
       g.revision++;
@@ -936,31 +944,60 @@ export class RuntimeServices {
       fail(-4);
       return;
     }
-    if (!this.registeredDrivers.has(name)) {
+    let code = this.registeredDrivers.get(name);
+    if (!code) {
       const path = this.find(name + '.BGI');
       if (path) {
-        const header = parseBgiDriver(this.fileBytes(path));
+        const bytes = this.fileBytes(path);
+        const header = parseBgiDriver(bytes);
         if (header?.name !== name) {
           fail(-4);
           return;
         }
-      } else if (driver >= 11) {
-        // A driver of another maker's is only ever its file.
+        code = bytes.subarray(header.headerSize, header.headerSize + header.codeSize);
+      }
+    }
+    if (name === 'EGAVGA') {
+      // The P-machine's own VGA, which EGAVGA drives, with or without the file.
+      g.detach();
+      this.loadedDriver = undefined;
+      g.init(9, mode);
+      if (!g.initialized) return;
+    } else {
+      // Any other driver's code runs, on the emulated PC.
+      if (!code) {
         fail(-3);
         return;
       }
+      if (!this.openDriver(code, driver, mode)) return;
     }
-    // The P-machine's graphics are the VGA's, which EGAVGA drives; another
-    // driver's code is not run.
-    if (name !== 'EGAVGA') {
-      fail(-4);
-      return;
-    }
-    g.init(9, mode);
-    if (!g.initialized) return;
     this.driverName = name;
     this.host.write(driverAddress, g.driver);
     this.host.write(modeAddress, g.mode);
+  }
+  /** Loads a driver's code and switches it to a mode; false, with GraphResult
+   * set, when it refuses. */
+  private openDriver(code: Uint8Array, driver: number, mode: number): boolean {
+    const g = this.graphics;
+    const host = this.host;
+    try {
+      const backend = BgiDriverBackend.open(code, mode, {
+        read: (linear) => host.readLinear?.(linear, 1)[0] ?? 0,
+        write: (linear, value) => {
+          host.writeLinear?.(linear, Uint8Array.of(value));
+        },
+      });
+      g.attach(backend, driver, mode);
+      this.loadedDriver = { code, number: driver };
+      return true;
+    } catch (error) {
+      if (!(error instanceof DriverRefused)) throw error;
+      g.detach();
+      g.initialized = false;
+      g.result = error.code;
+      g.revision++;
+      return false;
+    }
   }
   /** The routines that install and register drivers and fonts, and describe
    * the driver's modes. */
@@ -1000,7 +1037,8 @@ export class RuntimeServices {
         const standard = STANDARD_DRIVERS.indexOf(header.name);
         const user = this.userDrivers.indexOf(header.name);
         if (standard <= 0 && user < 0) return failed(-4);
-        this.registeredDrivers.add(header.name);
+        const image = this.bytesAt(a, [], header.headerSize + header.codeSize);
+        this.registeredDrivers.set(header.name, image.slice(header.headerSize));
         return { result: standard > 0 ? standard : 11 + user };
       }
       case 294: {
@@ -1039,11 +1077,12 @@ export class RuntimeServices {
       case 296:
         return { result: this.driverName };
       case 297:
-        return { result: VGA_MODES[a] ?? '' };
+        return { result: g.external ? g.external.nameOfMode(a) : (VGA_MODES[a] ?? '') };
       case 298:
-        return { result: VGA_MODES.length - 1 };
+        return { result: g.external ? g.external.modeCount - 1 : VGA_MODES.length - 1 };
       case 299: {
-        const [low, high] = MODE_RANGES[a] ?? [-1, -1];
+        const loaded = this.loadedDriver?.number === a ? g.external : null;
+        const [low, high] = loaded ? [0, loaded.modeCount - 1] : (MODE_RANGES[a] ?? [-1, -1]);
         this.host.write(b, low);
         this.host.write(c, high);
         return {};
@@ -1062,6 +1101,7 @@ export class RuntimeServices {
     const driverOrFont = this.driversAndFonts(index, args);
     if (driverOrFont) return driverOrFont;
     if (index === 201 || index === 207) {
+      g.detach();
       g.initialized = false;
       g.revision++;
       return {};
@@ -1103,20 +1143,22 @@ export class RuntimeServices {
       case 203:
         return { result: g.mode };
       case 204:
-        g.init(g.driver, a);
+        if (g.external && this.loadedDriver)
+          this.openDriver(this.loadedDriver.code, this.loadedDriver.number, a);
+        else g.init(g.driver, a);
         return {};
       case 210:
-        g.color = a & 15;
+        g.color = a & g.maxColor();
         return {};
       case 211:
         return { result: g.color };
       case 212:
-        g.background = a & 15;
+        g.background = a & g.maxColor();
         return {};
       case 213:
         return { result: g.background };
       case 214:
-        return { result: 15 };
+        return { result: g.maxColor() };
       case 220:
         g.pixel(a, b, c);
         return {};
@@ -1183,7 +1225,7 @@ export class RuntimeServices {
         return {};
       case 241:
         g.fillPattern = a;
-        g.fillColor = b & 15;
+        g.fillColor = b & g.maxColor();
         return {};
       case 250:
         g.linePattern = [0xffff, 0xcccc, 0xfc78, 0xf8f8, b][a] ?? 0xffff;

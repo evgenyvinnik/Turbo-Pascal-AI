@@ -274,7 +274,8 @@ function publish(session: Session, extra?: string): void {
             height: graphics.height,
             pixels: graphics.display(),
             revision: graphics.revision,
-            ...(graphics.dac ? { colors: graphics.colors() ?? [] } : {}),
+            // 256 colours, in mode 13h or a loaded driver's mode.
+            ...(graphics.dac || graphics.external ? { colors: graphics.colors() ?? [] } : {}),
           },
         }
       : {}),

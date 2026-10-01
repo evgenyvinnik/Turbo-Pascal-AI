@@ -1,3 +1,4 @@
+import type { BgiDriverBackend } from './BgiKernel';
 import { BGI_FONT } from '../../tui/bgiFont';
 import type { StrokeFont } from './StrokeFont';
 import { defined } from '../../utils/defined';
@@ -112,10 +113,57 @@ export class GraphicsRuntime {
   /** Dots shown over the screen without being part of it: Graph3's turtle. */
   decoration: { x: number; y: number; color: number }[] = [];
   private viewport = { left: 0, top: 0, right: 639, bottom: 479, clip: true };
+  /** A BGI driver the program loaded, whose code draws in place of the
+   * built-in VGA's, on the emulated PC's screen. */
+  external: BgiDriverBackend | null = null;
 
   reset(): void {
+    this.detach();
     this.init(9, 2);
     this.initialized = false;
+  }
+  /** Draws through a loaded driver from now on, on its screen. */
+  attach(backend: BgiDriverBackend, driver: number, mode: number): void {
+    this.detach();
+    this.external = backend;
+    this.width = backend.width;
+    this.height = backend.height;
+    this.pixels = new Uint8Array(0);
+    this.palette = null;
+    this.dac = null;
+    this.decoration = [];
+    this.driver = driver;
+    this.mode = mode;
+    this.initialized = true;
+    this.result = 0;
+    this.defaults();
+  }
+  /** Leaves a loaded driver's graphics. */
+  detach(): void {
+    const backend = this.external;
+    if (!backend) return;
+    this.external = null;
+    backend.close();
+    this.initialized = false;
+    this.revision++;
+  }
+  /** The highest colour the screen shows. */
+  maxColor(): number {
+    return this.external?.maxColour ?? 15;
+  }
+  /** Sends the driver what has changed of the colours, styles and viewport. */
+  private sendSettings(backend: BgiDriverBackend): void {
+    backend.setColour(this.color, this.fillColor);
+    backend.setFill(this.fillPattern);
+    const style = [0xffff, 0xcccc, 0xfc78, 0xf8f8].indexOf(this.linePattern);
+    backend.setLine(style < 0 ? 4 : style, this.linePattern, this.thickness);
+    const view = this.viewport;
+    if (view.clip) backend.setClip(view.left, view.top, view.right, view.bottom);
+    else backend.setClip(0, 0, this.width - 1, this.height - 1);
+  }
+  /** A point in the viewport, on the screen. */
+  private onScreen(x: number, y: number): [number, number] {
+    return [Math.round(x) + this.viewport.left, Math.round(y) + this.viewport.top];
   }
   init(driver: number, mode: number): void {
     if ((driver !== 0 && driver !== 9) || (driver === 9 && (mode < 0 || mode > 2))) {
@@ -171,6 +219,7 @@ export class GraphicsRuntime {
   }
   /** The 256 colors as 24-bit RGB, while mode 13h is on. */
   colors(): number[] | undefined {
+    if (this.external) return this.external.colours();
     return this.dac?.map(
       ([red, green, blue]) => (eightBit(red) << 16) | (eightBit(green) << 8) | eightBit(blue)
     );
@@ -199,6 +248,7 @@ export class GraphicsRuntime {
   }
   /** The screen as colors, for display. */
   display(): Uint8Array {
+    if (this.external) return this.external.screen().slice();
     const palette = this.palette;
     const shown = palette ? this.pixels.map((color) => palette[color] ?? 0) : this.pixels.slice();
     for (const dot of this.decoration)
@@ -237,15 +287,35 @@ export class GraphicsRuntime {
   }
   pixel(x: number, y: number, color = this.color): void {
     const index = this.position(x, y);
-    if (index >= 0) {
+    if (index >= 0 && this.external) {
+      this.external.putPixel(...this.onScreen(x, y), color);
+      this.revision++;
+    } else if (index >= 0) {
       this.pixels[index] = color & 15;
       this.revision++;
     }
   }
   getPixel(x: number, y: number): number {
+    if (this.external)
+      return this.position(x, y) < 0 ? -1 : this.external.getPixel(...this.onScreen(x, y));
     return this.pixels[this.position(x, y)] ?? -1;
   }
   clear(viewportOnly = false): void {
+    const backend = this.external;
+    if (backend) {
+      if (!viewportOnly) backend.clear();
+      else {
+        // The viewport in the background colour: an empty fill.
+        backend.setColour(this.color, this.background);
+        backend.setFill(0);
+        backend.setClip(0, 0, this.width - 1, this.height - 1);
+        const view = this.viewport;
+        backend.bar(view.left, view.top, view.right, view.bottom);
+      }
+      this.x = this.y = 0;
+      this.revision++;
+      return;
+    }
     if (!viewportOnly) this.pixels.fill(this.background);
     else
       for (let y = this.viewport.top; y <= this.viewport.bottom; y++) {
@@ -259,6 +329,22 @@ export class GraphicsRuntime {
     this.revision++;
   }
   line(x1: number, y1: number, x2: number, y2: number): void {
+    const backend = this.external;
+    if (backend) {
+      this.sendSettings(backend);
+      const [ax, ay] = this.onScreen(x1, y1),
+        [bx, by] = this.onScreen(x2, y2);
+      backend.line(ax, ay, bx, by);
+      // A thick line is three, side by side across its run.
+      if (this.thickness === 3) {
+        const steep = Math.abs(by - ay) > Math.abs(bx - ax);
+        for (const side of [-1, 1])
+          if (steep) backend.line(ax + side, ay, bx + side, by);
+          else backend.line(ax, ay + side, bx, by + side);
+      }
+      this.revision++;
+      return;
+    }
     x1 = Math.round(x1);
     y1 = Math.round(y1);
     x2 = Math.round(x2);
@@ -317,6 +403,13 @@ export class GraphicsRuntime {
     this.pixel(x, y, patterns[this.fillPattern] ? this.fillColor : this.background);
   }
   bar(x1: number, y1: number, x2: number, y2: number): void {
+    const backend = this.external;
+    if (backend) {
+      this.sendSettings(backend);
+      backend.bar(...this.onScreen(x1, y1), ...this.onScreen(x2, y2));
+      this.revision++;
+      return;
+    }
     for (
       let y = Math.max(-this.viewport.top, Math.ceil(Math.min(y1, y2)));
       y <= Math.min(this.height, Math.max(y1, y2));
@@ -344,7 +437,27 @@ export class GraphicsRuntime {
       return;
     }
     const sweep = end >= start ? end - start : end + 360 - start;
-    if (fill) {
+    const backend = this.external;
+    if (fill && backend) {
+      // As Borland's kernel emulates a filled shape: a bar a row's run.
+      this.sendSettings(backend);
+      for (let yy = -ry; yy <= ry; yy++) {
+        const half =
+          ry === 0 ? rx : Math.floor(rx * Math.sqrt(Math.max(0, 1 - (yy * yy) / (ry * ry))));
+        let run: number | undefined;
+        for (let xx = -half; xx <= half + 1; xx++) {
+          const angle =
+            ((Math.atan2(-yy / (ry || 1), xx / (rx || 1)) * 180) / Math.PI - start + 720) % 360;
+          const inside = xx <= half && (!sector || sweep >= 360 || angle <= sweep);
+          if (inside && run === undefined) run = xx;
+          if (!inside && run !== undefined) {
+            backend.bar(...this.onScreen(x + run, y + yy), ...this.onScreen(x + xx - 1, y + yy));
+            run = undefined;
+          }
+        }
+      }
+      this.revision++;
+    } else if (fill) {
       for (
         let yy = Math.max(-ry, -y - this.viewport.top);
         yy <= Math.min(ry, this.height - y);
@@ -381,6 +494,13 @@ export class GraphicsRuntime {
     if (sector && previous) this.line(x, y, ...previous);
   }
   flood(x: number, y: number, border: number): void {
+    const backend = this.external;
+    if (backend) {
+      this.sendSettings(backend);
+      backend.flood(...this.onScreen(x, y), border);
+      this.revision++;
+      return;
+    }
     const visited = new Uint8Array(this.pixels.length);
     const pending = new Int32Array(this.pixels.length);
     let start = 0,
@@ -451,6 +571,14 @@ export class GraphicsRuntime {
       }
       this.linePattern = oldPattern;
       this.thickness = oldThickness;
+      return;
+    }
+    if (this.external) {
+      // The driver's own font, which it scales and turns.
+      this.sendSettings(this.external);
+      const [sx, sy] = this.onScreen(x, this.direction === 1 ? y - w + 1 : y);
+      this.external.text(text, sx, sy, Math.max(1, s), this.direction);
+      this.revision++;
       return;
     }
     for (let i = 0; i < text.length; i++)

@@ -113,6 +113,10 @@ export class BgiMachine implements Bus {
   driverWord(offset: number): number {
     return this.driverByte(offset) | (this.driverByte(offset + 1) << 8);
   }
+  /** The BIOS's 8x8 font: eight bytes a character. */
+  font(): Uint8Array {
+    return this.bios.subarray(FONT_OFFSET, FONT_OFFSET + 8 * 256);
+  }
   /** The Graph unit's own memory, where it puts what it hands the driver. */
   scratchBytes(): Uint8Array {
     return this.scratch;
@@ -359,15 +363,19 @@ export class BgiMachine implements Bus {
   private vesa(cpu: Cpu86, al: number): void {
     const es = cpu.segment(ES),
       di = cpu.get16(DI);
-    const word = (offset: number, value: number) =>
-      { cpu.writeWord(es, (di + offset) & 0xffff, value); };
-    const byte = (offset: number, value: number) =>
-      { cpu.writeByte(es, (di + offset) & 0xffff, value); };
+    const word = (offset: number, value: number) => {
+      cpu.writeWord(es, (di + offset) & 0xffff, value);
+    };
+    const byte = (offset: number, value: number) => {
+      cpu.writeByte(es, (di + offset) & 0xffff, value);
+    };
     let ok = true;
     switch (al) {
       case 0x00:
         for (let i = 0; i < 256; i++) byte(i, 0);
-        'VESA'.split('').forEach((char, i) => { byte(i, char.charCodeAt(0)); });
+        'VESA'.split('').forEach((char, i) => {
+          byte(i, char.charCodeAt(0));
+        });
         word(4, 0x0102);
         word(6, OEM_OFFSET);
         word(8, BIOS_SEGMENT);
