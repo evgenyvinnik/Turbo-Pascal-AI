@@ -114,6 +114,19 @@ begin
 end.
 ```
 
+### Bundled Programs
+
+F3 opens the bundled samples alongside your own files: HELLO.PAS,
+SQUARE.PAS, FIBONACCI.PAS and PRIMES.PAS for the language, and two tours
+written for this project, a screen at a time (any key for the next, Esc to
+stop). BGIDEMO.PAS shows off the Graph unit: colors and palette cycling,
+line styles, circles and arcs, a pie chart and a 3D bar chart, the fill
+patterns, polygons, the ten stroked fonts, viewports and clipping, an image
+moved with `PutImage`, and XOR drawing. CRTDEMO.PAS does the same for Crt:
+the color attributes, scrolling windows, `InsLine` and `DelLine`, `GotoXY`,
+the keyboard's codes, sound, and a `KeyPressed` animation. Both run as
+end-to-end tests.
+
 ## Keyboard Shortcuts
 
 The original Turbo Pascal key assignments:

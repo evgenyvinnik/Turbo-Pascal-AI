@@ -37,7 +37,14 @@ import { encodeOverlayFile } from '@compiler/runtime/OverlayFile';
 import { openDosSession } from '@services/dos/dosSession';
 import { openNativePascalSession } from '@services/dos/nativePascal';
 
-export const SAMPLE_FILES = ['FIBONACCI.PAS', 'HELLO.PAS', 'PRIMES.PAS', 'SQUARE.PAS'];
+export const SAMPLE_FILES = [
+  'BGIDEMO.PAS',
+  'CRTDEMO.PAS',
+  'FIBONACCI.PAS',
+  'HELLO.PAS',
+  'PRIMES.PAS',
+  'SQUARE.PAS',
+];
 
 const desk = () => useDesktopStore.getState();
 const dlg = () => useDialogStore.getState();

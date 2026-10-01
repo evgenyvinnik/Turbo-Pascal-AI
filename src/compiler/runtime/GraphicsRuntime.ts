@@ -546,8 +546,6 @@ export class GraphicsRuntime {
       dy = -Math.abs(y2 - y1),
       sx = x1 < x2 ? 1 : -1,
       sy = y1 < y2 ? 1 : -1;
-    let error = dx + dy,
-      step = 0;
     // Clip very large coordinates before raster traversal to bound each VM instruction.
     if (dx - dy > 1_000_000) {
       this.result = -11;
@@ -559,23 +557,26 @@ export class GraphicsRuntime {
       if (xor) dots.set(`${String(x)},${String(y)}`, [x, y]);
       else this.pixel(x, y);
     };
-    for (;;) {
-      if ((this.linePattern >>> (15 - (step % 16))) & 1) {
-        const radius = this.thickness === 3 ? 1 : 0;
-        for (let yy = -radius; yy <= radius; yy++)
-          for (let xx = -radius; xx <= radius; xx++) plot(x1 + xx, y1 + yy);
+    // A thick line is three, side by side across its run, each in the
+    // pattern, as the BGI draws it.
+    const steep = dy < -dx;
+    const sides = this.thickness === 3 ? [0, -1, 1] : [0];
+    for (const side of sides) {
+      let [x, y, error] = [x1 + (steep ? side : 0), y1 + (steep ? 0 : side), dx + dy];
+      const [endX, endY] = [x2 + (steep ? side : 0), y2 + (steep ? 0 : side)];
+      for (let step = 0; ; step++) {
+        if ((this.linePattern >>> (15 - (step % 16))) & 1) plot(x, y);
+        if (x === endX && y === endY) break;
+        const twice = 2 * error;
+        if (twice >= dy) {
+          error += dy;
+          x += sx;
+        }
+        if (twice <= dx) {
+          error += dx;
+          y += sy;
+        }
       }
-      if (x1 === x2 && y1 === y2) break;
-      const twice = 2 * error;
-      if (twice >= dy) {
-        error += dy;
-        x1 += sx;
-      }
-      if (twice <= dx) {
-        error += dx;
-        y1 += sy;
-      }
-      step++;
     }
     for (const [x, y] of dots.values()) {
       const old = this.getPixel(x, y);

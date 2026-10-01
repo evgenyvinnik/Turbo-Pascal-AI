@@ -172,6 +172,7 @@ export enum ClipMode {
 /** Graph's constants that are not integers, in Pascal. */
 export const GRAPH_DECLARATIONS = `const
   ClipOn = True; ClipOff = False;
+  TopOn = True; TopOff = False;
   MaxColors = 15;
 type
   PaletteType = record Size: Byte; Colors: array[0..MaxColors] of ShortInt end;
