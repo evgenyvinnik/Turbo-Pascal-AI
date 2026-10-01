@@ -98,6 +98,20 @@ describe('Turbo Pascal runtime compatibility', () => {
     machine.run();
     expect(machine.getOutput()).toEqual(['-8,0,8']);
   });
+
+  it('declares ClipOn and ClipOff as the Booleans SetViewPort takes', () => {
+    const machine = machineFor(`program Clip; uses Graph; var driver,mode: Integer; clip: Boolean;
+      begin driver:=VGA; mode:=VGAHi; InitGraph(driver,mode,'');
+        clip:=ClipOff; WriteLn(ClipOn,',',clip,',',Graph.ClipOn,',',Ord(ClipOff));
+        SetViewPort(10,10,20,20,ClipOn); Line(0,0,30,0);
+        SetViewPort(10,30,20,40,Graph.ClipOff); Line(0,0,30,0) end.`);
+    machine.run();
+    expect(machine.getOutput()).toEqual(['TRUE,FALSE,TRUE,0']);
+    const pixels = machine.getGraphics().pixels;
+    // Clipped at the viewport's right edge, x = 20, and not clipped below.
+    expect([pixels[10 * 640 + 20], pixels[10 * 640 + 21]]).toEqual([15, 0]);
+    expect(pixels[30 * 640 + 40]).toBe(15);
+  });
 });
 
 describe('the DOS null device', () => {

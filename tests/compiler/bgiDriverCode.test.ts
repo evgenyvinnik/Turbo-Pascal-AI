@@ -53,7 +53,7 @@ describe("a third-party BGI driver's code", () => {
         SetColor(200); Line(0, 0, 99, 99); SetFillStyle(SolidFill, 100); Bar(150, 10, 160, 20);
         PutPixel(300, 150, 77);
         WriteLn(GetPixel(50, 50), ' ', GetPixel(51, 50), ' ', GetPixel(155, 15), ' ', GetPixel(300, 150));
-        SetViewPort(200, 100, 250, 150, True); Line(0, 0, 100, 0);
+        SetViewPort(200, 100, 250, 150, ClipOn); Line(0, 0, 100, 0);
         WriteLn(GetPixel(0, 0), ' ', GetPixel(50, 0)) end.`);
     expect(machine.getOutput()).toEqual(['200 0 100 77', '200 200']);
     // The screen shown is the driver's video memory.
