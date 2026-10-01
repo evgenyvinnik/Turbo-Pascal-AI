@@ -590,6 +590,31 @@ export class Compiler {
     this.scope.imports.set(unit, exports);
   }
   /** A type a standard unit declares, as its routines take it. */
+  /** What emits a buffer's byte layout, for a routine that works on its
+   * bytes: its type's, or an untyped parameter's caller's. */
+  private bufferLayout(argument: Node, routine: string): () => void {
+    const type = this.expressionType(argument);
+    if (type.openArray) this.fail(argument, `${routine} needs a variable whose type is known here`);
+    if (type.kind === 'untyped') {
+      const operand = this.qualified(argument);
+      // P^ of an untyped pointer: the bytes at its address.
+      if (operand.type === NodeType.POINTER_DEREF)
+        return () => {
+          this.literal(-1, INTEGER);
+        };
+      const source =
+        operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
+      if (source?.kind !== 'variable')
+        this.fail(argument, `${routine} needs a variable whose type is known here`);
+      return () => {
+        this.emitLayoutOf(source);
+      };
+    }
+    const text = JSON.stringify(this.binaryLayout(type));
+    return () => {
+      this.literal(text, STRING);
+    };
+  }
   private unitType(unit: string, name: string): PascalType | undefined {
     const symbol = this.unitDeclarations.get(unit)?.get(name.toLowerCase());
     return symbol?.kind === 'type' ? symbol.type : undefined;
@@ -5493,32 +5518,8 @@ export class Compiler {
     if (['delete', 'insert', 'str', 'val'].includes(name))
       return this.stringMutation(node, builtin);
     if (name === 'fillchar' || name === 'move') {
-      // They change bytes, so the runtime needs each variable's byte layout:
-      // its type's, or an untyped parameter's caller's.
-      const layout = (argument: Node): (() => void) => {
-        const type = this.expressionType(argument);
-        if (type.openArray)
-          this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
-        if (type.kind === 'untyped') {
-          const operand = this.qualified(argument);
-          // P^ of an untyped pointer: the bytes at its address.
-          if (operand.type === NodeType.POINTER_DEREF)
-            return () => {
-              this.literal(-1, INTEGER);
-            };
-          const source =
-            operand.type === NodeType.IDENTIFIER ? this.lookup(String(operand.name)) : undefined;
-          if (source?.kind !== 'variable')
-            this.fail(argument, `${builtin.name} needs a variable whose type is known here`);
-          return () => {
-            this.emitLayoutOf(source);
-          };
-        }
-        const text = JSON.stringify(this.binaryLayout(type));
-        return () => {
-          this.literal(text, STRING);
-        };
-      };
+      // They change bytes, so the runtime needs each variable's byte layout.
+      const layout = (argument: Node) => this.bufferLayout(argument, builtin.name);
       if (name === 'fillchar') {
         this.requireWritable(defined(args[0]));
         const target = layout(defined(args[0]));
@@ -5806,9 +5807,15 @@ export class Compiler {
       const parameter = builtin.params[index];
       if (parameter?.mode === ParamMode.VAR) {
         this.requireWritable(arg);
+        const buffer = parameter.buffer ? this.bufferLayout(arg, builtin.name) : undefined;
         const type = this.address(arg);
         if (parameter.type !== TypeKind.POINTER && parameter.type !== (type.kind as TypeKind))
           this.fail(arg, `Type mismatch in VAR argument for ${node.name}`);
+        // An untyped buffer, such as DrawPoly's points, goes with its layout.
+        if (buffer) {
+          buffer();
+          layouts++;
+        }
         // A unit's record, such as SearchRec, goes with its byte layout.
         if (parameter.typeName) {
           const expected = this.unitType(

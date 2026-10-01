@@ -1134,6 +1134,8 @@ export class RuntimeServices {
               '-12': 'Graphics I/O error',
               '-13': 'Invalid font file',
               '-14': 'Invalid font number',
+              '-15': 'Invalid device number',
+              '-18': 'Invalid version number',
             } as Record<number, string>
           )[a] ?? `Graphics error ${String(a)}`,
       };
@@ -1165,15 +1167,15 @@ export class RuntimeServices {
       case 221:
         return { result: g.getPixel(a, b) };
       case 222:
-        g.line(a, b, c, d);
+        g.drawLine(a, b, c, d);
         return {};
       case 223:
-        g.line(g.x, g.y, a, b);
+        g.drawLine(g.x, g.y, a, b);
         g.x = a;
         g.y = b;
         return {};
       case 224:
-        g.line(g.x, g.y, g.x + a, g.y + b);
+        g.drawLine(g.x, g.y, g.x + a, g.y + b);
         g.x += a;
         g.y += b;
         return {};
@@ -1186,7 +1188,7 @@ export class RuntimeServices {
         g.y += b;
         return {};
       case 227:
-        g.rectangle(a, b, c, d);
+        g.rectangle(a, b, c, d, g.writeMode === 1);
         return {};
       case 228:
         g.bar(a, b, c, d);
@@ -1202,11 +1204,12 @@ export class RuntimeServices {
           g.line(a + e, b - e, c + e, b - e);
         }
         return {};
+      // A circle's height is its radius in the aspect ratio.
       case 230:
-        g.ellipse(a, b, 0, 360, c, c);
+        g.ellipse(a, b, 0, 360, c, g.circleHeight(c));
         return {};
       case 231:
-        g.ellipse(a, b, c, d, e, e);
+        g.ellipse(a, b, c, d, e, g.circleHeight(e));
         return {};
       case 232:
         g.ellipse(a, b, c, d, e, f);
@@ -1218,7 +1221,7 @@ export class RuntimeServices {
         g.ellipse(a, b, c, d, e, f, true, true);
         return {};
       case 235:
-        g.ellipse(a, b, c, d, e, e, true, true);
+        g.ellipse(a, b, c, d, e, g.circleHeight(e), true, true);
         return {};
       case 240:
         g.flood(a, b, c);
@@ -1228,6 +1231,7 @@ export class RuntimeServices {
         g.fillColor = b & g.maxColor();
         return {};
       case 250:
+        g.lineStyle = a >= 0 && a <= 4 ? a : 0;
         g.linePattern = [0xffff, 0xcccc, 0xfc78, 0xf8f8, b][a] ?? 0xffff;
         g.thickness = c === 3 ? 3 : 1;
         return {};
@@ -1303,6 +1307,157 @@ export class RuntimeServices {
         return { result: g.x };
       case 277:
         return { result: g.y };
+      default:
+        return this.graphState(index, args);
+    }
+  }
+  /** Graph's palettes, settings records, polygons, images, aspect ratio and
+   * pages. A record or buffer argument comes as its address, then its
+   * byte layout. */
+  private graphState(index: number, args: StackValue[]): Result | undefined {
+    const g = this.graphics,
+      [a = 0, b = 0, c = 0, d = 0, e = 0] = args.map(Number);
+    /** Fields in turn, each a value and its bytes, into a record. */
+    const put = (address: number, layout: StackValue | undefined, fields: [number, number][]) => {
+      const bytes = new Uint8Array(fields.reduce((size, [, width]) => size + width, 0));
+      const view = new DataView(bytes.buffer);
+      let at = 0;
+      for (const [field, width] of fields) {
+        if (width === 1) view.setUint8(at, field & 0xff);
+        else view.setUint16(at, field & 0xffff, true);
+        at += width;
+      }
+      this.putBytes(address, this.layoutOf(layout), bytes);
+    };
+    const bytes = (address: number, layout: StackValue | undefined, length: number) =>
+      this.bytesAt(address, this.layoutOf(layout), length);
+    /** A PaletteType: its size, then sixteen registers. */
+    const palette = (address: number, layout: StackValue | undefined, colours: number[]) => {
+      put(address, layout, [
+        [Math.min(g.paletteSize(), 16), 1],
+        ...colours.slice(0, 16).map((colour): [number, number] => [colour, 1]),
+      ]);
+    };
+    /** DrawPoly's and FillPoly's points: pairs of Integers. */
+    const points = (): [number, number][] => {
+      const view = new DataView(bytes(b, args[2], a * 4).buffer);
+      return Array.from({ length: Math.min(a, Math.floor(view.byteLength / 4)) }, (_, i) => [
+        view.getInt16(i * 4, true),
+        view.getInt16(i * 4 + 2, true),
+      ]);
+    };
+    switch (index) {
+      case 215:
+        if (!g.setPalette(a, b)) g.result = -11;
+        return {};
+      case 216:
+        palette(a, args[1], g.paletteColours());
+        return {};
+      case 217: {
+        const view = bytes(a, args[1], 17);
+        Array.from(view.subarray(1, 17)).forEach((colour, register) => {
+          // An entry of -1 leaves its register as it is.
+          if (register < (view[0] ?? 0) && colour !== 0xff) g.setPalette(register, colour);
+        });
+        return {};
+      }
+      case 218:
+        palette(a, args[1], g.defaultPaletteColours());
+        return {};
+      case 219:
+        return { result: g.paletteSize() };
+      case 245:
+        g.setRgb(a, b, c, d);
+        return {};
+      case 236:
+        g.drawPoly(points());
+        return {};
+      case 237:
+        g.fillPoly(points());
+        return {};
+      case 238: {
+        const arc = g.arc;
+        put(a, args[1], [
+          [arc.x, 2],
+          [arc.y, 2],
+          [arc.xStart, 2],
+          [arc.yStart, 2],
+          [arc.xEnd, 2],
+          [arc.yEnd, 2],
+        ]);
+        return {};
+      }
+      case 242:
+        put(a, args[1], [
+          [g.fillPattern, 2],
+          [g.fillColor, 2],
+        ]);
+        return {};
+      case 243:
+        g.userFill = Array.from(bytes(a, args[1], 8));
+        g.fillPattern = 12;
+        g.fillColor = c & g.maxColor();
+        return {};
+      case 244:
+        put(
+          a,
+          args[1],
+          g.userFill.map((row): [number, number] => [row, 1])
+        );
+        return {};
+      case 251:
+        put(a, args[1], [
+          [g.lineStyle, 2],
+          [g.linePattern, 2],
+          [g.thickness, 2],
+        ]);
+        return {};
+      case 252:
+        g.writeMode = a & 1;
+        return {};
+      case 263:
+        put(a, args[1], [
+          [g.font, 2],
+          [g.direction, 2],
+          [g.charSize, 2],
+          [g.horizontalJustify, 2],
+          [g.verticalJustify, 2],
+        ]);
+        return {};
+      case 271: {
+        const view = g.viewSettings();
+        put(a, args[1], [
+          [view.left, 2],
+          [view.top, 2],
+          [view.right, 2],
+          [view.bottom, 2],
+          [view.clip ? 1 : 0, 1],
+        ]);
+        return {};
+      }
+      case 280:
+        this.putBytes(e, this.layoutOf(args[5]), g.getImage(a, b, c, d));
+        return {};
+      case 281: {
+        const { size } = g.imageExtent(bytes(c, args[3], 4));
+        g.putImage(a, b, bytes(c, args[3], size), Number(args[4]));
+        return {};
+      }
+      case 282:
+        return { result: g.imageSize(a, b, c, d) };
+      case 290:
+        g.aspect = { x: a, y: b };
+        return {};
+      case 291:
+        this.host.write(a, g.aspect.x);
+        this.host.write(b, g.aspect.y);
+        return {};
+      case 283:
+        g.setPage(a, false);
+        return {};
+      case 284:
+        g.setPage(a, true);
+        return {};
       default:
         return undefined;
     }
