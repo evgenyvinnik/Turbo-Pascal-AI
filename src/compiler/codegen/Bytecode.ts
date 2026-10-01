@@ -234,6 +234,10 @@ export class Bytecode {
   /** The data segment: the globals and typed constants, in the main frame. */
   public dataSegment: SegmentLayout = EMPTY_SEGMENT;
 
+  /** The units {$O} overlays, in order, with their code: what the .OVR file
+   * holds and the overlay manager loads. */
+  public overlays: { name: string; code: number[] }[] = [];
+
   /** Each routine's frame on the stack, by the address the routine starts at. */
   public frames: Record<number, SegmentLayout> = {};
 

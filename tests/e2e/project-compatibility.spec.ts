@@ -465,3 +465,38 @@ end.`);
   await ide.waitForText('COUNT=0');
   await ide.waitForText('MISSING=[]');
 });
+
+test('overlays need Destination Disk, which writes the .OVR file OvrInit opens', async ({
+  page,
+}) => {
+  const ide = await Ide.open(page);
+  await importProject(
+    ide,
+    {
+      'OVLUNIT.PAS': `{$O+}
+unit OvlUnit;
+interface
+procedure Greet;
+implementation
+procedure Greet;
+begin WriteLn('OVERLAID GREETING') end;
+end.`,
+      'OVLMAIN.PAS': `program OvlMain;
+uses Overlay, OvlUnit;
+{$O OvlUnit}
+begin
+  OvrInit('OVLMAIN.OVR');
+  WriteLn('OVRRESULT=', OvrResult);
+  Greet;
+end.`,
+    },
+    'OVLMAIN.PAS'
+  );
+  await ide.press('Control+F9');
+  await ide.waitForText('Error 141: Cannot compile overlays to memory');
+  await ide.openMenu('C');
+  await ide.chooseItem('d');
+  await runCompiled(ide);
+  await ide.waitForText('OVERLAID GREETING');
+  await ide.waitForText('OVRRESULT=0');
+});

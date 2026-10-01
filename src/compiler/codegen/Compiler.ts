@@ -81,6 +81,8 @@ import {
 export interface CompilerOptions {
   /** Resolve a user unit from the current virtual workspace. Names are case insensitive. */
   resolveUnit?: (name: string) => string | UnitNode | undefined;
+  /** Compile > Destination: overlays need the disk, whose .OVR file they come from. */
+  destination?: 'memory' | 'disk';
 }
 interface CompiledUnit {
   node: UnitNode;
@@ -267,6 +269,8 @@ interface Scope {
   /** On a module's outermost scope: its switches as it starts, which the
    * global ones, $D and $L, keep for all of it. */
   module?: CompilerSwitches;
+  /** On an overlaid unit's outermost scope: its number among the overlays. */
+  overlay?: number;
   /** Value open array parameters, which the routine copies when it starts. */
   openCopies?: Variable[];
   symbols: Map<string, Symbol>;
@@ -411,6 +415,8 @@ export class Compiler {
   private typedConstants: { variable: Variable; stores: StaticStore[] }[] = [];
   private objectTypes: PascalType[] = [];
   private routineValues: Routine[] = [];
+  /** Each overlay's instructions, by address, gathered as they are emitted. */
+  private overlayCode: number[][] = [];
 
   compile(root: Node, options: CompilerOptions = {}): Bytecode {
     if (root.type === NodeType.UNIT) {
@@ -469,6 +475,7 @@ export class Compiler {
     this.addBuiltins();
     const programScope = this.scope;
     this.importUnits(program.uses ?? [], root);
+    this.overlayUnits(program, options);
     this.scope.nextOffset = this.globalOffset;
     this.declarations(program.block.declarations);
     this.globalOffset = this.scope.nextOffset;
@@ -504,7 +511,44 @@ export class Compiler {
         : [{ name: standard.name, address: MARK_SIZE + index, initial: standard.initial }]
     );
     this.compileBody(block, undefined);
+    for (const [index, addresses] of this.overlayCode.entries())
+      if (this.bytecode.overlays[index])
+        this.bytecode.overlays[index].code = addresses.map(
+          (address) => this.bytecode.istore[address] ?? 0
+        );
     return this.bytecode;
+  }
+  /** The units {$O Name} overlays: units the program uses, compiled {$O+}, of
+   * which there is a file to put them in. Of the standard units only Dos
+   * may be, and it has no code here to move. */
+  private overlayUnits(program: ProgramNode, options: CompilerOptions): void {
+    this.overlayCode = [];
+    for (const { name, line } of program.overlays ?? []) {
+      const at = { type: NodeType.IDENTIFIER, lineNumber: line } as Node;
+      if (options.destination === 'memory') this.fail(at, 'Cannot compile overlays to memory');
+      const key = name.toLowerCase();
+      if (key === 'dos' && this.standardUnits.has(key)) continue;
+      const unit = this.units.get(key);
+      if (!unit || unit.node.globalSwitches?.overlaysAllowed !== true)
+        this.fail(at, `Cannot overlay this unit: ${name}`);
+      if (unit.scope.overlay !== undefined) continue;
+      unit.scope.overlay = this.bytecode.overlays.length;
+      this.bytecode.overlays.push({ name: unit.node.name.toUpperCase(), code: [] });
+      this.overlayCode.push([]);
+    }
+  }
+  /** The overlay the code being compiled belongs to, if it is one's. */
+  private overlayOf(): number | undefined {
+    for (let at: Scope | null = this.scope; at; at = at.parent)
+      if (at.overlay !== undefined) return at.overlay;
+    return undefined;
+  }
+  /** Overlaid code starts by asking the overlay manager for its unit. */
+  private enterOverlay(): void {
+    const overlay = this.overlayOf();
+    if (overlay === undefined) return;
+    this.literal(overlay, INTEGER);
+    this.emit(Opcode.CSP, 1, InternalProcedure.OVERLAY_ENTER);
   }
 
   private importUnits(names: string[], node: Node): void {
@@ -683,6 +727,8 @@ export class Compiler {
     // it, and a run-time error there is found by address alone.
     if (this.moduleSwitches()?.debugInfo === false) this.bytecode.lineless[address] = true;
     else this.bytecode.sourceLines[address] = this.line;
+    const overlay = this.overlayCode.length ? this.overlayOf() : undefined;
+    if (overlay !== undefined) this.overlayCode[overlay]?.push(address);
     if (this.sourceFile) this.bytecode.sourceFiles[address] = this.sourceFile;
     if (opcode === Opcode.CSP) this.bytecode.ioChecks[address] = this.ioChecking;
     return address;
@@ -2103,6 +2149,7 @@ export class Compiler {
     if (typeof block.sourceFile === 'string') this.sourceFile = block.sourceFile;
     this.line = block.lineNumber ?? routine?.declaration.lineNumber ?? this.line;
     const entry = this.emit(Opcode.ENT);
+    if (routine) this.enterOverlay();
     for (const local of this.scope.locals) this.initialize(local.type, local.offset);
     // Lst is open for writing before any unit initialization runs.
     if (!routine && this.printerUsed) {
@@ -2787,6 +2834,7 @@ export class Compiler {
         this.scope = unit.scope;
         this.scope.nextOffset = parent.nextOffset;
         unit.debugStart = this.bytecode.getNextAddress();
+        if (unit.node.initialization.statements.length) this.enterOverlay();
         for (const statement of unit.node.initialization.statements) this.statement(statement);
         for (const exit of this.scope.exits) this.patch(exit);
         for (const label of this.scope.labels.values())
@@ -5548,8 +5596,9 @@ export class Compiler {
       return VOID;
     }
     if (builtin.procedureIndex >= 450 && builtin.procedureIndex <= 456) {
-      // Every unit is resident, so the Overlay unit's procedures succeed:
-      // OvrResult is ovrOk after each one.
+      // The overlay manager's procedures give OvrResult what they did.
+      if (!builtin.isFunction)
+        this.emit(Opcode.LDA, this.scope.level, this.standardVariable('OvrResult'));
       for (const [index, argument] of args.entries())
         this.requireType(
           argument,
@@ -5558,8 +5607,6 @@ export class Compiler {
         );
       this.emit(Opcode.CSP, args.length, builtin.procedureIndex);
       if (builtin.isFunction) return LONGINT;
-      this.emit(Opcode.LDA, this.scope.level, this.standardVariable('OvrResult'));
-      this.literal(0, INTEGER);
       this.emit(Opcode.STI, TypeCode.I);
       return VOID;
     }

@@ -33,6 +33,7 @@ import { programArgumentsDialog } from './programArgumentsDialog';
 import { parseGrepArguments, searchGrepFiles } from './grepSearch';
 import { sourcePath } from '@compiler/project';
 import { memorySizesDirective, type MemorySizes } from '@compiler/directives';
+import { encodeOverlayFile } from '@compiler/runtime/OverlayFile';
 import { openDosSession } from '@services/dos/dosSession';
 import { openNativePascalSession } from '@services/dos/nativePascal';
 
@@ -545,6 +546,7 @@ async function doCompile(
     numericProcessing: ide().compilerOptions.numeric?.[0] ?? false,
     emulation: ide().compilerOptions.numeric?.[1] ?? true,
     ...memorySizes(ide().optionDialogs['options.memory']),
+    destination: ide().destination === 'Disk' ? 'disk' : 'memory',
     sources,
     defines: ide()
       .defines.split(/[;,\s]+/)
@@ -586,6 +588,14 @@ async function doCompile(
     return;
   }
 
+  // Compiled to disk, a program's overlays go to its .OVR file, which OvrInit opens.
+  if (ide().destination === 'Disk' && result.bytecode?.overlays.length)
+    writeVirtualFile(
+      buf.path.replace(/(\.[^./\\]*)?$/, '.OVR'),
+      Array.from(encodeOverlayFile(result.bytecode.overlays), (byte) =>
+        String.fromCharCode(byte)
+      ).join('')
+    );
   ide().setLastCompile({
     file: buf.name,
     lines,

@@ -43,6 +43,8 @@ export class Parser {
   private overflowChecking = false;
   /** The program's {$M stack, low, high}, once one is read. */
   private memorySizes: MemorySizes | undefined;
+  /** The units {$O Name} overlays. */
+  private overlays: { name: string; line: number }[] = [];
   /** Within a typed constant's value, parentheses may hold an array or record. */
   private aggregateConstants = false;
   private lastCompoundEndLine = 1;
@@ -152,6 +154,9 @@ export class Parser {
       applyCompilerSwitches(this.currentToken.value, this.switches);
       const sizes = memorySizesDirective(this.currentToken.value, this.currentToken.lineNumber);
       if (sizes) this.memorySizes = sizes;
+      const overlay = /^\$O\s+([A-Z_]\w*)\s*$/i.exec(this.currentToken.value.trim());
+      if (overlay)
+        this.overlays.push({ name: overlay[1] ?? '', line: this.currentToken.lineNumber });
       this.ioChecking = this.switches.ioChecking;
       this.overflowChecking = this.switches.overflowChecking;
       this.currentToken = this.lexer.next();
@@ -269,6 +274,7 @@ export class Parser {
       lineNumber: line,
       globalSwitches,
       ...(this.memorySizes ? { memorySizes: this.memorySizes } : {}),
+      ...(this.overlays.length ? { overlays: this.overlays } : {}),
     };
   }
 

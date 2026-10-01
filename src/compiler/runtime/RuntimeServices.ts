@@ -9,6 +9,7 @@ import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { parseStrokeFont, type StrokeFont } from './StrokeFont';
 import { BGI_HEADER_BYTES, parseBgiDriver } from './BgiDriver';
+import { decodeOverlayFile, overlaySize, type OverlayUnit } from './OverlayFile';
 import { roundReal48 } from '../codegen/numeric';
 import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { ViewShape } from '../codegen/Bytecode';
@@ -34,6 +35,8 @@ interface Host extends MemoryAccess {
   stackPointer(): number;
   /** The heap top, which Mark records and Release returns to. */
   heapTop(): number;
+  /** Whether nothing has been allocated: HeapPtr is still HeapOrg. */
+  heapEmpty?(): boolean;
   releaseHeap(address: number): void;
   sound(frequency: number): void;
   /** A layout by its number, as an untyped parameter's caller passes it. */
@@ -112,9 +115,14 @@ export class RuntimeServices {
   private registeredFonts = new Map<number, StrokeFont>();
   /** The name of the driver InitGraph loaded. */
   private driverName = '';
-  /** The Overlay unit's buffer and probation sizes. Every unit is resident,
-   * so they only report back what the program set. */
+  /** The units {$O} overlays, which the program's .OVR file holds. */
+  overlays: readonly OverlayUnit[] = [];
+  /** The overlay manager, once OvrInit opens the file: the file, the buffer's
+   * size, the overlays in it, the least recently used first, and the
+   * probation area's size. */
+  private overlayFile: string | undefined;
   private overlayBuffer = 0;
+  private overlaysLoaded: number[] = [];
   private overlayRetry = 0;
   /** Interrupt vectors a program has set. The others hold the addresses of
    * the BIOS and DOS handlers, which only compare and restore. */
@@ -251,7 +259,9 @@ export class RuntimeServices {
     this.files.reset();
     this.dos.reset();
     this.clockOffset = 0;
+    this.overlayFile = undefined;
     this.overlayBuffer = 0;
+    this.overlaysLoaded = [];
     this.overlayRetry = 0;
     this.vectors.clear();
     this.host.sound(0);
@@ -613,21 +623,33 @@ export class RuntimeServices {
       case 309:
         this.host.write(b, this.vectors.get(a & 255) ?? 0xf000_0000 + (a & 255));
         return {};
-      // The Overlay unit: nothing to load, so each call succeeds.
+      // The Overlay unit. Each procedure gives what OvrResult becomes:
+      // ovrOk, ovrError (-1), ovrNotFound (-2) or ovrNoEMSDriver (-5).
       case 450:
+        return { result: this.overlayInit(String(args[0] ?? '')) };
       case 451:
-      case 456:
-        return {};
-      case 452:
-        this.overlayBuffer = Math.max(0, a);
-        return {};
+        // There is no EMS driver to load the overlays into.
+        return { result: this.overlayFile === undefined ? -1 : -5 };
+      case 452: {
+        // At least the largest overlay, and set before the heap is used.
+        const smallest = Math.max(0, ...this.overlays.map(overlaySize));
+        if (this.overlayFile === undefined || a < smallest || this.host.heapEmpty?.() === false)
+          return { result: -1 };
+        this.overlayBuffer = a;
+        return { result: 0 };
+      }
       case 453:
         return { result: this.overlayBuffer };
       case 454:
+        if (this.overlayFile === undefined) return { result: -1 };
         this.overlayRetry = Math.max(0, a);
-        return {};
+        return { result: 0 };
       case 455:
         return { result: this.overlayRetry };
+      case 456:
+        if (this.overlayFile === undefined) return { result: -1 };
+        this.overlaysLoaded = [];
+        return { result: 0 };
       // Turbo3: the heap in 16-byte paragraphs, and Turbo Pascal 3's video
       // attributes, yellow and light gray on black.
       case 461:
@@ -841,6 +863,50 @@ export class RuntimeServices {
         return { result: g.ycor };
     }
     throw new PascalError('Unknown Graph3 routine');
+  }
+  /** OvrInit: opens the overlay file, which must hold this program's
+   * overlays, and gives the buffer room for the largest. */
+  private overlayInit(name: string): number {
+    this.overlayFile = undefined;
+    this.overlaysLoaded = [];
+    const path = name.trim();
+    if (!path || !this.disk.exists(path)) return -2;
+    if (!this.overlayFileMatches(path)) return -1;
+    this.overlayFile = path;
+    this.overlayBuffer = Math.max(0, ...this.overlays.map(overlaySize));
+    return 0;
+  }
+  /** Whether a file holds this program's overlays, every one as compiled. */
+  private overlayFileMatches(path: string, only?: number): boolean {
+    if (!this.disk.exists(path)) return false;
+    const units = decodeOverlayFile(this.fileBytes(path));
+    if (!units || units.length !== this.overlays.length) return false;
+    return this.overlays.every(
+      (unit, index) =>
+        (only !== undefined && index !== only) ||
+        (units[index]?.name === unit.name &&
+          units[index].code.length === unit.code.length &&
+          units[index].code.every((word, at) => word === unit.code[at]))
+    );
+  }
+  /** An overlaid unit's code is entered: it must be in the buffer, or be
+   * read into it from the file, pushing out the least recently used. */
+  enterOverlay(index: number): void {
+    if (this.overlayFile === undefined) throw new PascalError('Overlay manager not installed');
+    const loaded = this.overlaysLoaded.indexOf(index);
+    if (loaded >= 0) {
+      this.overlaysLoaded.splice(loaded, 1);
+      this.overlaysLoaded.push(index);
+      return;
+    }
+    if (!this.overlayFileMatches(this.overlayFile, index))
+      throw new PascalError('Overlay file read error');
+    this.overlaysLoaded.push(index);
+    const size = (at: number) => overlaySize(this.overlays[at] ?? { name: '', code: [] });
+    let used = this.overlaysLoaded.reduce((total, at) => total + size(at), 0);
+    while (used > this.overlayBuffer && this.overlaysLoaded.length > 1) {
+      used -= size(this.overlaysLoaded.shift() ?? index);
+    }
   }
   /** A file on the drive: in the directory InitGraph was given, or else the
    * current one, as the Graph unit looks for drivers and fonts. */

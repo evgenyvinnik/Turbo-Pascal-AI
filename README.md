@@ -435,10 +435,19 @@ too. `Ptr(S, O)` keeps S and O, as does a variable declared `absolute S:O`:
 `Seg` and `Ofs` give them back, and pointers compare by segment and offset,
 so `Ptr($1234, $5678)` reaches the byte `Ptr($179B, 8)` does but is not equal
 to it. A structure, and the data segment, hold up to 65520 bytes, as in Turbo
-Pascal. It does not implement original overlay/linker formats. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
+Pascal. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
-circle's centre. The Overlays allowed option is retained as an IDE preference,
-since every unit stays resident.
+circle's centre. Overlays work as in Turbo Pascal: `{$O Name}` overlays a
+unit compiled `{$O+}` (Overlays allowed), which is otherwise error 144, and
+needs Compile > Destination Disk, which is otherwise error 141. Compiling to
+disk writes the program's `.OVR` file beside it, holding each overlaid
+unit's code (P-code here, where Turbo Pascal's holds 8086 code); `OvrInit`
+opens it, setting `OvrResult` to `ovrNotFound` or `ovrError` when it is
+missing or another program's. Entering an overlaid unit before the overlay
+manager is in is run-time error 208, and loading one into the buffer from a
+file that has gone is 209. `OvrSetBuf`, `OvrClearBuf`, `OvrSetRetry` and
+`OvrInitEMS` (with no EMS driver, `ovrNoEMSDriver`) follow Turbo Pascal's
+rules; the buffer does not take its bytes from the heap.
 The VM always enforces its memory/instruction limits. In 8087 code, `Sin`,
 `Cos`, `ArcTan`, `Ln` and `Exp` of an `Extended` or `Comp`, or stored in one,
 give Extended's 64 bits, the exact value rounded to the nearest; the 8087

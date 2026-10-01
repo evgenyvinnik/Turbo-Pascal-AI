@@ -103,6 +103,8 @@ export interface ProgramNode extends Node {
   globalSwitches?: CompilerSwitches;
   /** The sizes a {$M} directive gives. */
   memorySizes?: MemorySizes;
+  /** The units {$O Name} directives overlay, and where each was named. */
+  overlays?: { name: string; line: number }[];
 }
 
 /**

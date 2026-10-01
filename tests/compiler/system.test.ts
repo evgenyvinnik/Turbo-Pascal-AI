@@ -272,13 +272,15 @@ describe('Standard units beyond System', () => {
     ).toEqual(['TRUE TRUE']);
   });
 
-  it('lets Overlay programs run, with every unit resident', () => {
+  // With no T.OVR, as Turbo Pascal's: ovrNotFound, then ovrError from the
+  // manager that is not installed. tests/compiler/overlay-files.test.ts has a file.
+  it('reports through OvrResult an overlay file that is not there', () => {
     expect(
       execute(`{$O+,F+} program T; uses Overlay, Dos; {$O Dos}
       begin OvrInit('T.OVR'); WriteLn(OvrResult = ovrOk, ' ', OvrGetBuf); OvrInitEMS;
         OvrSetBuf(8192); OvrSetRetry(100); WriteLn(OvrGetBuf, ' ', OvrGetRetry, ' ', OvrTrapCount, OvrLoadCount, OvrFileMode);
         OvrResult := ovrError; OvrClearBuf; WriteLn(OvrResult) end.`)
-    ).toEqual(['TRUE 0', '8192 100 000', '0']);
+    ).toEqual(['FALSE 0', '0 0 000', '-1']);
     expect(() => compile("program T; begin OvrInit('T.OVR') end.")).toThrow(
       /Undeclared procedure or function "OvrInit"/
     );

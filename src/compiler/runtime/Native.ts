@@ -76,6 +76,9 @@ export enum InternalProcedure {
   /** A pointer value as the 32 bits of its segment and offset, for a value
    * typecast such as LongInt(@Buffer). */
   POINTER_BITS = 915,
+  /** The entry of an overlaid unit's code, by the unit's number: the overlay
+   * manager must be installed, and the unit in its buffer or its file. */
+  OVERLAY_ENTER = 916,
 }
 
 /**

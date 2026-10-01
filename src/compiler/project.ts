@@ -16,6 +16,8 @@ export interface ProjectOptions extends ParserOptions {
   defines?: readonly string[];
   includeDirectories?: readonly string[];
   unitDirectories?: readonly string[];
+  /** Compile > Destination, which overlays must be compiled to disk for. */
+  destination?: 'memory' | 'disk';
 }
 
 export { NativePascalRequired } from './errors/NativePascalRequired';
@@ -112,7 +114,10 @@ function remapDiagnostic(error: unknown, prepared: PreprocessedSource): void {
 
 export function compileProject(source: string, filename: string, options: ProjectOptions = {}) {
   const project = parseProject(source, filename, options);
-  const bytecode = new Compiler().compile(project.tree, { resolveUnit: project.resolveUnit });
+  const bytecode = new Compiler().compile(project.tree, {
+    resolveUnit: project.resolveUnit,
+    ...(options.destination ? { destination: options.destination } : {}),
+  });
   bytecode.sources = project.sources;
   return { tree: project.tree, bytecode };
 }

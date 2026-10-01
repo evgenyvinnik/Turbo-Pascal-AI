@@ -82,6 +82,8 @@ export const COMPILER_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   119: 'No inherited methods are accessible here',
   159: '286/287 instructions are not enabled',
   121: 'Invalid qualifier',
+  141: 'Cannot compile overlays to memory',
+  144: 'Cannot overlay this unit',
   162: 'ASM expected',
 };
 
@@ -115,6 +117,8 @@ export const RUNTIME_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   210: 'Object not initialized',
   211: 'Call to abstract method',
   215: 'Arithmetic overflow error',
+  208: 'Overlay manager not installed',
+  209: 'Overlay file read error',
   216: 'General protection fault',
 };
 
@@ -216,6 +220,8 @@ const COMPILE_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Unexpected token in statement:/, 113],
   [/^Array or string expected$|^An array variable is required$/, 121],
   [/^286\/287 instructions are not enabled$/, 159],
+  [/^Cannot compile overlays to memory$/, 141],
+  [/^Cannot overlay this unit\b/, 144],
 ];
 const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^File not found\b/, 2],
@@ -243,6 +249,8 @@ const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Object not initialized$/, 210],
   [/^Call to abstract method$/, 211],
   [/^Arithmetic overflow$/, 215],
+  [/^Overlay manager not installed$/, 208],
+  [/^Overlay file read error$/, 209],
   // Errors Turbo Pascal's real-mode run-time library has no check for, given
   // the number of the check that comes closest.
   [

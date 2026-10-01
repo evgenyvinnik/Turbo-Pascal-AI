@@ -260,6 +260,7 @@ export class Machine {
         heapAvailable: () => this.heap.available(),
         stackPointer: () => this.space.stackPointer(),
         heapTop: () => this.space.heapPointer(this.heap.pointer),
+        heapEmpty: () => this.heap.pointer === 0,
         releaseHeap: (address) => {
           this.releaseHeap(address);
         },
@@ -278,6 +279,7 @@ export class Machine {
       this.config.fileSystem,
       this.config.programArguments
     );
+    this.services.overlays = bytecode.overlays;
     this.low = new LowMemory({
       console: this.services.console,
       graphics: this.services.graphics,
@@ -1146,7 +1148,8 @@ export class Machine {
     if (
       procedureIndex >= 1000 ||
       (procedureIndex >= (InternalProcedure.VIEW as number) &&
-        procedureIndex <= (InternalProcedure.PORT as number))
+        procedureIndex <= (InternalProcedure.PORT as number)) ||
+      procedureIndex === (InternalProcedure.OVERLAY_ENTER as number)
     ) {
       this.quickProcedure(argCount, procedureIndex);
       return;
@@ -1183,6 +1186,9 @@ export class Machine {
         return;
       case InternalProcedure.RETYPE as number:
         this.push(this.space.retype(Number(args[0]), Number(args[1])));
+        return;
+      case InternalProcedure.OVERLAY_ENTER as number:
+        this.services.enterOverlay(Number(args[0]));
         return;
       case InternalProcedure.NORMALIZE_POINTERS as number: {
         const a = args[0] ?? 0,
