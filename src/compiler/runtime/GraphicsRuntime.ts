@@ -5,7 +5,7 @@ import { defined } from '../../utils/defined';
 /** The VGA's palette when BIOS mode 13h starts, as six-bit red, green and
  * blue: the sixteen EGA colors, a gray ramp, then rings of 24 hues at three
  * brightnesses and three saturations, and black. */
-function defaultVgaPalette(): [number, number, number][] {
+export function defaultVgaPalette(): [number, number, number][] {
   const ega: [number, number, number][] = [
     [0, 0, 0],
     [0, 0, 42],
