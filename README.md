@@ -290,7 +290,20 @@ filenames to keep both copies. A failed batch preserves existing files. Pascal
 programs cannot access the host filesystem or change the host clock. Source
 printing uses the browser's print dialog; the original DOS printer-filter
 settings are retained as UI preferences. Graph emulates VGA modes 640×200,
-640×350, and 640×480; unsupported drivers report a graphics error. BIOS mode
+640×350, and 640×480; unsupported drivers report a graphics error. `InitGraph` reads
+the driver's `.BGI` file, from its path or else the current directory, as
+Turbo Pascal does, and refuses one whose header is not that driver's
+(`grInvalidDriver`); with no file, the VGA's EGAVGA driver is taken as linked
+into the program. `InstallUserDriver` and `RegisterBGIdriver` (of a driver a
+program read into memory) take drivers by the names in their headers; a
+driver of another maker's, such as an SVGA one, is read but its 8086 code is
+not run, so `InitGraph` reports `grInvalidDriver` for it, or
+`grFileNotFound` without its file. `InstallUserFont` adds `.CHR` fonts from 11
+on, which `SetTextStyle` loads like the ten standard ones, and
+`RegisterBGIfont` takes a font already in memory, needing no file after.
+`GetDriverName`, `GetModeName`, `GetMaxMode`, `GetModeRange`, `GetGraphMode`,
+`SetGraphMode`, `RestoreCrtMode`, `GraphDefaults` and `SetGraphBufSize` are
+there too. BIOS mode
 13h (320×200 in 256 colors), which `INT 10h` sets from `Intr` or assembly,
 shows a dot per byte of `Mem[$A000:0]` onward, with the VGA's default palette,
 which ports 3C7h to 3C9h read and set.
@@ -422,8 +435,7 @@ too. `Ptr(S, O)` keeps S and O, as does a variable declared `absolute S:O`:
 `Seg` and `Ofs` give them back, and pointers compare by segment and offset,
 so `Ptr($1234, $5678)` reaches the byte `Ptr($179B, 8)` does but is not equal
 to it. A structure, and the data segment, hold up to 65520 bytes, as in Turbo
-Pascal. It does not implement original overlay/linker formats or `.BGI`
-loading. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
+Pascal. It does not implement original overlay/linker formats. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
 circle's centre. The Overlays allowed option is retained as an IDE preference,
 since every unit stays resident.

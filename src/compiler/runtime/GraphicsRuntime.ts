@@ -133,6 +133,10 @@ export class GraphicsRuntime {
     this.pixels = new Uint8Array(this.width * this.height);
     this.initialized = true;
     this.result = 0;
+    this.defaults();
+  }
+  /** GraphDefaults: the settings InitGraph starts with, the screen kept. */
+  defaults(): void {
     this.color = this.fillColor = 15;
     this.background = this.x = this.y = this.direction = this.font = this.horizontalJustify = 0;
     this.charSize = this.fillPattern = this.thickness = 1;
