@@ -170,7 +170,18 @@ export enum ClipMode {
 }
 
 /** Graph's constants that are not integers, in Pascal. */
-export const GRAPH_DECLARATIONS = 'const ClipOn = True; ClipOff = False;';
+export const GRAPH_DECLARATIONS = `const
+  ClipOn = True; ClipOff = False;
+  MaxColors = 15;
+type
+  PaletteType = record Size: Byte; Colors: array[0..MaxColors] of ShortInt end;
+  LineSettingsType = record LineStyle, Pattern, Thickness: Word end;
+  TextSettingsType = record Font, Direction, CharSize, Horiz, Vert: Word end;
+  FillSettingsType = record Pattern, Color: Word end;
+  FillPatternType = array[1..8] of Byte;
+  PointType = record X, Y: Integer end;
+  ViewPortType = record x1, y1, x2, y2: Integer; Clip: Boolean end;
+  ArcCoordsType = record X, Y, Xstart, Ystart, Xend, Yend: Integer end;`;
 
 /**
  * Graphics result codes
@@ -293,6 +304,13 @@ export enum GraphProcedure {
   // Aspect ratio
   SETASPECTRATIO = 290,
   GETASPECTRATIO = 291,
+
+  // Palette size and DAC, arcs and pages
+  GETPALETTESIZE = 219,
+  SETRGBPALETTE = 245,
+  GETARCCOORDS = 238,
+  SETACTIVEPAGE = 283,
+  SETVISUALPAGE = 284,
 }
 
 /**
@@ -869,6 +887,184 @@ export const GRAPH_VIEWPORT_PROCS: BuiltinDef[] = [
 /**
  * All Graph procedures
  */
+const value = (name: string) => ({ name, type: TypeKind.INTEGER, mode: ParamMode.VALUE });
+const out = (name: string) => ({ name, type: TypeKind.INTEGER, mode: ParamMode.VAR });
+/** A record or array of one of Graph's own types, passed with its layout. */
+const typed = (name: string, typeName: string) => ({
+  name,
+  type: TypeKind.POINTER,
+  mode: ParamMode.VAR,
+  typeName,
+});
+/** An untyped buffer, such as DrawPoly's points or GetImage's bitmap. */
+const buffer = (name: string) => ({
+  name,
+  type: TypeKind.POINTER,
+  mode: ParamMode.VAR,
+  buffer: true,
+});
+const procedure = (
+  name: string,
+  procedureIndex: number,
+  params: BuiltinDef['params'],
+  description: string,
+  returnType?: TypeKind
+): BuiltinDef => ({
+  name,
+  isFunction: returnType !== undefined,
+  ...(returnType === undefined ? {} : { returnType }),
+  params,
+  description,
+  procedureIndex,
+});
+
+/**
+ * Graphics state the program reads back or sets as a whole: palettes,
+ * settings records, polygons, images, aspect ratio and pages
+ */
+export const GRAPH_STATE_PROCS: BuiltinDef[] = [
+  procedure(
+    'SetPalette',
+    GraphProcedure.SETPALETTE,
+    [value('ColorNum'), value('Color')],
+    'Set a palette register to one of the 64 EGA colors'
+  ),
+  procedure(
+    'GetPalette',
+    GraphProcedure.GETPALETTE,
+    [typed('Palette', 'PaletteType')],
+    'Return the palette registers'
+  ),
+  procedure(
+    'SetAllPalette',
+    GraphProcedure.SETALLPALETTE,
+    [buffer('Palette')],
+    'Set every palette register, -1 leaving one as it is'
+  ),
+  procedure(
+    'GetDefaultPalette',
+    GraphProcedure.GETDEFAULTPALETTE,
+    [typed('Palette', 'PaletteType')],
+    'Return the palette InitGraph sets'
+  ),
+  procedure(
+    'GetPaletteSize',
+    GraphProcedure.GETPALETTESIZE,
+    [],
+    'Return the number of palette entries',
+    TypeKind.INTEGER
+  ),
+  procedure(
+    'SetRGBPalette',
+    GraphProcedure.SETRGBPALETTE,
+    [value('ColorNum'), value('RedValue'), value('GreenValue'), value('BlueValue')],
+    "Set a DAC entry's red, green and blue (VGA and IBM 8514)"
+  ),
+  procedure(
+    'DrawPoly',
+    GraphProcedure.DRAWPOLY,
+    [value('NumPoints'), buffer('PolyPoints')],
+    'Draw lines through an array of PointType'
+  ),
+  procedure(
+    'FillPoly',
+    GraphProcedure.FILLPOLY,
+    [value('NumPoints'), buffer('PolyPoints')],
+    'Fill and outline a polygon given as an array of PointType'
+  ),
+  procedure(
+    'GetFillSettings',
+    GraphProcedure.GETFILLSETTINGS,
+    [typed('FillInfo', 'FillSettingsType')],
+    'Return the fill pattern and color'
+  ),
+  procedure(
+    'SetFillPattern',
+    GraphProcedure.SETFILLPATTERN,
+    [typed('Pattern', 'FillPatternType'), value('Color')],
+    'Set a user fill pattern of eight rows of eight dots'
+  ),
+  procedure(
+    'GetFillPattern',
+    GraphProcedure.GETFILLPATTERN,
+    [typed('FillPattern', 'FillPatternType')],
+    'Return the user fill pattern'
+  ),
+  procedure(
+    'GetLineSettings',
+    GraphProcedure.GETLINESETTINGS,
+    [typed('LineInfo', 'LineSettingsType')],
+    'Return the line style, pattern and thickness'
+  ),
+  procedure(
+    'SetWriteMode',
+    GraphProcedure.SETWRITEMODE,
+    [value('WriteMode')],
+    'Draw lines by copying (CopyPut) or XORing (XORPut)'
+  ),
+  procedure(
+    'GetTextSettings',
+    GraphProcedure.GETTEXTSETTINGS,
+    [typed('TextInfo', 'TextSettingsType')],
+    'Return the font, direction, size and justification'
+  ),
+  procedure(
+    'GetViewSettings',
+    GraphProcedure.GETVIEWSETTINGS,
+    [typed('ViewPort', 'ViewPortType')],
+    'Return the viewport and whether it clips'
+  ),
+  procedure(
+    'GetArcCoords',
+    GraphProcedure.GETARCCOORDS,
+    [typed('ArcCoords', 'ArcCoordsType')],
+    'Return the center and ends of the last arc drawn'
+  ),
+  procedure(
+    'ImageSize',
+    GraphProcedure.IMAGESIZE,
+    [value('X1'), value('Y1'), value('X2'), value('Y2')],
+    'Return the bytes GetImage needs for a rectangle',
+    TypeKind.INTEGER
+  ),
+  procedure(
+    'GetImage',
+    GraphProcedure.GETIMAGE,
+    [value('X1'), value('Y1'), value('X2'), value('Y2'), buffer('BitMap')],
+    'Save a rectangle of the screen in a buffer'
+  ),
+  procedure(
+    'PutImage',
+    GraphProcedure.PUTIMAGE,
+    [value('X'), value('Y'), buffer('BitMap'), value('BitBlt')],
+    'Draw an image GetImage saved'
+  ),
+  procedure(
+    'SetAspectRatio',
+    GraphProcedure.SETASPECTRATIO,
+    [value('Xasp'), value('Yasp')],
+    'Change the aspect ratio circles are drawn with'
+  ),
+  procedure(
+    'GetAspectRatio',
+    GraphProcedure.GETASPECTRATIO,
+    [out('Xasp'), out('Yasp')],
+    "Return the screen's aspect ratio"
+  ),
+  procedure(
+    'SetActivePage',
+    GraphProcedure.SETACTIVEPAGE,
+    [value('Page')],
+    'Draw on another page of video memory'
+  ),
+  procedure(
+    'SetVisualPage',
+    GraphProcedure.SETVISUALPAGE,
+    [value('Page')],
+    'Show another page of video memory'
+  ),
+];
+
 export const ALL_GRAPH_PROCS: BuiltinDef[] = [
   ...GRAPH_INIT_PROCS,
   ...GRAPH_COLOR_PROCS,
@@ -876,6 +1072,7 @@ export const ALL_GRAPH_PROCS: BuiltinDef[] = [
   ...GRAPH_FILL_PROCS,
   ...GRAPH_TEXT_PROCS,
   ...GRAPH_VIEWPORT_PROCS,
+  ...GRAPH_STATE_PROCS,
 ];
 
 /**
@@ -963,6 +1160,70 @@ export const GRAPH_CONSTANTS: Map<string, number> = new Map<string, number>([
   ['TOPTEXT', VertJust.TopText],
 
   // Graphics result codes
+  // TP7's stroked fonts beyond the first four
+  ['SCRIPTFONT', 5],
+  ['SIMPLEXFONT', 6],
+  ['TRIPLEXSCRFONT', 7],
+  ['COMPLEXFONT', 8],
+  ['EUROPEANFONT', 9],
+  ['BOLDFONT', 10],
+  ['USERCHARSIZE', 0],
+
+  // PutImage's operations, and SetWriteMode's
+  ['NORMALPUT', 0],
+  ['COPYPUT', 0],
+  ['XORPUT', 1],
+  ['ORPUT', 2],
+  ['ANDPUT', 3],
+  ['NOTPUT', 4],
+
+  // The EGA's colors, as SetPalette numbers them
+  ['EGABLACK', 0],
+  ['EGABLUE', 1],
+  ['EGAGREEN', 2],
+  ['EGACYAN', 3],
+  ['EGARED', 4],
+  ['EGAMAGENTA', 5],
+  ['EGABROWN', 20],
+  ['EGALIGHTGRAY', 7],
+  ['EGADARKGRAY', 56],
+  ['EGALIGHTBLUE', 57],
+  ['EGALIGHTGREEN', 58],
+  ['EGALIGHTCYAN', 59],
+  ['EGALIGHTRED', 60],
+  ['EGALIGHTMAGENTA', 61],
+  ['EGAYELLOW', 62],
+  ['EGAWHITE', 63],
+
+  // The other drivers' modes, and the driver InitGraph keeps
+  ['CURRENTDRIVER', -128],
+  ['CGAC0', 0],
+  ['CGAC1', 1],
+  ['CGAC2', 2],
+  ['CGAC3', 3],
+  ['CGAHI', 4],
+  ['MCGAC0', 0],
+  ['MCGAC1', 1],
+  ['MCGAC2', 2],
+  ['MCGAC3', 3],
+  ['MCGAMED', 4],
+  ['MCGAHI', 5],
+  ['EGALO', 0],
+  ['EGAHI', 1],
+  ['EGA64LO', 0],
+  ['EGA64HI', 1],
+  ['EGAMONOHI', 3],
+  ['HERCMONOHI', 0],
+  ['ATT400C0', 0],
+  ['ATT400C1', 1],
+  ['ATT400C2', 2],
+  ['ATT400C3', 3],
+  ['ATT400MED', 4],
+  ['ATT400HI', 5],
+  ['IBM8514LO', 0],
+  ['IBM8514HI', 1],
+  ['PC3270HI', 0],
+
   ['GROK', GraphResult.grOk],
   ['GRNOINITGRAPH', GraphResult.grNoInitGraph],
   ['GRNOTDETECTED', GraphResult.grNotDetected],
@@ -978,6 +1239,8 @@ export const GRAPH_CONSTANTS: Map<string, number> = new Map<string, number>([
   ['GRIOERROR', GraphResult.grIOerror],
   ['GRINVALIDFONT', GraphResult.grInvalidFont],
   ['GRINVALIDFONTNUM', GraphResult.grInvalidFontNum],
+  ['GRINVALIDDEVICENUM', GraphResult.grInvalidDeviceNum],
+  ['GRINVALIDVERSION', GraphResult.grInvalidVersion],
 ]);
 
 /**

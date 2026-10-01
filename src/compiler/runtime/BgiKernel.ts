@@ -92,7 +92,7 @@ export class BgiDriverBackend {
     if (code < 0) throw new DriverRefused(code);
     this.width = word(2) + 1;
     this.height = word(4) + 1;
-    this.aspect = word(16);
+    this.aspect = word(14);
     const scratch = machine.scratchBytes();
     scratch.fill(0, DIT_OFFSET, DIT_OFFSET + 16);
     this.call(DriverFunction.Init, { es: SCRATCH_SEGMENT, bx: DIT_OFFSET });
@@ -271,6 +271,16 @@ export class BgiDriverBackend {
     });
     this.setColour(colour, fillColour);
     this.setFill(pattern);
+  }
+  /** SetPalette: the driver's PALETTE function, register AX to colour BX. */
+  setPalette(register: number, colour: number): void {
+    this.call(DriverFunction.Palette, { ax: register & 0x3fff, bx: colour & 0xffff });
+  }
+  /** SetRGBPalette: a DAC entry's six-bit red, green and blue, set as the
+   * VGA's ports would. */
+  setRgb(entry: number, red: number, green: number, blue: number): void {
+    this.machine.dac.set([red & 63, green & 63, blue & 63], (entry & 0xff) * 3);
+    this.machine.revision++;
   }
   /** Leaves graphics. */
   close(): void {

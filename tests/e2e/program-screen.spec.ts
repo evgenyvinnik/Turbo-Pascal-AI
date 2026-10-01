@@ -309,3 +309,35 @@ end.`;
   await ide.press('Enter');
   await expect(canvas).toHaveCount(0);
 });
+
+test('SetPalette and SetRGBPalette recolor what Graph has drawn', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program Pal;
+uses Graph;
+var d, m: Integer;
+begin
+  d := VGA; m := VGAHi; InitGraph(d, m, '');
+  SetFillStyle(SolidFill, 1); Bar(0, 0, 9, 9);
+  SetFillStyle(SolidFill, 2); Bar(10, 0, 19, 9);
+  SetPalette(1, EGAYellow);
+  SetRGBPalette(2, 255, 0, 255);
+  ReadLn;
+  CloseGraph;
+end.`);
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
+  await expect(canvas).toBeVisible();
+  const pixel = (x: number, y: number) =>
+    canvas.evaluate(
+      (element: HTMLCanvasElement, [px, py]) =>
+        Array.from(element.getContext('2d')?.getImageData(px ?? 0, py ?? 0, 1, 1).data ?? []),
+      [x, y]
+    );
+  // Register 1 now holds the EGA's yellow; register 2's DAC entry is magenta.
+  await expect.poll(() => pixel(5, 5)).toEqual([255, 255, 85, 255]);
+  await expect.poll(() => pixel(15, 5)).toEqual([255, 0, 255, 255]);
+  await ide.press('Enter');
+  await expect(canvas).toHaveCount(0);
+});

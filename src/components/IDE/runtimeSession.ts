@@ -251,6 +251,7 @@ function publish(session: Session, extra?: string): void {
   const cursor = console.getCursor();
   const consoleChanged = screen.console?.revision !== console.revision;
   const graphicsChanged = screen.graphics?.revision !== graphics.revision;
+  const colors = graphicsChanged ? graphics.colors() : undefined;
   useProgramScreenStore.setState({
     ...(consoleChanged
       ? {
@@ -274,8 +275,8 @@ function publish(session: Session, extra?: string): void {
             height: graphics.height,
             pixels: graphics.display(),
             revision: graphics.revision,
-            // 256 colours, in mode 13h or a loaded driver's mode.
-            ...(graphics.dac || graphics.external ? { colors: graphics.colors() ?? [] } : {}),
+            // The palette's colours: Graph's sixteen, mode 13h's or a driver's 256.
+            ...(colors ? { colors } : {}),
           },
         }
       : {}),

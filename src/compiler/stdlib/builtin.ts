@@ -35,6 +35,9 @@ export interface BuiltinParam {
   /** A type its unit declares, such as the Dos unit's SearchRec, which the
    * argument must have. Its byte layout is passed after its address. */
   typeName?: string;
+  /** An untyped `var` buffer, as Move takes: the argument's byte layout is
+   * passed after its address. */
+  buffer?: boolean;
 }
 
 /**
