@@ -75,4 +75,9 @@ describe('The 8086 that runs drivers', () => {
       sp: 0xfffe,
     });
   });
+
+  it('jumps and calls near, relative to the next instruction', () => {
+    const { cpu } = run('jumps');
+    expect([cpu.halted, cpu.get16(AX)]).toEqual([true, 14]);
+  });
 });

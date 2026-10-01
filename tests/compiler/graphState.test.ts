@@ -185,7 +185,7 @@ describe('pages and the aspect ratio', () => {
           SetGraphMode(VGAHi); GetAspectRatio(x, y); Write(x, ' ', y, ' ');
           SetAspectRatio(5000, 10000); Circle(100, 100, 20);
           WriteLn(GetPixel(120, 100), ' ', GetPixel(100, 90), ' ', GetPixel(100, 80)) end.`)
-    ).toEqual(['4167 10000 10000 10000 15 15 0']);
+    ).toEqual(['4500 10000 10000 10000 15 15 0']);
   });
 
   it("take a loaded driver's aspect ratio and 256 colors", () => {

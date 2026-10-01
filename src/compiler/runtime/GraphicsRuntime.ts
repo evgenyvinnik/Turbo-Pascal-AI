@@ -98,6 +98,9 @@ export interface GraphMode {
   colours: 2 | 4 | 16;
   pages: number;
   cga?: number;
+  /** GetAspectRatio's Xasp, over a Yasp of 10000, where it is known: the
+   * numbers 16-colour BGI drivers give their EGA and VGA modes. */
+  aspect?: number;
 }
 const cga = (adapter: string): Record<number, GraphMode> =>
   Object.fromEntries(
@@ -127,18 +130,20 @@ export const BUILT_IN_MODES: Record<number, Record<number, GraphMode>> = {
     5: { name: '640 x 480 MCGA', width: 640, height: 480, colours: 2, pages: 1 },
   },
   3: {
-    0: { name: '640 x 200 EGA', width: 640, height: 200, colours: 16, pages: 4 },
-    1: { name: '640 x 350 EGA', width: 640, height: 350, colours: 16, pages: 2 },
+    0: { name: '640 x 200 EGA', width: 640, height: 200, colours: 16, pages: 4, aspect: 4500 },
+    1: { name: '640 x 350 EGA', width: 640, height: 350, colours: 16, pages: 2, aspect: 7750 },
   },
   4: {
-    0: { name: '640 x 200 EGA64', width: 640, height: 200, colours: 16, pages: 1 },
-    1: { name: '640 x 350 EGA64', width: 640, height: 350, colours: 4, pages: 1 },
+    0: { name: '640 x 200 EGA64', width: 640, height: 200, colours: 16, pages: 1, aspect: 4500 },
+    1: { name: '640 x 350 EGA64', width: 640, height: 350, colours: 4, pages: 1, aspect: 7750 },
   },
-  5: { 3: { name: '640 x 350 EGA MONO', width: 640, height: 350, colours: 2, pages: 2 } },
+  5: {
+    3: { name: '640 x 350 EGA MONO', width: 640, height: 350, colours: 2, pages: 2, aspect: 7750 },
+  },
   9: {
-    0: { name: '640 x 200 VGA', width: 640, height: 200, colours: 16, pages: 4 },
-    1: { name: '640 x 350 VGA', width: 640, height: 350, colours: 16, pages: 2 },
-    2: { name: '640 x 480 VGA', width: 640, height: 480, colours: 16, pages: 1 },
+    0: { name: '640 x 200 VGA', width: 640, height: 200, colours: 16, pages: 4, aspect: 4500 },
+    1: { name: '640 x 350 VGA', width: 640, height: 350, colours: 16, pages: 2, aspect: 7750 },
+    2: { name: '640 x 480 VGA', width: 640, height: 480, colours: 16, pages: 1, aspect: 10000 },
   },
 };
 /** CGA's four-colour palettes 0 to 3: colours 1, 2 and 3 of each, as the
@@ -329,8 +334,12 @@ export class GraphicsRuntime {
     this.pixels = defined(this.pages[0]);
     this.activePage = this.visualPage = 0;
     this.planarDac = egaDac();
-    // A round circle on a 4:3 screen: its height in dots over its width.
-    this.aspect = { x: Math.round((10000 * this.height * 4) / (this.width * 3)), y: 10000 };
+    // A round circle on a 4:3 screen, where the mode gives no number: its
+    // height in dots over its width.
+    this.aspect = {
+      x: info.aspect ?? Math.round((10000 * this.height * 4) / (this.width * 3)),
+      y: 10000,
+    };
     this.initialized = true;
     this.result = 0;
     this.defaults();
