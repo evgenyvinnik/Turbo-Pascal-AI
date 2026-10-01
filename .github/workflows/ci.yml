@@ -55,7 +55,9 @@ jobs:
       - name: Install Free Pascal
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fpc
+          # The compiler and its run-time units: the fpc package would pull in
+          # some ninety more, GTK's among them, which no test uses.
+          sudo apt-get install -y --no-install-recommends fp-compiler fp-units-rtl
           echo "Free Pascal $(fpc -iV)"
       - run: bun run test:reference
       # Free Pascal's own tests: fails when a test in tests/fpc-suite/baseline.json stops passing.
