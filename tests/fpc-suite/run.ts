@@ -31,6 +31,7 @@ import { VirtualFileSystem } from '../../src/compiler/runtime/VirtualFileSystem'
 import { expectation, readHeader, type Expectation } from './header';
 import { firstError, samePlace, type ErrorSite } from './fpc-output';
 import pin from './pin.json';
+import { defined } from '../../src/utils/defined';
 
 const execute = promisify(execFile);
 const compiler = process.env.FPC_BIN ?? 'fpc';
@@ -490,7 +491,7 @@ for (const directory of directories) {
   await Promise.all(
     Array.from({ length: jobs }, async () => {
       for (let index = next++; index < tests.length; index = next++) {
-        const name = tests[index]!;
+        const name = defined(tests[index]);
         try {
           outcomes.push(
             await judge(path.join(folder, name), `${directory}/${name}`, sources, fpcVersion)

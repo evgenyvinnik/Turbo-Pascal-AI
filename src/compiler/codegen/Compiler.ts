@@ -3,6 +3,7 @@ import { Parser } from '../parser/Parser';
 import { Lexer, Stream } from '../lexer';
 import type { UnitNode } from '../parser/Node';
 import { PascalError } from '../errors/PascalError';
+import type { CompilerSwitches } from '../directives';
 import {
   NodeType,
   type Node,
@@ -38,7 +39,18 @@ import { Opcode, TypeCode, MARK_SIZE } from '../types';
 import { InternalProcedure, NativeRegistry } from '../runtime/Native';
 import { CONSOLE_INPUT, CONSOLE_KEYBOARD, CONSOLE_OUTPUT } from '../runtime/FileRuntime';
 import { LINEAR_BASE, farAddress } from '../runtime/AddressSpace';
-import { Float80, extendedOperation, parseReal, sqrtReal, type Real } from './float80';
+import {
+  Float80,
+  arcTanReal,
+  cosReal,
+  expReal,
+  extendedOperation,
+  lnReal,
+  parseReal,
+  sinReal,
+  sqrtReal,
+  type Real,
+} from './float80';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { RawInstruction } from '../asm/parse';
 import { assemble, type AsmName } from '../asm/resolve';
@@ -65,10 +77,13 @@ import {
   defaultRealWidth,
   formatReal,
 } from './numeric';
+import { defined } from '../../utils/defined';
 
 export interface CompilerOptions {
   /** Resolve a user unit from the current virtual workspace. Names are case insensitive. */
   resolveUnit?: (name: string) => string | UnitNode | undefined;
+  /** Compile > Destination: overlays need the disk, whose .OVR file they come from. */
+  destination?: 'memory' | 'disk';
 }
 interface CompiledUnit {
   node: UnitNode;
@@ -252,6 +267,11 @@ interface Scope {
   level: number;
   /** On a module's outermost scope: the module is compiled for the 8087. */
   coprocessor?: boolean;
+  /** On a module's outermost scope: its switches as it starts, which the
+   * global ones, $D and $L, keep for all of it. */
+  module?: CompilerSwitches;
+  /** On an overlaid unit's outermost scope: its number among the overlays. */
+  overlay?: number;
   /** Value open array parameters, which the routine copies when it starts. */
   openCopies?: Variable[];
   symbols: Map<string, Symbol>;
@@ -340,6 +360,14 @@ const INTERMEDIATE: PascalType = { ...EXTENDED, approximate: true };
 const EXTENDED_CONSTANT: PascalType = { ...INTERMEDIATE, extendedValue: true };
 /** Pi as the 8087's FLDPI loads it, to 64 bits. */
 const EXTENDED_PI = new Float80(false, 0xc90fdaa22168c235n, -62);
+/** The functions the 8087 computes to Extended's 64 bits, by name. */
+const TRANSCENDENTAL: Readonly<Record<string, (value: Real, line: number) => Real>> = {
+  sin: sinReal,
+  cos: cosReal,
+  arctan: arcTanReal,
+  exp: expReal,
+  ln: lnReal,
+};
 const BOOLEAN: PascalType = { kind: 'boolean', size: 1, byteSize: 1, low: 0, high: 1 };
 const CHAR: PascalType = { kind: 'char', size: 1, byteSize: 1, low: 0, high: 255 };
 const STRING: PascalType = { kind: 'string', size: 1, byteSize: 256, capacity: 255 };
@@ -388,6 +416,8 @@ export class Compiler {
   private typedConstants: { variable: Variable; stores: StaticStore[] }[] = [];
   private objectTypes: PascalType[] = [];
   private routineValues: Routine[] = [];
+  /** Each overlay's instructions, by address, gathered as they are emitted. */
+  private overlayCode: number[][] = [];
 
   compile(root: Node, options: CompilerOptions = {}): Bytecode {
     if (root.type === NodeType.UNIT) {
@@ -441,9 +471,12 @@ export class Compiler {
     this.scope = this.newScope(null, program.name);
     this.scope.nextOffset = this.globalOffset;
     this.scope.coprocessor = this.usesCoprocessor(root);
+    if (program.globalSwitches) this.scope.module = program.globalSwitches;
+    if (program.memorySizes) this.bytecode.memorySizes = program.memorySizes;
     this.addBuiltins();
     const programScope = this.scope;
     this.importUnits(program.uses ?? [], root);
+    this.overlayUnits(program, options);
     this.scope.nextOffset = this.globalOffset;
     this.declarations(program.block.declarations);
     this.globalOffset = this.scope.nextOffset;
@@ -479,7 +512,44 @@ export class Compiler {
         : [{ name: standard.name, address: MARK_SIZE + index, initial: standard.initial }]
     );
     this.compileBody(block, undefined);
+    for (const [index, addresses] of this.overlayCode.entries())
+      if (this.bytecode.overlays[index])
+        this.bytecode.overlays[index].code = addresses.map(
+          (address) => this.bytecode.istore[address] ?? 0
+        );
     return this.bytecode;
+  }
+  /** The units {$O Name} overlays: units the program uses, compiled {$O+}, of
+   * which there is a file to put them in. Of the standard units only Dos
+   * may be, and it has no code here to move. */
+  private overlayUnits(program: ProgramNode, options: CompilerOptions): void {
+    this.overlayCode = [];
+    for (const { name, line } of program.overlays ?? []) {
+      const at = { type: NodeType.IDENTIFIER, lineNumber: line } as Node;
+      if (options.destination === 'memory') this.fail(at, 'Cannot compile overlays to memory');
+      const key = name.toLowerCase();
+      if (key === 'dos' && this.standardUnits.has(key)) continue;
+      const unit = this.units.get(key);
+      if (!unit || unit.node.globalSwitches?.overlaysAllowed !== true)
+        this.fail(at, `Cannot overlay this unit: ${name}`);
+      if (unit.scope.overlay !== undefined) continue;
+      unit.scope.overlay = this.bytecode.overlays.length;
+      this.bytecode.overlays.push({ name: unit.node.name.toUpperCase(), code: [] });
+      this.overlayCode.push([]);
+    }
+  }
+  /** The overlay the code being compiled belongs to, if it is one's. */
+  private overlayOf(): number | undefined {
+    for (let at: Scope | null = this.scope; at; at = at.parent)
+      if (at.overlay !== undefined) return at.overlay;
+    return undefined;
+  }
+  /** Overlaid code starts by asking the overlay manager for its unit. */
+  private enterOverlay(): void {
+    const overlay = this.overlayOf();
+    if (overlay === undefined) return;
+    this.literal(overlay, INTEGER);
+    this.emit(Opcode.CSP, 1, InternalProcedure.OVERLAY_ENTER);
   }
 
   private importUnits(names: string[], node: Node): void {
@@ -544,6 +614,7 @@ export class Compiler {
     this.units.set(key, unit);
     this.scope = scope;
     scope.coprocessor = this.usesCoprocessor(unitNode);
+    if (unitNode.globalSwitches) scope.module = unitNode.globalSwitches;
     this.addBuiltins();
     this.importUnits(unitNode.interfaceUses, unitNode);
     scope.nextOffset = this.globalOffset;
@@ -621,7 +692,7 @@ export class Compiler {
     this.standardSymbols = new Map([['system', new Map<string, Symbol>()]]);
     const system = (name: string, symbol: Symbol) => {
       this.scope.symbols.set(name, symbol);
-      this.standardSymbols.get('system')!.set(name, symbol);
+      defined(this.standardSymbols.get('system')).set(name, symbol);
     };
     for (const [name, type] of Object.entries(types)) system(name, { kind: 'type', type });
     for (const standard of STANDARD_VARIABLES) if (!standard.unit) this.declareStandard(standard);
@@ -653,7 +724,12 @@ export class Compiler {
   private emit(opcode: Opcode, p = 0, q = 0): number {
     const address = this.bytecode.getNextAddress();
     this.bytecode.add(opcode, p, q);
-    this.bytecode.sourceLines[address] = this.line;
+    // Under {$D-} a module keeps no line numbers: the debugger cannot stop in
+    // it, and a run-time error there is found by address alone.
+    if (this.moduleSwitches()?.debugInfo === false) this.bytecode.lineless[address] = true;
+    else this.bytecode.sourceLines[address] = this.line;
+    const overlay = this.overlayCode.length ? this.overlayOf() : undefined;
+    if (overlay !== undefined) this.overlayCode[overlay]?.push(address);
     if (this.sourceFile) this.bytecode.sourceFiles[address] = this.sourceFile;
     if (opcode === Opcode.CSP) this.bytecode.ioChecks[address] = this.ioChecking;
     return address;
@@ -702,9 +778,10 @@ export class Compiler {
         };
     }
     const [qualifier, member] = name.toLowerCase().split('.');
-    const standard = member === undefined ? undefined : this.standardSymbols.get(qualifier!);
-    if (standard && (qualifier === 'system' || this.standardUnits.has(qualifier!))) {
-      const symbol = standard.get(member!);
+    const standard =
+      member === undefined ? undefined : this.standardSymbols.get(defined(qualifier));
+    if (standard && (qualifier === 'system' || this.standardUnits.has(defined(qualifier)))) {
+      const symbol = standard.get(defined(member));
       if (symbol) return symbol;
       const constant = this.modules.lookupConstant(name);
       if (constant) return { kind: 'constant', type: INTEGER, value: constant.value };
@@ -727,9 +804,9 @@ export class Compiler {
         };
       if (name.includes('.')) {
         const [unitName, member] = name.toLowerCase().split('.');
-        const exported = scope.imports.get(unitName!)?.get(member!);
+        const exported = scope.imports.get(defined(unitName))?.get(defined(member));
         if (exported) return exported;
-        if (scope.name.toLowerCase() === unitName) return scope.symbols.get(member!);
+        if (scope.name.toLowerCase() === unitName) return scope.symbols.get(defined(member));
       } else {
         for (const exports of [...scope.imports.values()].reverse()) {
           const imported = exports.get(name.toLowerCase());
@@ -828,7 +905,7 @@ export class Compiler {
   }
   private integerRangeType(low: number, high: number, node: Node): PascalType {
     const type = [SHORTINT, BYTE, INTEGER, WORD, LONGINT].find(
-      (candidate) => low >= candidate.low! && high <= candidate.high!
+      (candidate) => low >= defined(candidate.low) && high <= defined(candidate.high)
     );
     if (!type || !Number.isSafeInteger(low) || !Number.isSafeInteger(high))
       this.fail(node, 'Integer constant out of range');
@@ -846,8 +923,8 @@ export class Compiler {
     const type =
       [SHORTINT, BYTE, INTEGER, WORD, LONGINT].find(
         (candidate) =>
-          Math.min(a.low!, b.low!) >= candidate.low! &&
-          Math.max(a.high!, b.high!) <= candidate.high!
+          Math.min(defined(a.low), defined(b.low)) >= defined(candidate.low) &&
+          Math.max(defined(a.high), defined(b.high)) <= defined(candidate.high)
       ) ?? LONGINT;
     return ['and', 'or', 'xor'].includes(operator) ? type : this.promoteInteger(type);
   }
@@ -981,6 +1058,11 @@ export class Compiler {
     return type.kind === 'real' && type.byteSize !== 6;
   }
   /** Whether the current module is compiled for the 8087 ({$N+}). */
+  /** The global switches of the module a scope lies in. */
+  private moduleSwitches(scope: Scope = this.scope): CompilerSwitches | undefined {
+    for (let at: Scope | null = scope; at; at = at.parent) if (at.module) return at.module;
+    return undefined;
+  }
   private coprocessorMode(): boolean {
     let scope = this.scope;
     while (scope.parent) scope = scope.parent;
@@ -1080,7 +1162,7 @@ export class Compiler {
           (target.kind === 'array' &&
             target.low === source.low &&
             target.high === source.high &&
-            this.compatible(target.element!, source.element!, true))
+            this.compatible(defined(target.element), defined(source.element), true))
         );
       return true;
     }
@@ -1247,9 +1329,9 @@ export class Compiler {
           const declaration = node as ProcedureNode | FunctionNode;
           const parameters = this.parameterList(declaration.parameters);
           if (declaration.name.includes('.')) {
-            const owner = this.lookup(declaration.name.split('.')[0]!);
+            const owner = this.lookup(defined(declaration.name.split('.')[0]));
             if (owner?.kind !== 'type' || !owner.type.object)
-              this.fail(node, `Unknown object type "${declaration.name.split('.')[0]!}"`);
+              this.fail(node, `Unknown object type "${defined(declaration.name.split('.')[0])}"`);
           } else if (['constructor', 'destructor'].includes(String(declaration.routineKind)))
             this.fail(node, `A ${String(declaration.routineKind)} must be a method of an object`);
           const previous = this.scope.symbols.get(declaration.name.toLowerCase());
@@ -1291,7 +1373,9 @@ export class Compiler {
             if (
               parameters.length &&
               (parameters.length !== previous.parameters.length ||
-                parameters.some((param, i) => !this.sameParameter(param, previous.parameters[i]!)))
+                parameters.some(
+                  (param, i) => !this.sameParameter(param, defined(previous.parameters[i]))
+                ))
             )
               this.fail(node, 'Forward declaration parameter mismatch');
             if (previous.declaration.routineKind !== declaration.routineKind)
@@ -1351,7 +1435,7 @@ export class Compiler {
     if (a.type.openArray || b.type.openArray)
       return (
         Boolean(a.type.openArray && b.type.openArray) &&
-        this.compatible(a.type.element!, b.type.element!, true)
+        this.compatible(defined(a.type.element), defined(b.type.element), true)
       );
     return this.compatible(a.type, b.type, true);
   }
@@ -1392,12 +1476,14 @@ export class Compiler {
     };
   }
   private proceduralCompatible(target: PascalType, source: PascalType): boolean {
-    const a = target.procedureSignature!,
-      b = source.procedureSignature!;
+    const a = defined(target.procedureSignature),
+      b = defined(source.procedureSignature);
     return (
       this.compatible(a.result, b.result, true) &&
       a.parameters.length === b.parameters.length &&
-      a.parameters.every((parameter, index) => this.sameParameter(parameter, b.parameters[index]!))
+      a.parameters.every((parameter, index) =>
+        this.sameParameter(parameter, defined(b.parameters[index]))
+      )
     );
   }
   private inModule(owner: Scope): boolean {
@@ -1440,7 +1526,7 @@ export class Compiler {
       for (const fieldName of field.names) {
         if (
           fields.has(fieldName.toLowerCase()) ||
-          type.object!.methods.has(fieldName.toLowerCase())
+          defined(type.object).methods.has(fieldName.toLowerCase())
         )
           this.fail(field, `Duplicate object member "${fieldName}"`);
         fields.set(fieldName.toLowerCase(), {
@@ -1458,7 +1544,7 @@ export class Compiler {
       if (declared.has(key) || fields.has(key))
         this.fail(method, `Duplicate object member "${method.name}"`);
       declared.add(key);
-      const inherited = type.object!.methods.get(key);
+      const inherited = defined(type.object).methods.get(key);
       const declaration = { ...method, name: `${name}.${method.name}` };
       this.declarations([declaration]);
       const routine = this.scope.symbols.get(declaration.name.toLowerCase()) as Routine;
@@ -1473,14 +1559,14 @@ export class Compiler {
           this.fail(method, 'Dynamic method index must be 1..65535');
         routine.dynamicIndex = Number(index.value);
         if (
-          [...type.object!.methods].some(
+          [...defined(type.object).methods].some(
             ([name, other]) => name !== key && other.dynamicIndex === routine.dynamicIndex
           )
         )
           this.fail(method, 'Duplicate dynamic method index');
       }
-      if (routine.virtual && !type.object!.hasVirtual) {
-        type.object!.hasVirtual = true;
+      if (routine.virtual && !defined(type.object).hasVirtual) {
+        defined(type.object).hasVirtual = true;
         type.byteSize += 2;
       }
       if (inherited?.virtual) {
@@ -1490,15 +1576,16 @@ export class Compiler {
           routine.parameters.length !== inherited.parameters.length ||
           routine.parameters.some(
             (parameter, index) =>
-              parameter.name.toLowerCase() !== inherited.parameters[index]!.name.toLowerCase() ||
-              parameter.reference !== inherited.parameters[index]!.reference ||
-              !this.compatible(parameter.type, inherited.parameters[index]!.type, true)
+              parameter.name.toLowerCase() !==
+                defined(inherited.parameters[index]).name.toLowerCase() ||
+              parameter.reference !== defined(inherited.parameters[index]).reference ||
+              !this.compatible(parameter.type, defined(inherited.parameters[index]).type, true)
           ) ||
           !this.compatible(routine.type, inherited.type, true)
         )
           this.fail(method, 'Virtual method override must match the inherited signature');
       }
-      type.object!.methods.set(key, routine);
+      defined(type.object).methods.set(key, routine);
     }
   }
 
@@ -1965,8 +2052,8 @@ export class Compiler {
     for (const element of node.elements as Node[]) {
       const low = element.type === NodeType.RANGE ? (element.low as Node) : element;
       const high = element.type === NodeType.RANGE ? (element.high as Node) : undefined;
-      this.requireType(low, type.base!, this.expression(low));
-      if (high) this.requireType(high, type.base!, this.expression(high));
+      this.requireType(low, defined(type.base), this.expression(low));
+      if (high) this.requireType(high, defined(type.base), this.expression(high));
       const line = node.lineNumber ?? this.line;
       this.helper(
         `set-add-${high ? 'range' : 'value'}-${String(line)}`,
@@ -2007,7 +2094,7 @@ export class Compiler {
       this.scope.self.parameter = true;
     }
     if (routine.type.kind !== 'void' && !this.scope.constructorBody)
-      this.scope.symbols.set(routine.name.split('.').at(-1)!.toLowerCase(), {
+      this.scope.symbols.set(defined(routine.name.split('.').at(-1)).toLowerCase(), {
         kind: 'variable',
         name: routine.name,
         type: routine.type,
@@ -2050,7 +2137,10 @@ export class Compiler {
     const frame = this.frame(routine, parameters);
     // A routine's variables must fit a segment too.
     if (frame.bytes > 65536) this.fail(declaration, 'Too many variables');
-    this.bytecode.frames[routine.address] = frame;
+    // Under {$S+} the routine checks, as it is entered, that its frame fits
+    // the stack that remains.
+    this.bytecode.frames[routine.address] =
+      declaration.stackChecking === false ? frame : { ...frame, stackCheck: true };
     for (const patch of routine.patches) this.patch(patch, routine.address);
     if (declaration.interrupt)
       this.bytecode.interruptHandlers[routine.proceduralId] = {
@@ -2066,6 +2156,7 @@ export class Compiler {
     if (typeof block.sourceFile === 'string') this.sourceFile = block.sourceFile;
     this.line = block.lineNumber ?? routine?.declaration.lineNumber ?? this.line;
     const entry = this.emit(Opcode.ENT);
+    if (routine) this.enterOverlay();
     for (const local of this.scope.locals) this.initialize(local.type, local.offset);
     // Lst is open for writing before any unit initialization runs.
     if (!routine && this.printerUsed) {
@@ -2107,10 +2198,10 @@ export class Compiler {
       const { element, openHigh } = variable.type;
       this.emit(Opcode.LDA, 0, variable.offset);
       this.addressVariable(variable);
-      this.loadVariable(openHigh!);
+      this.loadVariable(defined(openHigh));
       this.literal(1, INTEGER);
       this.emit(Opcode.ADI);
-      this.literal(element!.size, INTEGER);
+      this.literal(defined(element).size, INTEGER);
       this.emit(Opcode.MPI);
       this.emit(Opcode.CSP, 2, InternalProcedure.COPY_TO_HEAP);
       this.emit(Opcode.STI, TypeCode.A);
@@ -2154,6 +2245,8 @@ export class Compiler {
     this.recordDebugScope(this.scope, entry, this.bytecode.getNextAddress(), this.scope.nextOffset);
   }
   private recordDebugScope(scope: Scope, start: number, end: number, frameSize: number): void {
+    // Under {$L-} a module's routines keep no names for their locals.
+    const hidden = scope.level > 0 && this.moduleSwitches(scope)?.localSymbols === false;
     this.bytecode.debugScopes.push({
       id: scope.id,
       parentId: scope.parent?.id ?? null,
@@ -2163,7 +2256,7 @@ export class Compiler {
       end,
       frameSize,
       variables: [...scope.symbols.values()]
-        .filter((symbol): symbol is Variable => symbol.kind === 'variable')
+        .filter((symbol): symbol is Variable => !hidden && symbol.kind === 'variable')
         .map((variable) => ({
           name: variable.name,
           offset: variable.offset,
@@ -2173,7 +2266,7 @@ export class Compiler {
           type: this.debugType(variable.type),
         })),
       constants: [...scope.symbols.entries()]
-        .filter((entry): entry is [string, Constant] => entry[1].kind === 'constant')
+        .filter((entry): entry is [string, Constant] => !hidden && entry[1].kind === 'constant')
         .map(([name, value]) => ({ name, value: value.value, type: this.debugType(value.type) })),
     });
   }
@@ -2713,10 +2806,10 @@ export class Compiler {
 
   private initialize(type: PascalType, offset: number): void {
     if (type.kind === 'array') {
-      for (let index = 0; index < type.size; index += type.element!.size)
-        this.initialize(type.element!, offset + index);
+      for (let index = 0; index < type.size; index += defined(type.element).size)
+        this.initialize(defined(type.element), offset + index);
     } else if (type.kind === 'record') {
-      for (const field of type.initialLayout ?? type.fields!.values())
+      for (const field of type.initialLayout ?? defined(type.fields).values())
         this.initialize(field.type, offset + field.offset);
     } else {
       this.emit(Opcode.LDA, 0, offset);
@@ -2748,6 +2841,7 @@ export class Compiler {
         this.scope = unit.scope;
         this.scope.nextOffset = parent.nextOffset;
         unit.debugStart = this.bytecode.getNextAddress();
+        if (unit.node.initialization.statements.length) this.enterOverlay();
         for (const statement of unit.node.initialization.statements) this.statement(statement);
         for (const exit of this.scope.exits) this.patch(exit);
         for (const label of this.scope.labels.values())
@@ -2789,7 +2883,7 @@ export class Compiler {
         // Turbo Pascal's goto stays within the routine or program block that
         // declares the label.
         if (destination !== this.scope) this.fail(node, 'Label not within current block');
-        const label = destination.labels.get(key)!;
+        const label = defined(destination.labels.get(key));
         label.uses.push(node);
         const jump = this.emit(
           Opcode.UJP,
@@ -3001,21 +3095,22 @@ export class Compiler {
     const offsets = new Set<number>();
     if (type.object) offsets.add(start);
     if (type.kind === 'record')
-      for (const [name, field] of type.fields!) {
+      for (const [name, field] of defined(type.fields)) {
         if (name === '$vmt') continue;
         for (const offset of this.objectVmtOffsets(field.type, start + field.offset))
           offsets.add(offset);
       }
     if (type.kind === 'array')
-      for (let offset = 0; offset < type.size; offset += type.element!.size)
-        for (const item of this.objectVmtOffsets(type.element!, start + offset)) offsets.add(item);
+      for (let offset = 0; offset < type.size; offset += defined(type.element).size)
+        for (const item of this.objectVmtOffsets(defined(type.element), start + offset))
+          offsets.add(item);
     return offsets;
   }
   private assignment(node: AssignmentNode): void {
     // A store into a variant case brings its record's other cases up to date.
     if (this.variantChain(node.target).length) {
       this.withVariantSyncs([node.target], [false], ([target]) => {
-        this.assign({ ...node, target: target! });
+        this.assign({ ...node, target: defined(target) });
       });
       return;
     }
@@ -3315,7 +3410,7 @@ export class Compiler {
         }
         if (call.name.toLowerCase() === 'assigned') return BOOLEAN;
         const callable = this.proceduralTarget(call);
-        if (callable) return callable.type.procedureSignature!.result;
+        if (callable) return defined(callable.type.procedureSignature).result;
         const method = this.methodTarget(call);
         if (method) return method.routine.type;
         const cast = this.lookup(call.name);
@@ -3336,7 +3431,7 @@ export class Compiler {
         if (this.charPointer(type) && access.indices.length === 1) return CHAR;
         for (const index of access.indices) {
           if (type.kind === 'string') type = CHAR;
-          else if (type.kind === 'array') type = type.element!;
+          else if (type.kind === 'array') type = defined(type.element);
           else this.fail(index, 'Array or string expected');
         }
         return !rawProcedure && type.procedureSignature ? type.procedureSignature.result : type;
@@ -3562,7 +3657,11 @@ export class Compiler {
             return CHAR;
           }
           this.expression(access.array);
-          this.requireType(access.indices[0]!, INTEGER, this.expression(access.indices[0]!));
+          this.requireType(
+            defined(access.indices[0]),
+            INTEGER,
+            this.expression(defined(access.indices[0]))
+          );
           const line = node.lineNumber ?? this.line;
           this.helper(`string-index-${String(line)}`, 2, (value, index) => {
             const text = String(value),
@@ -3910,7 +4009,11 @@ export class Compiler {
       if (this.charPointer(this.expressionType(access.array)) && access.indices.length === 1) {
         if (node.extendedSyntax === false) this.fail(node, 'Array or string expected');
         this.expression(access.array);
-        this.requireType(access.indices[0]!, INTEGER, this.expression(access.indices[0]!));
+        this.requireType(
+          defined(access.indices[0]),
+          INTEGER,
+          this.expression(defined(access.indices[0]))
+        );
         this.emit(Opcode.ADI);
         return CHAR;
       }
@@ -3919,8 +4022,12 @@ export class Compiler {
         if (access.indices.length !== 1) this.fail(node, 'A string requires one index');
         // A constant index no string can have is rejected while compiling;
         // one within 0..255 but past this string's length fails when it runs.
-        this.checkConstantRange(access.indices[0]!, { ...INTEGER, low: 0, high: 255 });
-        this.requireType(access.indices[0]!, INTEGER, this.expression(access.indices[0]!));
+        this.checkConstantRange(defined(access.indices[0]), { ...INTEGER, low: 0, high: 255 });
+        this.requireType(
+          defined(access.indices[0]),
+          INTEGER,
+          this.expression(defined(access.indices[0]))
+        );
         this.stringCapacity(type);
         this.emit(Opcode.CSP, 3, InternalProcedure.STRING_CHARACTER_ADDRESS);
         return CHAR;
@@ -3931,12 +4038,12 @@ export class Compiler {
           this.checkConstantRange(index, { ...INTEGER, low: type.low, high: type.high });
         const indexType = this.expression(index);
         if (!this.ordinal(indexType)) this.fail(index, 'Array index must be ordinal');
-        this.requireType(index, type.index!, indexType);
+        this.requireType(index, defined(type.index), indexType);
         if (type.openArray) {
           // Open arrays run from 0 to the High their caller passed.
           const line = node.lineNumber ?? this.line,
             checked = Boolean(node.rangeChecking);
-          this.loadVariable(type.openHigh!);
+          this.loadVariable(defined(type.openHigh));
           this.helper(`open-array-index-${String(line)}-${String(checked)}`, 2, (value, high) => {
             const indexValue = Number(value);
             if (
@@ -3949,12 +4056,12 @@ export class Compiler {
               );
             return indexValue;
           });
-          this.emit(Opcode.IXA, 0, type.element!.size);
-          type = type.element!;
+          this.emit(Opcode.IXA, 0, defined(type.element).size);
+          type = defined(type.element);
           continue;
         }
-        const low = type.low!,
-          high = type.high!,
+        const low = defined(type.low),
+          high = defined(type.high),
           line = node.lineNumber ?? this.line;
         const checked = Boolean(node.rangeChecking);
         this.helper(
@@ -3973,8 +4080,8 @@ export class Compiler {
             return indexValue - low;
           }
         );
-        this.emit(Opcode.IXA, 0, type.element!.size);
-        type = type.element!;
+        this.emit(Opcode.IXA, 0, defined(type.element).size);
+        type = defined(type.element);
       }
       return type;
     }
@@ -4126,11 +4233,11 @@ export class Compiler {
       // A routine may change an untyped parameter's bytes as a whole, by
       // FillChar or a typecast; so may a standard routine.
       return this.withVariantSyncs(
-        written.map((index) => node.arguments[index]!),
+        written.map((index) => defined(node.arguments[index])),
         written.map((index) => builtin || routine?.parameters[index]?.type.kind === 'untyped'),
         (targets) => {
           const args = [...node.arguments];
-          written.forEach((index, at) => (args[index] = targets[at]!));
+          written.forEach((index, at) => (args[index] = defined(targets[at])));
           return this.compileCall({ ...node, arguments: args }, expression);
         }
       );
@@ -4167,7 +4274,7 @@ export class Compiler {
       words++;
     }
     routine.parameters.forEach((parameter, index) => {
-      const argument = node.arguments[index]!;
+      const argument = defined(node.arguments[index]);
       if (parameter.type.openArray) {
         this.openArrayArgument(argument, parameter);
         words += 2;
@@ -4243,7 +4350,7 @@ export class Compiler {
    * one-dimensional array of the element type fits, whatever its bounds. */
   private openArrayArgument(argument: Node, parameter: Parameter): void {
     const type = this.address(argument);
-    const element = parameter.type.element!;
+    const element = defined(parameter.type.element);
     if (type.kind !== 'array' || !type.element || !this.compatible(element, type.element, true))
       this.fail(
         argument,
@@ -4370,7 +4477,7 @@ export class Compiler {
       }
       return { type, offset };
     };
-    const first = path[0]!;
+    const first = defined(path[0]);
     const symbol = first.toLowerCase() === '@result' ? this.resultVariable() : this.lookup(first);
     if (!symbol) {
       if (first.toLowerCase() === '@result') this.fail(at, '@Result is only valid in a function');
@@ -4489,8 +4596,8 @@ export class Compiler {
         if (part.value !== undefined) value += sign * part.value;
         else if (part.location) value += sign * bytes.length;
         else {
-          const name = this.assemblyName(part.name!.split('.'), line, pointers, false);
-          if (!name) this.fail(node, `Unknown identifier "${part.name!}"`);
+          const name = this.assemblyName(defined(part.name).split('.'), line, pointers, false);
+          if (!name) this.fail(node, `Unknown identifier "${defined(part.name)}"`);
           if (name.kind === 'constant') value += sign * name.value;
           else if (name.kind === 'type') value += sign * name.offset;
           else {
@@ -4528,7 +4635,7 @@ export class Compiler {
         ![1, 2, 4].includes(type.byteSize)
       )
         this.unsupportedAssembly('This parameter of an inline routine');
-      const argument = node.arguments[index]!;
+      const argument = defined(node.arguments[index]);
       this.requireType(argument, type, this.expression(argument));
       sizes.push(type.byteSize as 1 | 2 | 4);
     });
@@ -4577,7 +4684,7 @@ export class Compiler {
     const args = node.arguments;
     if (args.length !== builtin.params.length)
       this.fail(node, `Wrong number of arguments for "${builtin.name}"`);
-    const regs = args.at(-1)!;
+    const regs = defined(args.at(-1));
     this.requireWritable(regs);
     const type = this.expressionType(regs);
     if (type !== this.unitType('dos', 'Registers'))
@@ -4587,7 +4694,7 @@ export class Compiler {
     const variables: AsmVariable[] = [{ name: 'Regs', layout: this.binaryLayout(type) }];
     let number: Operand = { kind: 'immediate', value: 0x21 };
     if (args.length === 2) {
-      const intNo = args[0]!;
+      const intNo = defined(args[0]);
       if (this.numericConstant(intNo))
         number = { kind: 'immediate', value: Number(this.constant(intNo).value) & 0xff };
       else {
@@ -4641,7 +4748,7 @@ export class Compiler {
       unit = standard.unit ?? 'system';
     this.scope.symbols.set(standard.name.toLowerCase(), symbol);
     if (!this.standardSymbols.has(unit)) this.standardSymbols.set(unit, new Map());
-    this.standardSymbols.get(unit)!.set(standard.name.toLowerCase(), symbol);
+    defined(this.standardSymbols.get(unit)).set(standard.name.toLowerCase(), symbol);
   }
   private standardSymbol(name: string, type: PascalType): Variable {
     let root = this.scope;
@@ -4902,7 +5009,7 @@ export class Compiler {
     if (node.type === NodeType.FIELD_ACCESS)
       return this.constantRoot((node as FieldAccessNode).record);
     if (node.type === NodeType.CALL && (node as CallNode).arguments.length === 1)
-      return this.constantRoot((node as CallNode).arguments[0]!);
+      return this.constantRoot(defined((node as CallNode).arguments[0]));
     return undefined;
   }
 
@@ -4954,7 +5061,7 @@ export class Compiler {
     expression: boolean,
     target: { node: Node; type: PascalType }
   ): PascalType {
-    const signature = target.type.procedureSignature!;
+    const signature = defined(target.type.procedureSignature);
     if (expression && signature.result.kind === 'void')
       this.fail(node, 'Procedure cannot be used as an expression');
     if (!expression && signature.result.kind !== 'void')
@@ -5072,7 +5179,7 @@ export class Compiler {
     this.emit(Opcode.STI, TypeCode.A);
     if (method.routine.declaration.routineKind === 'constructor' && !node.inherited) {
       this.loadVariable(bound);
-      this.literal(method.type.object!.id, INTEGER);
+      this.literal(defined(method.type.object).id, INTEGER);
       this.emit(Opcode.STI, TypeCode.I);
     }
     if (!method.routine.virtual || node.inherited) {
@@ -5085,13 +5192,13 @@ export class Compiler {
     for (const type of this.objectTypes.filter((type) => this.descendsFrom(type, method.type))) {
       this.loadVariable(bound);
       this.emit(Opcode.LDI, TypeCode.I);
-      this.literal(type.object!.id, INTEGER);
+      this.literal(defined(type.object).id, INTEGER);
       this.emit(Opcode.EQU, TypeCode.I);
       const next = this.emit(Opcode.FJP);
       this.emitRoutineCall(
         node,
         expression,
-        type.object!.methods.get(node.name.toLowerCase())!,
+        defined(defined(type.object).methods.get(node.name.toLowerCase())),
         bound
       );
       exits.push(this.emit(Opcode.UJP));
@@ -5109,11 +5216,11 @@ export class Compiler {
     if (node.name.toLowerCase() === 'assigned' && !node.receiver) {
       if (!expression || node.arguments.length !== 1)
         this.fail(node, 'Assigned requires one pointer or procedural value');
-      const type = this.expressionType(node.arguments[0]!, true);
+      const type = this.expressionType(defined(node.arguments[0]), true);
       if (type.kind !== 'pointer')
         this.fail(node, 'Assigned requires a pointer or procedural value');
-      if (type.procedureSignature) this.proceduralValue(node.arguments[0]!);
-      else this.expression(node.arguments[0]!);
+      if (type.procedureSignature) this.proceduralValue(defined(node.arguments[0]));
+      else this.expression(defined(node.arguments[0]));
       this.literal(0, INTEGER);
       this.emit(Opcode.NEQ, TypeCode.A);
       return BOOLEAN;
@@ -5175,7 +5282,7 @@ export class Compiler {
           return target;
         }
       }
-      const source = this.expression(node.arguments[0]!);
+      const source = this.expression(defined(node.arguments[0]));
       // A pointer typecast keeps the address and changes what it points to.
       if (target.kind === 'pointer' && source.kind === 'pointer') return target;
       // LongInt(@Buffer): a pointer's segment and offset, as a number.
@@ -5211,7 +5318,7 @@ export class Compiler {
     const name = builtin.name.toLowerCase();
     if ((name === 'high' || name === 'low') && arguments_[0]) {
       const type = this.expressionType(arguments_[0]);
-      return type.kind === 'array' ? type.index! : type.kind === 'string' ? INTEGER : type;
+      return type.kind === 'array' ? defined(type.index) : type.kind === 'string' ? INTEGER : type;
     }
     if (['abs', 'sqr', 'succ', 'pred'].includes(name) && arguments_[0]) {
       const type = this.expressionType(arguments_[0]);
@@ -5224,9 +5331,10 @@ export class Compiler {
         : type;
     }
     if (name === 'random' && arguments_.length === 0) return this.realResult();
-    // Sqrt, Int and Frac of an Extended or Comp keep its precision.
+    // Sqrt, Int, Frac and the transcendental functions of an Extended or
+    // Comp keep its precision.
     if (
-      ['sqrt', 'int', 'frac'].includes(name) &&
+      ['sqrt', 'int', 'frac', ...Object.keys(TRANSCENDENTAL)].includes(name) &&
       arguments_[0] &&
       this.exactReal(this.expressionType(arguments_[0]))
     )
@@ -5253,7 +5361,7 @@ export class Compiler {
       [TypeKind.STRING]: STRING,
       [TypeKind.POINTER]: POINTER,
     };
-    return builtin.isFunction ? (types[builtin.returnType!] ?? INTEGER) : VOID;
+    return builtin.isFunction ? (types[defined(builtin.returnType)] ?? INTEGER) : VOID;
   }
   private builtin(node: CallNode, builtin: BuiltinDef, expression: boolean): PascalType {
     // System.WriteLn is WriteLn.
@@ -5268,7 +5376,7 @@ export class Compiler {
     // Ofs and Seg of a field of T(nil)^ are the field's offset and 0.
     const nilOffset =
       (name === 'ofs' || name === 'seg') && args.length === 1
-        ? this.nilOffset(args[0]!)
+        ? this.nilOffset(defined(args[0]))
         : undefined;
     if (nilOffset !== undefined) {
       this.literal(name === 'ofs' ? nilOffset : 0, WORD);
@@ -5277,7 +5385,7 @@ export class Compiler {
     if (name === 'new' || name === 'dispose') {
       if (args.length < 1 || args.length > 2)
         this.fail(node, `Wrong number of arguments for "${node.name}"`);
-      let pointerNode = args[0]!;
+      let pointerNode = defined(args[0]);
       const type = this.expressionType(pointerNode);
       const pointerType =
         pointerNode.type === NodeType.IDENTIFIER && this.lookup(String(pointerNode.name));
@@ -5320,7 +5428,11 @@ export class Compiler {
           done = this.emit(Opcode.UJP);
         this.patch(failed);
         this.address(pointerNode);
-        this.emit(Opcode.CSP, 1, this.modules.lookupProcedure('dispose')!.proc.procedureIndex);
+        this.emit(
+          Opcode.CSP,
+          1,
+          defined(this.modules.lookupProcedure('dispose')).proc.procedureIndex
+        );
         this.patch(done);
       }
       if (expression) {
@@ -5332,9 +5444,9 @@ export class Compiler {
     if (
       name === 'assigned' &&
       args.length === 1 &&
-      this.expressionType(args[0]!, true).procedureSignature
+      this.expressionType(defined(args[0]), true).procedureSignature
     ) {
-      this.proceduralValue(args[0]!);
+      this.proceduralValue(defined(args[0]));
       this.literal(0, INTEGER);
       this.emit(Opcode.NEQ, TypeCode.A);
       return BOOLEAN;
@@ -5345,12 +5457,12 @@ export class Compiler {
     if (args.length < required || (!builtin.variadic && args.length > builtin.params.length))
       this.fail(node, `Wrong number of arguments for "${node.name}"`);
     if (name === 'sizeof') {
-      const type = this.expressionType(args[0]!);
+      const type = this.expressionType(defined(args[0]));
       if (type.openHigh) {
         this.loadVariable(type.openHigh);
         this.literal(1, INTEGER);
         this.emit(Opcode.ADI);
-        this.literal(type.element!.byteSize, INTEGER);
+        this.literal(defined(type.element).byteSize, INTEGER);
         this.emit(Opcode.MPI);
       } else if (type.openCapacity) {
         this.stringCapacity(type);
@@ -5360,7 +5472,7 @@ export class Compiler {
       return INTEGER;
     }
     if (name === 'high' || name === 'low') {
-      const type = this.expressionType(args[0]!);
+      const type = this.expressionType(defined(args[0]));
       if (type.openHigh) {
         if (name === 'high') this.loadVariable(type.openHigh);
         else this.literal(0, INTEGER);
@@ -5371,7 +5483,7 @@ export class Compiler {
         else this.literal(0, INTEGER);
         return INTEGER;
       }
-      const result = type.kind === 'array' ? type.index! : type;
+      const result = type.kind === 'array' ? defined(type.index) : type;
       const value = name === 'high' ? type.high : type.low;
       if (!this.ordinal(result) || value === undefined)
         this.fail(node, 'Ordinal, array or string type expected');
@@ -5408,21 +5520,21 @@ export class Compiler {
         };
       };
       if (name === 'fillchar') {
-        this.requireWritable(args[0]!);
-        const target = layout(args[0]!);
-        this.address(args[0]!);
-        this.requireType(args[1]!, INTEGER, this.expression(args[1]!));
-        if (!this.ordinal(this.expression(args[2]!)))
-          this.fail(args[2]!, 'FillChar needs a byte or character value');
+        this.requireWritable(defined(args[0]));
+        const target = layout(defined(args[0]));
+        this.address(defined(args[0]));
+        this.requireType(defined(args[1]), INTEGER, this.expression(defined(args[1])));
+        if (!this.ordinal(this.expression(defined(args[2]))))
+          this.fail(defined(args[2]), 'FillChar needs a byte or character value');
         target();
         this.emit(Opcode.CSP, 4, builtin.procedureIndex);
       } else {
-        this.requireWritable(args[1]!);
-        const source = layout(args[0]!),
-          target = layout(args[1]!);
-        this.address(args[0]!);
-        this.address(args[1]!);
-        this.requireType(args[2]!, INTEGER, this.expression(args[2]!));
+        this.requireWritable(defined(args[1]));
+        const source = layout(defined(args[0])),
+          target = layout(defined(args[1]));
+        this.address(defined(args[0]));
+        this.address(defined(args[1]));
+        this.requireType(defined(args[2]), INTEGER, this.expression(defined(args[2])));
         source();
         target();
         this.emit(Opcode.CSP, 5, builtin.procedureIndex);
@@ -5437,19 +5549,19 @@ export class Compiler {
       });
     if (name === 'settextbuf') {
       // The virtual drive has no buffers to size; the arguments are checked.
-      const file = this.expressionType(args[0]!);
+      const file = this.expressionType(defined(args[0]));
       if (file.kind !== 'file' || file.element?.kind !== 'char' || file.base)
-        this.fail(args[0]!, 'Text file variable required');
-      this.expressionType(args[1]!);
+        this.fail(defined(args[0]), 'Text file variable required');
+      this.expressionType(defined(args[1]));
       if (args[2]) this.requireType(args[2], INTEGER, this.expressionType(args[2]));
       return VOID;
     }
     if (name === 'getmem' || name === 'freemem') {
-      this.requireWritable(args[0]!);
-      const pointer = this.address(args[0]!);
+      this.requireWritable(defined(args[0]));
+      const pointer = this.address(defined(args[0]));
       if (pointer.kind !== 'pointer' || pointer.procedureSignature)
-        this.fail(args[0]!, 'Pointer variable required');
-      this.requireType(args[1]!, INTEGER, this.expression(args[1]!));
+        this.fail(defined(args[0]), 'Pointer variable required');
+      this.requireType(defined(args[1]), INTEGER, this.expression(defined(args[1])));
       if (name === 'getmem') {
         // The block holds as many of the pointer's type as fit, or of its
         // element for an array type, each as New would leave it, then bytes.
@@ -5464,7 +5576,7 @@ export class Compiler {
     if (name === 'typeof') {
       // Turbo Pascal gives a pointer to the object's method table; the
       // P-machine identifies the type instead, which compares the same way.
-      const argument = args[0]!;
+      const argument = defined(args[0]);
       const symbol =
         argument.type === NodeType.IDENTIFIER ? this.lookup(String(argument.name)) : undefined;
       const type = symbol?.kind === 'type' ? symbol.type : this.expressionType(argument);
@@ -5476,9 +5588,9 @@ export class Compiler {
       return POINTER;
     }
     if (name === 'mark' || name === 'release') {
-      this.requireWritable(args[0]!);
-      const pointer = this.address(args[0]!);
-      if (pointer.kind !== 'pointer') this.fail(args[0]!, 'Pointer variable required');
+      this.requireWritable(defined(args[0]));
+      const pointer = this.address(defined(args[0]));
+      if (pointer.kind !== 'pointer') this.fail(defined(args[0]), 'Pointer variable required');
       this.emit(Opcode.CSP, 1, builtin.procedureIndex);
       return VOID;
     }
@@ -5497,10 +5609,10 @@ export class Compiler {
       // Graph3's GetPic, PutPic and Pattern read or fill a variable's bytes.
       if (args.length !== builtin.params.length)
         this.fail(node, `Wrong number of arguments for "${builtin.name}"`);
-      if (builtin.procedureIndex === 512) this.requireWritable(args[0]!);
-      const type = this.address(args[0]!);
+      if (builtin.procedureIndex === 512) this.requireWritable(defined(args[0]));
+      const type = this.address(defined(args[0]));
       if (type.kind === 'untyped' || type.openArray)
-        this.fail(args[0]!, `${builtin.name} needs a variable whose type is known here`);
+        this.fail(defined(args[0]), `${builtin.name} needs a variable whose type is known here`);
       for (const argument of args.slice(1))
         this.requireType(argument, INTEGER, this.expression(argument));
       this.literal(JSON.stringify(this.binaryLayout(type)), STRING);
@@ -5508,8 +5620,9 @@ export class Compiler {
       return VOID;
     }
     if (builtin.procedureIndex >= 450 && builtin.procedureIndex <= 456) {
-      // Every unit is resident, so the Overlay unit's procedures succeed:
-      // OvrResult is ovrOk after each one.
+      // The overlay manager's procedures give OvrResult what they did.
+      if (!builtin.isFunction)
+        this.emit(Opcode.LDA, this.scope.level, this.standardVariable('OvrResult'));
       for (const [index, argument] of args.entries())
         this.requireType(
           argument,
@@ -5518,27 +5631,25 @@ export class Compiler {
         );
       this.emit(Opcode.CSP, args.length, builtin.procedureIndex);
       if (builtin.isFunction) return LONGINT;
-      this.emit(Opcode.LDA, this.scope.level, this.standardVariable('OvrResult'));
-      this.literal(0, INTEGER);
       this.emit(Opcode.STI, TypeCode.I);
       return VOID;
     }
     if (name === 'paramstr') {
-      this.requireType(args[0]!, INTEGER, this.expression(args[0]!));
+      this.requireType(defined(args[0]), INTEGER, this.expression(defined(args[0])));
       this.literal(`C:\\${this.programName.toUpperCase()}.EXE`, STRING);
       this.emit(Opcode.CSP, 2, builtin.procedureIndex);
       return STRING;
     }
     if (name === 'blockread' || name === 'blockwrite') {
-      const file = this.address(args[0]!);
+      const file = this.address(defined(args[0]));
       if (file.kind !== 'file' || file.base || file.element)
-        this.fail(args[0]!, 'Untyped file required');
-      const buffer = this.address(args[1]!);
-      this.requireType(args[2]!, INTEGER, this.expression(args[2]!));
+        this.fail(defined(args[0]), 'Untyped file required');
+      const buffer = this.address(defined(args[1]));
+      this.requireType(defined(args[2]), INTEGER, this.expression(defined(args[2])));
       if (args[3]) this.requireType(args[3], INTEGER, this.address(args[3]));
       else this.literal(-1, INTEGER);
       // An untyped parameter's buffer goes by its caller's layout.
-      const operand = this.qualified(args[1]!);
+      const operand = this.qualified(defined(args[1]));
       const source =
         buffer.kind === 'untyped' && operand.type === NodeType.IDENTIFIER
           ? this.lookup(String(operand.name))
@@ -5569,8 +5680,8 @@ export class Compiler {
       ].includes(name) &&
       args.length
     ) {
-      const type = this.address(args[0]!);
-      if (type.kind !== 'file') this.fail(args[0]!, 'File variable required');
+      const type = this.address(defined(args[0]));
+      if (type.kind !== 'file') this.fail(defined(args[0]), 'File variable required');
       let count = 1;
       for (const arg of args.slice(1)) {
         // A file name may be a PChar or a zero-based array of Char under {$X+}.
@@ -5643,14 +5754,14 @@ export class Compiler {
       return VOID;
     }
     if (name === 'inc' || name === 'dec') {
-      this.requireWritable(args[0]!);
+      this.requireWritable(defined(args[0]));
       const address = this.temp(POINTER);
       this.addressVariable(address);
-      const type = this.address(args[0]!);
+      const type = this.address(defined(args[0]));
       // Under {$X+} Inc and Dec move a PChar, as P + N does.
       const pchar = this.charPointer(type) && node.extendedSyntax !== false;
       if (!this.ordinal(type) && !pchar)
-        this.fail(args[0]!, 'Inc and Dec require an ordinal variable');
+        this.fail(defined(args[0]), 'Inc and Dec require an ordinal variable');
       this.emit(Opcode.STI, TypeCode.A);
       this.loadVariable(address);
       this.loadVariable(address);
@@ -5737,17 +5848,30 @@ export class Compiler {
     });
     const returnType = this.builtinReturn(builtin, args);
     this.line = node.lineNumber ?? this.line;
+    const transcendental = Object.hasOwn(TRANSCENDENTAL, name) ? TRANSCENDENTAL[name] : undefined;
     if (['abs', 'sqr', 'succ', 'pred'].includes(name) && returnType.kind === 'integer') {
       this.integerHelper(name, returnType, node, 1);
     } else if (
       name === 'sqrt' &&
       this.coprocessorMode() &&
-      (this.exactContext || this.exactReal(this.expressionType(args[0]!)))
+      (this.exactContext || this.exactReal(this.expressionType(defined(args[0]))))
     ) {
       // The 8087's FSQRT rounds to Extended's 64 bits.
       const line = node.lineNumber ?? this.line;
       this.helper(`8087x-sqrt-${String(line)}`, 1, (value) =>
         sqrtReal(value instanceof Float80 ? value : Number(value), line)
+      );
+    } else if (
+      transcendental &&
+      args[0] &&
+      this.coprocessorMode() &&
+      (this.exactContext || this.exactReal(this.expressionType(args[0])))
+    ) {
+      // As are its transcendental functions' results.
+      const line = node.lineNumber ?? this.line;
+      const compute = transcendental;
+      this.helper(`8087x-${name}-${String(line)}`, 1, (value) =>
+        compute(value instanceof Float80 ? value : Number(value), line)
       );
     } else if (name === 'sqr' && returnType.kind === 'real') {
       const line = node.lineNumber ?? this.line;
@@ -6019,7 +6143,7 @@ export class Compiler {
         shape: this.viewShape(field.type),
       }));
       const shadows = (type.variantParts ?? []).map(({ part, byteStart }) => {
-        const info = this.bytecode.variantParts[part]!;
+        const info = defined(this.bytecode.variantParts[part]);
         const shape: ViewShape = {
           kind: 'array',
           count: info.bytes,
@@ -6123,7 +6247,7 @@ export class Compiler {
       return Array.from({ length: type.size / type.element.size }, (_, index) =>
         inner.map((entry) => ({
           part: entry.part,
-          offset: entry.offset + offset + index * type.element!.size,
+          offset: entry.offset + offset + index * defined(type.element).size,
         }))
       ).flat();
     }
@@ -6135,11 +6259,11 @@ export class Compiler {
 
   private cells(type: PascalType, offset = 0): { offset: number; type: PascalType }[] {
     if (type.kind === 'array')
-      return Array.from({ length: type.size / type.element!.size }, (_, index) =>
-        this.cells(type.element!, offset + index * type.element!.size)
+      return Array.from({ length: type.size / defined(type.element).size }, (_, index) =>
+        this.cells(defined(type.element), offset + index * defined(type.element).size)
       ).flat();
     if (type.kind === 'record')
-      return (type.layout ?? [...type.fields!.values()]).flatMap((field) =>
+      return (type.layout ?? [...defined(type.fields).values()]).flatMap((field) =>
         this.cells(field.type, offset + field.offset)
       );
     return [{ offset, type }];
@@ -6159,13 +6283,13 @@ export class Compiler {
   }
   private defaults(type: PascalType): Value[] {
     if (type.kind === 'array')
-      return Array.from({ length: type.size / type.element!.size }, () =>
-        this.defaults(type.element!)
+      return Array.from({ length: type.size / defined(type.element).size }, () =>
+        this.defaults(defined(type.element))
       ).flat();
     if (type.kind === 'record') {
       // By offset, since the cases of a variant part share cells.
       const values: Value[] = Array.from({ length: type.size }, () => 0);
-      for (const field of type.initialLayout ?? [...type.fields!.values()]) {
+      for (const field of type.initialLayout ?? [...defined(type.fields).values()]) {
         const cells = this.defaults(field.type);
         for (const [index, value] of cells.entries()) values[field.offset + index] = value;
       }
@@ -6177,47 +6301,49 @@ export class Compiler {
     const name = node.name.toLowerCase(),
       args = node.arguments;
     if (name === 'delete') {
-      this.requireWritable(args[0]!);
-      const type = this.address(args[0]!);
-      this.requireType(args[0]!, STRING, type);
-      this.requireType(args[1]!, INTEGER, this.expression(args[1]!));
-      this.requireType(args[2]!, INTEGER, this.expression(args[2]!));
+      this.requireWritable(defined(args[0]));
+      const type = this.address(defined(args[0]));
+      this.requireType(defined(args[0]), STRING, type);
+      this.requireType(defined(args[1]), INTEGER, this.expression(defined(args[1])));
+      this.requireType(defined(args[2]), INTEGER, this.expression(defined(args[2])));
       this.emit(Opcode.CSP, 3, builtin.procedureIndex);
     } else if (name === 'insert') {
-      this.requireType(args[0]!, STRING, this.expression(args[0]!));
-      this.requireWritable(args[1]!);
-      const type = this.address(args[1]!);
-      this.requireType(args[1]!, STRING, type);
-      this.requireType(args[2]!, INTEGER, this.expression(args[2]!));
+      this.requireType(defined(args[0]), STRING, this.expression(defined(args[0])));
+      this.requireWritable(defined(args[1]));
+      const type = this.address(defined(args[1]));
+      this.requireType(defined(args[1]), STRING, type);
+      this.requireType(defined(args[2]), INTEGER, this.expression(defined(args[2])));
       this.stringCapacity(type);
       this.emit(Opcode.CSP, 4, builtin.procedureIndex);
     } else if (name === 'str') {
       const value =
-        args[0]!.type === NodeType.FORMATTED_ARGUMENT ? (args[0]!.value as Node) : args[0]!;
+        defined(args[0]).type === NodeType.FORMATTED_ARGUMENT
+          ? (defined(args[0]).value as Node)
+          : defined(args[0]);
       if (!this.numeric(this.expressionType(value)))
         this.fail(value, 'Str requires a numeric argument');
-      this.outputArgument(args[0]!);
-      this.requireWritable(args[1]!);
-      const target = this.expressionType(args[1]!);
+      this.outputArgument(defined(args[0]));
+      this.requireWritable(defined(args[1]));
+      const target = this.expressionType(defined(args[1]));
       // Under {$X+} Str fills a zero-based array of Char, then a null.
-      if (this.zeroBasedChars(target, args[1]!)) {
-        this.address(args[1]!);
+      if (this.zeroBasedChars(target, defined(args[1]))) {
+        this.address(defined(args[1]));
         this.literal(target.size - 1, INTEGER);
         this.emit(Opcode.CSP, 3, InternalProcedure.STORE_C_STRING);
         return VOID;
       }
-      const type = this.address(args[1]!);
-      this.requireType(args[1]!, STRING, type);
+      const type = this.address(defined(args[1]));
+      this.requireType(defined(args[1]), STRING, type);
       this.stringCapacity(type);
       this.emit(Opcode.CSP, 3, builtin.procedureIndex);
     } else {
-      if (!this.emitNullTerminated(args[0]!))
-        this.requireType(args[0]!, STRING, this.expression(args[0]!));
-      this.requireWritable(args[1]!);
-      this.requireWritable(args[2]!);
-      const type = this.address(args[1]!);
-      if (!this.numeric(type)) this.fail(args[1]!, 'Val requires a numeric target');
-      this.requireType(args[2]!, INTEGER, this.address(args[2]!));
+      if (!this.emitNullTerminated(defined(args[0])))
+        this.requireType(defined(args[0]), STRING, this.expression(defined(args[0])));
+      this.requireWritable(defined(args[1]));
+      this.requireWritable(defined(args[2]));
+      const type = this.address(defined(args[1]));
+      if (!this.numeric(type)) this.fail(defined(args[1]), 'Val requires a numeric target');
+      this.requireType(defined(args[2]), INTEGER, this.address(defined(args[2])));
       this.literal(this.typeCode(type), INTEGER);
       if (type.kind === 'integer') {
         this.literal(type.low ?? -2147483648, INTEGER);
@@ -6236,14 +6362,14 @@ export class Compiler {
   private fileIO(node: CallNode): PascalType {
     const name = node.name.toLowerCase(),
       [file, ...args] = node.arguments;
-    const type = this.expressionType(file!);
+    const type = this.expressionType(defined(file));
     const writing = name === 'write' || name === 'writeln';
     if (type.base) {
       if (name === 'writeln' || name === 'readln')
         this.fail(node, 'ReadLn/WriteLn require a text file');
       for (const arg of args) {
         this.requireType(arg, type.base, this.expressionType(arg));
-        this.address(file!);
+        this.address(defined(file));
         if (writing) {
           if (this.aggregate(type.base)) {
             const pointer = this.temp(POINTER);
@@ -6273,7 +6399,7 @@ export class Compiler {
       return VOID;
     }
     if (!type.element) this.fail(node, 'Untyped files require BlockRead/BlockWrite');
-    this.address(file!);
+    this.address(defined(file));
     if (writing) {
       for (const arg of args) this.outputArgument(arg);
       this.emit(Opcode.CSP, args.length + 1, name === 'write' ? 70 : 71);

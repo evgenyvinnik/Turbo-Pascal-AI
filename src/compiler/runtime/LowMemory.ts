@@ -1,6 +1,7 @@
 import { CP437, glyphCode } from '../../tui/vgaFont';
 import type { TextConsole } from './TextConsole';
 import type { GraphicsRuntime } from './GraphicsRuntime';
+import { defined } from '../../utils/defined';
 
 /** Colour text video memory, as Mem[$B800:0] reaches it. */
 export const VIDEO_TEXT = 0xb8000;
@@ -32,7 +33,7 @@ export class LowMemory {
 
   read(linear: number): number {
     const dot = this.dot(linear);
-    if (dot !== undefined) return this.host.graphics!.pixels[dot] ?? 0;
+    if (dot !== undefined) return defined(this.host.graphics).pixels[dot] ?? 0;
     const screen = this.screenCell(linear);
     if (screen) {
       const { console, index, attribute } = screen;
@@ -45,7 +46,7 @@ export class LowMemory {
   write(linear: number, byte: number): void {
     const dot = this.dot(linear);
     if (dot !== undefined) {
-      const graphics = this.host.graphics!;
+      const graphics = defined(this.host.graphics);
       graphics.pixels[dot] = byte & 0xff;
       graphics.revision++;
       return;

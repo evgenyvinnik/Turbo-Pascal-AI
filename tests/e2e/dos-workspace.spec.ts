@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
+import { defined } from '../../src/utils/defined';
 
 test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 registers, and files persist', async ({
   page,
@@ -46,7 +47,7 @@ test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 regi
         string
       >
   );
-  expect(Array.from(persisted['REGTEST.COM']!, (c) => c.charCodeAt(0))).toEqual([
+  expect(Array.from(defined(persisted['REGTEST.COM']), (c) => c.charCodeAt(0))).toEqual([
     0xb8, 0x34, 0x12, 0xbb, 2, 0, 0x01, 0xd8, 0x50, 0x5a, 0xb8, 0, 0x4c, 0xcd, 0x21,
   ]);
   expect(persisted['X86TEST.TXT']).toContain('AX=1236');
@@ -113,7 +114,7 @@ test('native DOS Pascal compiles and executes inline x86 assembly and refuses to
   );
   const executable = Object.keys(firstDisk).find((name) => /\.EXE$/i.test(name));
   expect(executable).toBeTruthy();
-  expect(firstDisk[executable!]!.slice(0, 2)).toBe('MZ');
+  expect(defined(firstDisk[defined(executable)]).slice(0, 2)).toBe('MZ');
   expect(Object.keys(firstDisk).some((name) => /PPC386|SYSTEM.PPU|DEBUGX/.test(name))).toBe(false);
   await ide.press('Control+Home');
   await ide.type('this is not Pascal;');

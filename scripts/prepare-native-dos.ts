@@ -16,7 +16,7 @@ for (const distribution of distributions) {
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (createHash('sha256').update(bytes).digest('hex') !== distribution.sha256) throw new Error(`Checksum mismatch: ${distribution.url}`);
   for (const [path, content] of Object.entries(unzipSync(bytes))) {
-    const name = path.split('/').at(-1)!;
+    const name = path.split('/').at(-1) ?? path;
     let output: string | undefined;
     if (path.startsWith('units/go32v2/rtl/')) output = `RTL/${name.toUpperCase()}`;
     else if (['ppc386.exe', 'cwsdpmi.exe', 'as.exe', 'ld.exe', 'debugx.com'].includes(name.toLowerCase())) output = name.toUpperCase();

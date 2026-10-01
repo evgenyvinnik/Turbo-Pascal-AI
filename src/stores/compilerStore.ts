@@ -114,7 +114,10 @@ export const useCompilerStore = create<CompilerState & CompilerActions>()(
         get().appendOutput('Generating bytecode...');
 
         const compiler = new PascalCompiler();
-        bytecode = compiler.compile(project.tree, { resolveUnit: project.resolveUnit });
+        bytecode = compiler.compile(project.tree, {
+          resolveUnit: project.resolveUnit,
+          ...(options?.destination ? { destination: options.destination } : {}),
+        });
         bytecode.sources = project.sources;
 
         const compilationTime = Date.now() - startTime;

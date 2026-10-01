@@ -7,6 +7,7 @@ import { isMenuItemDisabled, isSeparator, type MenuContext } from '@components/M
 import type { InputControl } from '@components/Dialogs/types';
 import { EDITOR_LOCAL_MENU } from './localMenu';
 import { runCommand } from './commands';
+import { defined } from '../../utils/defined';
 
 export function localMenuContext(): MenuContext {
   const desktop = useDesktopStore.getState(),
@@ -86,7 +87,7 @@ function movePopup(delta: number): void {
   let selected = popup.selected;
   for (let i = 0; i < count; i++) {
     selected = (selected + delta + count) % count;
-    if (popup.kind === 'history' || !isSeparator(EDITOR_LOCAL_MENU[selected]!)) break;
+    if (popup.kind === 'history' || !isSeparator(defined(EDITOR_LOCAL_MENU[selected]))) break;
   }
   state.select(selected);
 }

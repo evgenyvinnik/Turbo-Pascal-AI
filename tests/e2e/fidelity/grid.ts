@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { defined } from '../../../src/utils/defined';
 
 export const COLS = 80;
 export const ROWS = 25;
@@ -66,7 +67,7 @@ export async function ourGrid(page: Page): Promise<Grid> {
         let best = 0;
         let dist = Infinity;
         rgb.forEach(([pr, pg, pb], i) => {
-          const d = (pr! - r) ** 2 + (pg! - g) ** 2 + (pb! - b) ** 2;
+          const d = ((pr ?? 0) - r) ** 2 + ((pg ?? 0) - g) ** 2 + ((pb ?? 0) - b) ** 2;
           if (d < dist) {
             dist = d;
             best = i;
@@ -155,7 +156,7 @@ export async function refGrid(page: Page, png: Buffer): Promise<Grid> {
         let best = 0;
         let dist = Infinity;
         rgb.forEach(([pr, pg, pb], i) => {
-          const d = (pr! - r) ** 2 + (pg! - g) ** 2 + (pb! - b) ** 2;
+          const d = ((pr ?? 0) - r) ** 2 + ((pg ?? 0) - g) ** 2 + ((pb ?? 0) - b) ** 2;
           if (d < dist) {
             dist = d;
             best = i;
@@ -177,7 +178,8 @@ export async function refGrid(page: Page, png: Buffer): Promise<Grid> {
           for (let py = 0; py < ch; py += 1) {
             for (let px = 0; px < cw; px += 1) {
               const i = ((y * ch + py) * canvas.width + x * cw + px) * 4;
-              counts[nearest(data[i]!, data[i + 1]!, data[i + 2]!)]! += 1;
+              const colour = nearest(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
+              counts[colour] = (counts[colour] ?? 0) + 1;
             }
           }
           const order = counts
@@ -185,13 +187,13 @@ export async function refGrid(page: Page, png: Buffer): Promise<Grid> {
             .filter(([c]) => c > 0)
             .sort((a, b) => b[0] - a[0]);
           const idx = y * cols + x;
-          grid.bg[idx] = order[0]![1];
+          grid.bg[idx] = order[0]?.[1] ?? 0;
           const second = order[1];
           if (second && second[0] >= 3) {
             grid.fg[idx] = second[1];
             grid.blank[idx] = false;
           } else {
-            grid.fg[idx] = order[0]![1];
+            grid.fg[idx] = order[0]?.[1] ?? 0;
           }
         }
       }
@@ -268,8 +270,8 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
         continue;
       }
       const textOnly = rule?.mode === 'text';
-      const o = { fg: ours.fg[i]!, bg: ours.bg[i]!, blank: ours.blank[i]! };
-      const r = { fg: ref.fg[i]!, bg: ref.bg[i]!, blank: ref.blank[i]! };
+      const o = { fg: defined(ours.fg[i]), bg: defined(ours.bg[i]), blank: defined(ours.blank[i]) };
+      const r = { fg: defined(ref.fg[i]), bg: defined(ref.bg[i]), blank: defined(ref.blank[i]) };
 
       if (textOnly) {
         const oBg = o.blank ? o.bg : o.bg;
@@ -291,7 +293,7 @@ export function diffGrids(ours: Grid, ref: Grid, ignore: Ignore[] = []): DiffRes
         line += 'P';
       } else if (o.blank) {
         if (o.bg !== r.bg) {
-          note('background', x, y, NAMES[o.bg]!, NAMES[r.bg]!);
+          note('background', x, y, defined(NAMES[o.bg]), defined(NAMES[r.bg]));
           line += 'B';
         } else line += '.';
       } else if (set(o.fg, o.bg) !== set(r.fg, r.bg)) {
@@ -318,7 +320,7 @@ export function formatReport(name: string, ours: Grid, ref: Grid, diff: DiffResu
     for (let x = 0; x < COLS; x += 1) {
       const i = y * COLS + x;
       line += ref.blank[i]
-        ? NAMES[ref.bg[i]!]!.toLowerCase() === NAMES[ref.bg[i]!]
+        ? defined(NAMES[defined(ref.bg[i])]).toLowerCase() === NAMES[defined(ref.bg[i])]
           ? ' '
           : ' '
         : '#';

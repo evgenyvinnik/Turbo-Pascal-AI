@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { PascalError } from '../../src/compiler/errors/PascalError';
 import {
@@ -61,6 +63,19 @@ describe('Borland diagnostic presentation', () => {
     ['I/O error 103', 103],
     ['Invalid integer input: letters', 106],
     ['Run-time error 211', 211],
+    ['Access beyond the variable', 201],
+    ['Memory access outside the variable', 201],
+    ['String length exceeds capacity', 201],
+    ['Real value out of binary range', 205],
+    ['Invalid allocation size', 203],
+    ['File access denied: A.TXT', 5],
+    ['File already exists: B.TXT', 5],
+    ['Invalid file operation on the console', 1],
+    ['Interrupt 21h function 99h is not supported', 1],
+    ['Only characters can be read from the keyboard', 106],
+    ['Invalid memory address', 216],
+    ['Nil pointer dereference', 216],
+    ['Unsupported instruction: HLT', 216],
   ])('classifies a runtime failure without changing its source: %s', (message, code) => {
     const error = new PascalError(message, 19, 7);
     const diagnostic = describePascalDiagnostic(error, 'runtime');
@@ -76,15 +91,52 @@ describe('Borland diagnostic presentation', () => {
     expect(describePascalDiagnostic(error, 'runtime').code).toBe(200);
   });
 
-  test('does not relabel implementation limits or arbitrary JavaScript failures as Borland errors', () => {
+  test('does not relabel arbitrary JavaScript failures or compiler messages as Borland errors', () => {
     for (const error of [
-      new PascalError('Maximum instruction count exceeded', 8),
       new Error('Division by zero'),
       new PascalError('Unsupported statement: custom'),
     ]) {
       expect(describePascalDiagnostic(error, 'runtime').code).toBeUndefined();
       expect(describePascalDiagnostic(error, 'compiler').code).toBeUndefined();
     }
+  });
+
+  test.each([
+    ['BGI Error: Graphics not initialized (use InitGraph)', 1],
+    ['Maximum instruction count exceeded', 255],
+    ['Maximum output size exceeded', 255],
+  ])('keeps a halt as its own text, with its exit code: %s', (message, exitCode) => {
+    const diagnostic = describePascalDiagnostic(new PascalError(message, 3), 'runtime');
+    expect(diagnostic).toMatchObject({ exitCode, halt: true, message });
+    expect(diagnostic.code).toBeUndefined();
+    expect(formatPascalDiagnostic(diagnostic)).toBe(message);
+  });
+
+  test('numbers every run-time error the machine and its libraries raise', () => {
+    const root = path.resolve(__dirname, '../../src/compiler');
+    const unnumbered: string[] = [];
+    // The real-number modules raise theirs at run time too.
+    const files = [
+      ...['runtime', 'stdlib'].flatMap((dir) =>
+        readdirSync(path.join(root, dir))
+          .filter((name) => name.endsWith('.ts'))
+          .map((name) => path.join(dir, name))
+      ),
+      'codegen/float80.ts',
+      'codegen/numeric.ts',
+    ];
+    {
+      for (const file of files) {
+        const source = readFileSync(path.join(root, file), 'utf8');
+        for (const match of source.matchAll(/new PascalError\(\s*(['`])((?:\\.|(?!\1).)*)\1/g)) {
+          const message = (match[2] ?? '').replace(/\$\{[^}]*\}/g, '7');
+          const diagnostic = describePascalDiagnostic(new PascalError(message, 1), 'runtime');
+          if (diagnostic.exitCode === undefined && message !== 'Run-time error')
+            unnumbered.push(`${file}: ${message}`);
+        }
+      }
+    }
+    expect(unnumbered).toEqual([]);
   });
 
   test('retains the originating unit or include source file', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Parser, Lexer, Stream } from '../../src/compiler';
 import { Machine, MachineState } from '../../src/compiler/runtime/Machine';
+import { defined } from '../../src/utils/defined';
 
 const compile = (source: string) =>
   new Compiler().compile(new Parser(new Lexer(new Stream(source))).parse());
@@ -131,8 +132,8 @@ describe('additional Pascal language execution', () => {
     const bytecode = compile(`program T;var n:Integer;
       procedure P(var x:Integer);var s:String[3];begin x:=2 end;
       begin n:=1;P(n);WriteLn(n)end.`);
-    const main = bytecode.debugScopes.find((scope) => scope.name === 'T')!;
-    const routine = bytecode.debugScopes.find((scope) => scope.name === 'P')!;
+    const main = defined(bytecode.debugScopes.find((scope) => scope.name === 'T'));
+    const routine = defined(bytecode.debugScopes.find((scope) => scope.name === 'P'));
     expect(routine.parentId).toBe(main.id);
     expect(routine.variables.find((value) => value.name === 'x')?.reference).toBe(true);
     expect(routine.variables.find((value) => value.name === 's')?.type.capacity).toBe(3);

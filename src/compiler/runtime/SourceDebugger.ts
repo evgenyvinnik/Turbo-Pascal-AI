@@ -15,6 +15,7 @@ import {
 import { Machine, MachineState, type StackValue } from './Machine';
 import { decodeDosText } from '../encoding';
 import { sourcePath } from '../project';
+import { defined } from '../../utils/defined';
 
 export type DebugAction = 'run' | 'entry' | 'into' | 'over' | 'out' | 'cursor';
 export interface SourceBreakpoint {
@@ -117,7 +118,7 @@ export class SourceDebugger {
               point.line !== line ||
               (point.file &&
                 this.getFile() &&
-                sourcePath(point.file) !== sourcePath(this.getFile()!)) ||
+                sourcePath(point.file) !== sourcePath(defined(this.getFile()))) ||
               (point.condition && !this.evaluate(point.condition).value)
             )
               return false;
@@ -439,7 +440,7 @@ export class SourceDebugger {
         // SizeOf, High and Low of a variable go by its type.
         const name = call.name.toLowerCase();
         if (['sizeof', 'high', 'low'].includes(name) && call.arguments.length === 1) {
-          const { type } = this.location(call.arguments[0]!);
+          const { type } = this.location(defined(call.arguments[0]));
           if (name === 'sizeof') return type.byteSize ?? type.size;
           if (type.kind === 'string') return name === 'high' ? (type.capacity ?? 255) : 0;
           const bound = name === 'high' ? type.high : type.low;
@@ -485,8 +486,8 @@ export class SourceDebugger {
     const bytes = { mem: 1, memw: 2, meml: 4 }[(access.array as IdentifierNode).name.toLowerCase()];
     if (!bytes) return undefined;
     return {
-      segment: Number(this.value(access.indices[0]!)),
-      offset: Number(this.value(access.indices[1]!)),
+      segment: Number(this.value(defined(access.indices[0]))),
+      offset: Number(this.value(defined(access.indices[1]))),
       bytes,
     };
   }

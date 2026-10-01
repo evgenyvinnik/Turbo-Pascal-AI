@@ -1,5 +1,6 @@
 import { BGI_FONT } from '../../tui/bgiFont';
 import type { StrokeFont } from './StrokeFont';
+import { defined } from '../../utils/defined';
 
 /** The VGA's palette when BIOS mode 13h starts, as six-bit red, green and
  * blue: the sixteen EGA colors, a gray ramp, then rings of 24 hues at three
@@ -133,6 +134,10 @@ export class GraphicsRuntime {
     this.pixels = new Uint8Array(this.width * this.height);
     this.initialized = true;
     this.result = 0;
+    this.defaults();
+  }
+  /** GraphDefaults: the settings InitGraph starts with, the screen kept. */
+  defaults(): void {
     this.color = this.fillColor = 15;
     this.background = this.x = this.y = this.direction = this.font = this.horizontalJustify = 0;
     this.charSize = this.fillPattern = this.thickness = 1;
@@ -177,7 +182,7 @@ export class GraphicsRuntime {
     if (!dac) return 0xff;
     if (value === undefined) {
       if (port !== 0x3c9) return port === 0x3c8 ? this.dacWrite.index : 0;
-      const level = dac[this.dacRead.index]![this.dacRead.component]!;
+      const level = defined(defined(dac[this.dacRead.index])[this.dacRead.component]);
       if (++this.dacRead.component === 3)
         this.dacRead = { index: (this.dacRead.index + 1) & 255, component: 0 };
       return level;
@@ -185,7 +190,7 @@ export class GraphicsRuntime {
     if (port === 0x3c8) this.dacWrite = { index: value & 255, component: 0 };
     else if (port === 0x3c7) this.dacRead = { index: value & 255, component: 0 };
     else if (port === 0x3c9) {
-      dac[this.dacWrite.index]![this.dacWrite.component] = value & 63;
+      defined(dac[this.dacWrite.index])[this.dacWrite.component] = value & 63;
       if (++this.dacWrite.component === 3)
         this.dacWrite = { index: (this.dacWrite.index + 1) & 255, component: 0 };
       this.revision++;
@@ -388,7 +393,7 @@ export class GraphicsRuntime {
     };
     enqueue(x, y);
     while (start < end) {
-      const index = pending[start++]!;
+      const index = defined(pending[start++]);
       const xx = (index % this.width) - this.viewport.left,
         yy = Math.floor(index / this.width) - this.viewport.top;
       this.fillPixel(xx, yy);

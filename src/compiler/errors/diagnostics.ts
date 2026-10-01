@@ -82,6 +82,8 @@ export const COMPILER_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   119: 'No inherited methods are accessible here',
   159: '286/287 instructions are not enabled',
   121: 'Invalid qualifier',
+  141: 'Cannot compile overlays to memory',
+  144: 'Cannot overlay this unit',
   162: 'ASM expected',
 };
 
@@ -115,12 +117,19 @@ export const RUNTIME_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   210: 'Object not initialized',
   211: 'Call to abstract method',
   215: 'Arithmetic overflow error',
+  208: 'Overlay manager not installed',
+  209: 'Overlay file read error',
+  216: 'General protection fault',
 };
 
 export interface PascalDiagnostic {
   phase: 'compiler' | 'runtime';
-  /** Absent when an implementation limit has no honest Borland equivalent. */
+  /** The run-time error's number; absent for a halt, which is not one. */
   code?: number;
+  /** The status the program ends with: the error's number, or a halt's code. */
+  exitCode?: number;
+  /** A halt rather than an error, whose message is its own text. */
+  halt?: boolean;
   message: string;
   detail: string;
   lineNumber: number;
@@ -211,6 +220,8 @@ const COMPILE_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Unexpected token in statement:/, 113],
   [/^Array or string expected$|^An array variable is required$/, 121],
   [/^286\/287 instructions are not enabled$/, 159],
+  [/^Cannot compile overlays to memory$/, 141],
+  [/^Cannot overlay this unit\b/, 144],
 ];
 const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^File not found\b/, 2],
@@ -234,10 +245,45 @@ const RUNTIME_PATTERNS: readonly (readonly [RegExp, number])[] = [
   [/^Heap overflow$/, 203],
   [/^Invalid or disposed pointer$/, 204],
   [/^Real overflow$/, 205],
-  [/^Invalid numeric result$/, 207],
+  [/^Invalid numeric result$|^Invalid floating point operation$/, 207],
   [/^Object not initialized$/, 210],
   [/^Call to abstract method$/, 211],
   [/^Arithmetic overflow$/, 215],
+  [/^Overlay manager not installed$/, 208],
+  [/^Overlay file read error$/, 209],
+  // Errors Turbo Pascal's real-mode run-time library has no check for, given
+  // the number of the check that comes closest.
+  [
+    /^(?:Access beyond|Memory access outside) the variable$|^String length exceeds capacity$|^Block I\/O exceeds buffer size$|^Invalid file position$|^Invalid random range$/,
+    201,
+  ],
+  [/^Real value out of binary range$/, 205],
+  [/^Invalid allocation size$/, 203],
+  [
+    /^File access denied\b|^File already exists\b|^Close the file before (?:erasing|renaming) it$/,
+    5,
+  ],
+  [
+    /^Block I\/O requires an untyped file$|^Invalid file operation on the console$|^Typed file record size mismatch$|^Invalid record size$|^Interrupt \w+ function \w+ is not supported$/,
+    1,
+  ],
+  [
+    /^Invalid input argument list$|^Only characters can be read from the keyboard$|^Unsupported input type$/,
+    106,
+  ],
+  // What real mode would read as stray memory or run as stray code, and
+  // Borland Pascal's protected mode stops: a general protection fault.
+  [
+    /^Invalid memory address$|^Nil pointer dereference$|^Invalid (?:instruction address|nonlocal label|assembler block|address combination|arithmetic on an address|operand|destination operand)$|^Stack underflow|^Unknown opcode\b|^Unsupported (?:standard procedure|instruction)\b|^Unknown Graph3 routine$|^Invalid integer (?:operand|operator)\b|^Graphics not initialized$|^Absolute memory addresses are not supported$|^An address (?:cannot|inside)|^Memory operand expected$|^Operand size unknown$|^Only labels in this block can be jumped to$|^The type this address points at is not known$/,
+    216,
+  ],
+];
+/** Ends that are not run-time errors, and keep their own text: the Graph
+ * unit's halt, and the IDE's limits, which stop a program as Ctrl+Break does,
+ * with exit code 255. */
+const RUNTIME_HALTS: readonly (readonly [RegExp, number])[] = [
+  [/^BGI Error: /, 1],
+  [/^Maximum (?:instruction count|output size) exceeded$/, 255],
 ];
 
 /** Presentation adapter: never changes exception identity or source coordinates. */
@@ -247,6 +293,7 @@ export function describePascalDiagnostic(
 ): PascalDiagnostic {
   const detail = error instanceof Error ? error.message : String(error);
   let code: number | undefined;
+  let halt: number | undefined;
   if (error instanceof PascalError) {
     if (phase === 'compiler') {
       const expected = /^Expected '([^']+)', found /.exec(detail)?.[1];
@@ -254,10 +301,12 @@ export function describePascalDiagnostic(
       code ??= COMPILE_PATTERNS.find(([pattern]) => pattern.test(detail))?.[1];
     } else {
       const explicit = /^(?:I\/O error|Run-time error|Runtime error) (\d+)\b/.exec(detail);
+      halt = RUNTIME_HALTS.find(([pattern]) => pattern.test(detail))?.[1];
       code = explicit
         ? Number(explicit[1])
         : RUNTIME_PATTERNS.find(([pattern]) => pattern.test(detail))?.[1];
       if (code !== undefined && (code < 0 || code > 255)) code = undefined;
+      if (halt !== undefined) code = undefined;
     }
   }
   const messages = phase === 'compiler' ? COMPILER_ERROR_MESSAGES : RUNTIME_ERROR_MESSAGES;
@@ -267,7 +316,8 @@ export function describePascalDiagnostic(
       : undefined;
   return {
     phase,
-    ...(code === undefined ? {} : { code }),
+    ...(code === undefined ? {} : { code, exitCode: code }),
+    ...(halt === undefined ? {} : { exitCode: halt, halt: true }),
     message: code === undefined ? detail : (messages[code] ?? detail),
     detail,
     lineNumber: error instanceof PascalError ? error.lineNumber : -1,
@@ -277,6 +327,7 @@ export function describePascalDiagnostic(
 }
 
 export function formatPascalDiagnostic(diagnostic: PascalDiagnostic): string {
+  if (diagnostic.halt) return diagnostic.message;
   const prefix = diagnostic.phase === 'runtime' ? 'Run-time error' : 'Error';
   return `${prefix}${diagnostic.code === undefined ? '' : ` ${String(diagnostic.code)}`}: ${diagnostic.message}`;
 }

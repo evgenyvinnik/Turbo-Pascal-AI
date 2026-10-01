@@ -7,13 +7,16 @@ import { Graph3 } from './Graph3';
 import { DosUnit, ENVIRONMENT } from './DosUnit';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
-import { parseStrokeFont } from './StrokeFont';
+import { parseStrokeFont, type StrokeFont } from './StrokeFont';
+import { BGI_HEADER_BYTES, parseBgiDriver } from './BgiDriver';
+import { decodeOverlayFile, overlaySize, type OverlayUnit } from './OverlayFile';
 import { roundReal48 } from '../codegen/numeric';
 import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { ViewShape } from '../codegen/Bytecode';
 import type { BlockType } from './Heap';
 import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
 import { compReal, parseReal } from '../codegen/float80';
+import { defined } from '../../utils/defined';
 
 const BYTE_CELL: BinaryCell = { kind: 'integer', bytes: 1, signed: false };
 
@@ -33,6 +36,8 @@ interface Host extends MemoryAccess {
   stackPointer(): number;
   /** The heap top, which Mark records and Release returns to. */
   heapTop(): number;
+  /** Whether nothing has been allocated: HeapPtr is still HeapOrg. */
+  heapEmpty?(): boolean;
   releaseHeap(address: number): void;
   sound(frequency: number): void;
   /** A layout by its number, as an untyped parameter's caller passes it. */
@@ -52,6 +57,49 @@ interface Result {
   dosError?: number;
 }
 
+/** The drivers Turbo Pascal's Graph unit numbers 1 to 10, by the files they
+ * load, and the modes each offers. */
+const STANDARD_DRIVERS = [
+  '',
+  'CGA',
+  'CGA',
+  'EGAVGA',
+  'EGAVGA',
+  'EGAVGA',
+  'IBM8514',
+  'HERC',
+  'ATT',
+  'EGAVGA',
+  'PC3270',
+];
+const MODE_RANGES: Record<number, [number, number]> = {
+  1: [0, 4],
+  2: [0, 5],
+  3: [0, 1],
+  4: [0, 1],
+  5: [3, 3],
+  6: [0, 1],
+  7: [0, 0],
+  8: [0, 5],
+  9: [0, 2],
+  10: [0, 0],
+};
+const VGA_MODES = ['640 x 200 VGA', '640 x 350 VGA', '640 x 480 VGA'];
+/** The stroked fonts Turbo Pascal numbers 1 to 10, by their files. */
+const STANDARD_FONTS = [
+  '',
+  'TRIP',
+  'LITT',
+  'SANS',
+  'GOTH',
+  'SCRI',
+  'SIMP',
+  'TSCR',
+  'LCOM',
+  'EURO',
+  'BOLD',
+];
+
 /** Stateful standard-library services called by the VM's CSP instruction. */
 export class RuntimeServices {
   readonly console = new TextConsole();
@@ -60,9 +108,22 @@ export class RuntimeServices {
   readonly files: FileRuntime;
   private clockOffset = 0;
   private fontPath = '';
-  /** The Overlay unit's buffer and probation sizes. Every unit is resident,
-   * so they only report back what the program set. */
+  /** Drivers InstallUserDriver added, numbered from 11, and the drivers and
+   * fonts RegisterBGIdriver and RegisterBGIfont took from memory. */
+  private userDrivers: string[] = [];
+  private registeredDrivers = new Set<string>();
+  private userFonts: string[] = [];
+  private registeredFonts = new Map<number, StrokeFont>();
+  /** The name of the driver InitGraph loaded. */
+  private driverName = '';
+  /** The units {$O} overlays, which the program's .OVR file holds. */
+  overlays: readonly OverlayUnit[] = [];
+  /** The overlay manager, once OvrInit opens the file: the file, the buffer's
+   * size, the overlays in it, the least recently used first, and the
+   * probation area's size. */
+  private overlayFile: string | undefined;
   private overlayBuffer = 0;
+  private overlaysLoaded: number[] = [];
   private overlayRetry = 0;
   /** Interrupt vectors a program has set. The others hold the addresses of
    * the BIOS and DOS handlers, which only compare and restore. */
@@ -95,7 +156,7 @@ export class RuntimeServices {
   private putCString(address: number, text: string): void {
     if (!address) throw new PascalError('Nil pointer dereference');
     for (let index = 0; index < text.length; index++)
-      this.host.write(address + index, text[index]!);
+      this.host.write(address + index, defined(text[index]));
     this.host.write(address + text.length, '\0');
   }
   /** Turbo Pascal's Strings unit. Comparisons give the difference of the
@@ -199,7 +260,9 @@ export class RuntimeServices {
     this.files.reset();
     this.dos.reset();
     this.clockOffset = 0;
+    this.overlayFile = undefined;
     this.overlayBuffer = 0;
+    this.overlaysLoaded = [];
     this.overlayRetry = 0;
     this.vectors.clear();
     this.host.sound(0);
@@ -561,21 +624,33 @@ export class RuntimeServices {
       case 309:
         this.host.write(b, this.vectors.get(a & 255) ?? 0xf000_0000 + (a & 255));
         return {};
-      // The Overlay unit: nothing to load, so each call succeeds.
+      // The Overlay unit. Each procedure gives what OvrResult becomes:
+      // ovrOk, ovrError (-1), ovrNotFound (-2) or ovrNoEMSDriver (-5).
       case 450:
+        return { result: this.overlayInit(String(args[0] ?? '')) };
       case 451:
-      case 456:
-        return {};
-      case 452:
-        this.overlayBuffer = Math.max(0, a);
-        return {};
+        // There is no EMS driver to load the overlays into.
+        return { result: this.overlayFile === undefined ? -1 : -5 };
+      case 452: {
+        // At least the largest overlay, and set before the heap is used.
+        const smallest = Math.max(0, ...this.overlays.map(overlaySize));
+        if (this.overlayFile === undefined || a < smallest || this.host.heapEmpty?.() === false)
+          return { result: -1 };
+        this.overlayBuffer = a;
+        return { result: 0 };
+      }
       case 453:
         return { result: this.overlayBuffer };
       case 454:
+        if (this.overlayFile === undefined) return { result: -1 };
         this.overlayRetry = Math.max(0, a);
-        return {};
+        return { result: 0 };
       case 455:
         return { result: this.overlayRetry };
+      case 456:
+        if (this.overlayFile === undefined) return { result: -1 };
+        this.overlaysLoaded = [];
+        return { result: 0 };
       // Turbo3: the heap in 16-byte paragraphs, and Turbo Pascal 3's video
       // attributes, yellow and light gray on black.
       case 461:
@@ -790,16 +865,202 @@ export class RuntimeServices {
     }
     throw new PascalError('Unknown Graph3 routine');
   }
+  /** OvrInit: opens the overlay file, which must hold this program's
+   * overlays, and gives the buffer room for the largest. */
+  private overlayInit(name: string): number {
+    this.overlayFile = undefined;
+    this.overlaysLoaded = [];
+    const path = name.trim();
+    if (!path || !this.disk.exists(path)) return -2;
+    if (!this.overlayFileMatches(path)) return -1;
+    this.overlayFile = path;
+    this.overlayBuffer = Math.max(0, ...this.overlays.map(overlaySize));
+    return 0;
+  }
+  /** Whether a file holds this program's overlays, every one as compiled. */
+  private overlayFileMatches(path: string, only?: number): boolean {
+    if (!this.disk.exists(path)) return false;
+    const units = decodeOverlayFile(this.fileBytes(path));
+    if (!units || units.length !== this.overlays.length) return false;
+    return this.overlays.every(
+      (unit, index) =>
+        (only !== undefined && index !== only) ||
+        (units[index]?.name === unit.name &&
+          units[index].code.length === unit.code.length &&
+          units[index].code.every((word, at) => word === unit.code[at]))
+    );
+  }
+  /** An overlaid unit's code is entered: it must be in the buffer, or be
+   * read into it from the file, pushing out the least recently used. */
+  enterOverlay(index: number): void {
+    if (this.overlayFile === undefined) throw new PascalError('Overlay manager not installed');
+    const loaded = this.overlaysLoaded.indexOf(index);
+    if (loaded >= 0) {
+      this.overlaysLoaded.splice(loaded, 1);
+      this.overlaysLoaded.push(index);
+      return;
+    }
+    if (!this.overlayFileMatches(this.overlayFile, index))
+      throw new PascalError('Overlay file read error');
+    this.overlaysLoaded.push(index);
+    const size = (at: number) => overlaySize(this.overlays[at] ?? { name: '', code: [] });
+    let used = this.overlaysLoaded.reduce((total, at) => total + size(at), 0);
+    while (used > this.overlayBuffer && this.overlaysLoaded.length > 1) {
+      used -= size(this.overlaysLoaded.shift() ?? index);
+    }
+  }
+  /** A file on the drive: in the directory InitGraph was given, or else the
+   * current one, as the Graph unit looks for drivers and fonts. */
+  private find(name: string): string | undefined {
+    const candidates = this.fontPath ? [this.fontPath + '/' + name, name] : [name];
+    return candidates.find((path) => this.disk.exists(path));
+  }
+  private fileBytes(path: string): Uint8Array {
+    return Uint8Array.from(this.disk.read(path), (char) => char.charCodeAt(0));
+  }
+  /** InitGraph: the driver asked for, or the one DetectGraph would pick, from
+   * a driver RegisterBGIdriver took or its .BGI file. The emulated VGA is
+   * EGAVGA's hardware, which, with no file, is taken as linked in. */
+  private initGraph(driverAddress: number, modeAddress: number): void {
+    const g = this.graphics;
+    let driver = Number(this.host.read(driverAddress));
+    let mode = Number(this.host.read(modeAddress));
+    if (driver === 0) [driver, mode] = [9, 2];
+    const name = driver >= 11 ? this.userDrivers[driver - 11] : STANDARD_DRIVERS[driver];
+    const fail = (code: number) => {
+      g.initialized = false;
+      g.result = code;
+      g.revision++;
+    };
+    if (name === undefined) {
+      fail(-4);
+      return;
+    }
+    if (!this.registeredDrivers.has(name)) {
+      const path = this.find(name + '.BGI');
+      if (path) {
+        const header = parseBgiDriver(this.fileBytes(path));
+        if (header?.name !== name) {
+          fail(-4);
+          return;
+        }
+      } else if (driver >= 11) {
+        // A driver of another maker's is only ever its file.
+        fail(-3);
+        return;
+      }
+    }
+    // The P-machine's graphics are the VGA's, which EGAVGA drives; another
+    // driver's code is not run.
+    if (name !== 'EGAVGA') {
+      fail(-4);
+      return;
+    }
+    g.init(9, mode);
+    if (!g.initialized) return;
+    this.driverName = name;
+    this.host.write(driverAddress, g.driver);
+    this.host.write(modeAddress, g.mode);
+  }
+  /** The routines that install and register drivers and fonts, and describe
+   * the driver's modes. */
+  private driversAndFonts(index: number, args: StackValue[]): Result | undefined {
+    const g = this.graphics;
+    const [a = 0, b = 0, c = 0] = args.map(Number);
+    const baseName = (text: StackValue | undefined) =>
+      String(text ?? '')
+        .trim()
+        .toUpperCase()
+        .replace(/^.*[\\/:]/, '')
+        .replace(/\.[^.]*$/, '');
+    const failed = (code: number) => {
+      g.result = code;
+      return { result: code };
+    };
+    switch (index) {
+      case 208:
+        if (g.initialized) g.defaults();
+        return {};
+      case 209:
+        return {};
+      case 292: {
+        const name = baseName(args[0]);
+        const standard = STANDARD_DRIVERS.indexOf(name);
+        if (standard > 0) return { result: standard };
+        const known = this.userDrivers.indexOf(name);
+        if (known >= 0) return { result: 11 + known };
+        if (this.userDrivers.length >= 10) return failed(-11);
+        this.userDrivers.push(name);
+        return { result: 10 + this.userDrivers.length };
+      }
+      case 293: {
+        if (!a) return failed(-4);
+        const header = parseBgiDriver(this.bytesAt(a, [], BGI_HEADER_BYTES));
+        if (!header) return failed(-4);
+        const standard = STANDARD_DRIVERS.indexOf(header.name);
+        const user = this.userDrivers.indexOf(header.name);
+        if (standard <= 0 && user < 0) return failed(-4);
+        this.registeredDrivers.add(header.name);
+        return { result: standard > 0 ? standard : 11 + user };
+      }
+      case 294: {
+        const name = baseName(args[0]);
+        const standard = STANDARD_FONTS.indexOf(name);
+        if (standard > 0) return { result: standard };
+        const known = this.userFonts.indexOf(name);
+        if (known >= 0) return { result: 11 + known };
+        if (this.userFonts.length >= 10) return failed(-11);
+        this.userFonts.push(name);
+        return { result: 10 + this.userFonts.length };
+      }
+      case 295: {
+        if (!a) return failed(-13);
+        // The font's header gives its size: the header's, then the strokes'.
+        const head = this.bytesAt(a, [], 0x80);
+        const marker = head.indexOf(0x1a);
+        const word = (at: number) => (head[at] ?? 0) | ((head[at + 1] ?? 0) << 8);
+        if (head[0] !== 0x50 || head[1] !== 0x4b || marker < 0) return failed(-13);
+        const fontName = String.fromCharCode(
+          ...head.subarray(marker + 3, marker + 7)
+        ).toUpperCase();
+        let font: StrokeFont;
+        try {
+          font = parseStrokeFont(this.bytesAt(a, [], word(marker + 1) + word(marker + 7)));
+        } catch {
+          return failed(-13);
+        }
+        const standard = STANDARD_FONTS.indexOf(fontName);
+        const user = this.userFonts.indexOf(fontName);
+        const number = standard > 0 ? standard : user >= 0 ? 11 + user : -1;
+        if (number < 0) return failed(-14);
+        this.registeredFonts.set(number, font);
+        return { result: number };
+      }
+      case 296:
+        return { result: this.driverName };
+      case 297:
+        return { result: VGA_MODES[a] ?? '' };
+      case 298:
+        return { result: VGA_MODES.length - 1 };
+      case 299: {
+        const [low, high] = MODE_RANGES[a] ?? [-1, -1];
+        this.host.write(b, low);
+        this.host.write(c, high);
+        return {};
+      }
+    }
+    return undefined;
+  }
   private graph(index: number, args: StackValue[]): Result | undefined {
     const g = this.graphics,
       [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = args.map(Number);
     if (index === 200) {
-      g.init(Number(this.host.read(a)), Number(this.host.read(b)));
-      this.fontPath = String(args[2] ?? '');
-      this.host.write(a, g.driver);
-      this.host.write(b, g.mode);
+      this.fontPath = String(args[2] ?? '').replace(/[\\/]+$/, '');
+      this.initGraph(a, b);
       return {};
     }
+    const driverOrFont = this.driversAndFonts(index, args);
+    if (driverOrFont) return driverOrFont;
     if (index === 201 || index === 207) {
       g.initialized = false;
       g.revision++;
@@ -822,15 +1083,22 @@ export class RuntimeServices {
             {
               0: 'No error',
               '-1': 'Graphics not initialized',
+              '-2': 'Graphics hardware not detected',
+              '-3': 'Device driver file not found',
               '-4': 'Invalid graphics driver',
+              '-5': 'Not enough memory to load driver',
               '-8': 'Font file not found',
+              '-9': 'Not enough memory to load font',
               '-10': 'Invalid graphics mode',
               '-11': 'Graphics error',
+              '-12': 'Graphics I/O error',
               '-13': 'Invalid font file',
+              '-14': 'Invalid font number',
             } as Record<number, string>
           )[a] ?? `Graphics error ${String(a)}`,
       };
-    if (!g.initialized) throw new PascalError('Graphics not initialized');
+    if (!g.initialized)
+      throw new PascalError('BGI Error: Graphics not initialized (use InitGraph)');
     switch (index) {
       case 203:
         return { result: g.mode };
@@ -929,27 +1197,31 @@ export class RuntimeServices {
         g.text(String(args[2]), a, b);
         return {};
       case 262: {
-        if (a < 0 || a > 10 || b < 0 || b > 1 || c < 0 || c > 10) {
+        if (b < 0 || b > 1 || c < 0 || c > 10) {
           g.result = -11;
           return {};
         }
+        // The ten fonts Turbo Pascal knows, then those InstallUserFont added.
+        if (a < 0 || a > 10 + this.userFonts.length) {
+          g.result = -14;
+          return {};
+        }
         if (a !== 0) {
-          const name =
-            ['', 'TRIP', 'LITT', 'SANS', 'GOTH', 'SCRI', 'SIMP', 'TSCR', 'LCOM', 'EURO', 'BOLD'][
-              a
-            ]! + '.CHR';
-          const path = this.fontPath ? this.fontPath + '/' + name : name;
-          if (!this.disk.exists(path)) {
-            g.result = -8;
-            return {};
-          }
-          try {
-            g.strokeFont = parseStrokeFont(
-              Uint8Array.from(this.disk.read(path), (char) => char.charCodeAt(0))
-            );
-          } catch {
-            g.result = -13;
-            return {};
+          const registered = this.registeredFonts.get(a);
+          if (registered) g.strokeFont = registered;
+          else {
+            const name = (STANDARD_FONTS[a] ?? this.userFonts[a - 11] ?? '') + '.CHR';
+            const path = this.find(name);
+            if (!path) {
+              g.result = -8;
+              return {};
+            }
+            try {
+              g.strokeFont = parseStrokeFont(this.fileBytes(path));
+            } catch {
+              g.result = -13;
+              return {};
+            }
           }
         }
         g.font = a;

@@ -7,6 +7,7 @@ import {
   REFERENCE_TOPICS,
 } from '../../src/components/IDE/helpDocuments';
 import { REFERENCE_HELP } from '../../src/components/IDE/referenceHelp';
+import { defined } from '../../src/utils/defined';
 
 describe('Help documents and cross references', () => {
   const names = [...Object.keys(HELP_TOPICS), ...Object.keys(REFERENCE_TOPICS)];
@@ -16,7 +17,11 @@ describe('Help documents and cross references', () => {
     for (const link of document.links) {
       expect(names, `${name} -> ${link.target}`).toContain(link.target);
       expect(getHelpDocument(link.target).lines.length).toBeGreaterThan(3);
-      expect(document.lines[link.row]!.slice(link.col, link.col + link.length).trim()).not.toBe('');
+      expect(
+        defined(document.lines[link.row])
+          .slice(link.col, link.col + link.length)
+          .trim()
+      ).not.toBe('');
       expect(helpLinkAt(name, link.row, link.col)?.target).toBe(link.target);
     }
   });
@@ -24,8 +29,8 @@ describe('Help documents and cross references', () => {
   test('the two contents columns lead to independent subjects', () => {
     const document = getHelpDocument('contents');
     const row = document.lines.findIndex((line) => line.includes('Built-in Assembler'));
-    const left = document.lines[row]!.indexOf('Built-in Assembler');
-    const right = document.lines[row]!.indexOf('Reserved Words');
+    const left = defined(document.lines[row]).indexOf('Built-in Assembler');
+    const right = defined(document.lines[row]).indexOf('Reserved Words');
     expect(helpLinkAt('contents', row, left)?.target).toBe('asm');
     expect(helpLinkAt('contents', row, right)?.target).toBe('reserved');
     expect(helpLinkAt('contents', row, left - 1)).toBeUndefined();
@@ -33,8 +38,8 @@ describe('Help documents and cross references', () => {
 
   test('retains the supplied visible editor pages and adds useful continuation', () => {
     expect(getHelpDocument('edit').lines.slice(0, 32)).toEqual([
-      ...REFERENCE_HELP['Help-Edit-Window']!,
-      ...REFERENCE_HELP['Help-2']!,
+      ...defined(REFERENCE_HELP['Help-Edit-Window']),
+      ...defined(REFERENCE_HELP['Help-2']),
     ]);
     expect(getHelpDocument('edit').lines.slice(32).join('\n')).toContain(
       'Shift+Tab selects the previous link'
@@ -43,7 +48,7 @@ describe('Help documents and cross references', () => {
 
   test('routine directory links lead to groups and then individual help', () => {
     const document = getHelpDocument('procedures');
-    const group = document.links.find((entry) => entry.target === 'routines-u-z')!;
+    const group = defined(document.links.find((entry) => entry.target === 'routines-u-z'));
     expect(group).toBeDefined();
     expect(getHelpDocument(group.target).links.map((entry) => entry.target)).toContain('writeln');
     expect(getHelpDocument('writeln').lines.join('\n')).toContain('WriteLn([F,]');

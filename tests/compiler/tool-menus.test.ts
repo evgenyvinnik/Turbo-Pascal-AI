@@ -4,6 +4,7 @@ import {
   configuredToolShortcut,
 } from '../../src/components/MenuBar/toolMenus';
 import type { MenuEntry, MenuNode } from '../../src/components/MenuBar/menuDefs';
+import { defined } from '../../src/utils/defined';
 const defaults: MenuNode[] = [
   { id: 'tools.messages', label: '~M~essages', hint: 'messages' },
   { id: 'tools.next', label: 'Go to next', hint: 'next' },
@@ -58,7 +59,7 @@ describe('configured Tools menu', () => {
   });
   test('renaming and appending a tool changes the actual menu and avoids accelerator collisions', () => {
     const changed = [
-      { ...tools[0]!, title: 'Messages scan' },
+      { ...defined(tools[0]), title: 'Messages scan' },
       ...tools.slice(1),
       { title: 'Disk listing', program: 'DIR', params: '*.PAS' },
     ];
@@ -78,8 +79,8 @@ describe('configured Tools menu', () => {
     );
   });
   test('deletion removes the old menu command and shortcut instead of executing the deleted default', () => {
-    expect(configuredToolShortcut('shift+F2', [tools[1]!])).toBe('tools.custom.0');
-    expect(configuredToolShortcut('shift+F3', [tools[1]!])).toBeUndefined();
+    expect(configuredToolShortcut('shift+F2', [defined(tools[1])])).toBe('tools.custom.0');
+    expect(configuredToolShortcut('shift+F3', [defined(tools[1])])).toBeUndefined();
     expect(buildToolsMenuItems([], defaults).map((item) => (item as MenuEntry).id)).toEqual([
       'tools.messages',
       'tools.next',

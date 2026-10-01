@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { CommandInterface } from 'emulators';
 import type { DosFiles } from '../../src/services/dos/dosFiles';
 import { DOS_EXIT_SIGNAL } from '../../src/services/dos/dosRuntime';
+import { defined } from '../../src/utils/defined';
 
 /** A stand-in for the js-dos emulator, driven by the test instead of DOSBox. */
 interface FakeDos {
@@ -51,17 +52,17 @@ function fakeDos(files: DosFiles): FakeDos {
       exit: () => fake.exit(),
     } as unknown as CommandInterface,
     stdout: (text) => {
-      on.onStdout!(text as never);
+      defined(on.onStdout)(text as never);
     },
     frame: (rgb, rgba) => {
-      on.onFrame!(rgb as never, rgba as never);
+      defined(on.onFrame)(rgb as never, rgba as never);
     },
     frameSize: (width, height) => {
-      on.onFrameSize!(width as never, height as never);
+      defined(on.onFrameSize)(width as never, height as never);
     },
-    unload: () => on.onUnload!() as Promise<void>,
+    unload: () => defined(on.onUnload)() as Promise<void>,
     exited: () => {
-      on.onExit!();
+      defined(on.onExit)();
     },
   };
   return fake;
@@ -76,7 +77,7 @@ vi.mock('../../src/services/dos/dosRuntime', async (importOriginal) => ({
     return fake.ci;
   },
   readDosFiles: (ci: CommandInterface) => {
-    const fake = emulator.machines.find((machine) => machine.ci === ci)!;
+    const fake = defined(emulator.machines.find((machine) => machine.ci === ci));
     emulator.reads += 1;
     return fake.readable ? Promise.resolve({ ...fake.drive }) : new Promise<never>(() => undefined);
   },
@@ -105,7 +106,7 @@ async function load(disk: DosFiles = {}) {
 async function launch(disk: DosFiles = {}) {
   const loaded = await load(disk);
   await loaded.session.openDosSession();
-  return { ...loaded, dos: emulator.machines.at(-1)! };
+  return { ...loaded, dos: defined(emulator.machines.at(-1)) };
 }
 
 afterEach(() => {
@@ -202,7 +203,7 @@ describe('leaving the DOS workspace', () => {
     await session.discardDosSession();
     started();
     await opening;
-    expect(emulator.machines[0]!.exit).toHaveBeenCalledOnce();
+    expect(defined(emulator.machines[0]).exit).toHaveBeenCalledOnce();
     expect(session.getDosMachine()).toBeNull();
     expect(state().visible).toBe(false);
   });
@@ -241,6 +242,6 @@ describe('DOS screen frames', () => {
     dos.width = 2;
     dos.height = 1;
     dos.frame(new Uint8Array([1, 2, 3, 4, 5, 6]), null);
-    expect(Array.from(state().frame!)).toEqual([1, 2, 3, 255, 4, 5, 6, 255]);
+    expect(Array.from(defined(state().frame))).toEqual([1, 2, 3, 255, 4, 5, 6, 255]);
   });
 });

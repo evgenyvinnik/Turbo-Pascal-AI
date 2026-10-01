@@ -4,6 +4,7 @@ import {
   UnsupportedWorkspaceVersionError,
   type WorkspaceSnapshot,
 } from '../../src/services/db/workspaceSnapshot';
+import { defined } from '../../src/utils/defined';
 
 function fixture(): WorkspaceSnapshot {
   return {
@@ -97,13 +98,13 @@ describe('saved workspace validation', () => {
     const source = fixture();
     const decoded = decodeWorkspace(source);
     expect(decoded).toEqual(source);
-    source.desktop.buffers.b9!.lines[0] = 'changed after decoding';
-    source.desktop.buffers.b9!.undo[0]!.lines[0] = 'changed undo';
-    source.ide.optionDialogs['env.editor']!.tab = '99';
+    defined(source.desktop.buffers.b9).lines[0] = 'changed after decoding';
+    defined(defined(source.desktop.buffers.b9).undo[0]).lines[0] = 'changed undo';
+    defined(source.ide.optionDialogs['env.editor']).tab = '99';
     source.output.programOutput.push('later');
-    expect(decoded.desktop.buffers.b9!.lines[0]).toBe('program Kept;');
-    expect(decoded.desktop.buffers.b9!.undo[0]!.lines[0]).toBe('program Before;');
-    expect(decoded.ide.optionDialogs['env.editor']!.tab).toBe('4');
+    expect(defined(decoded.desktop.buffers.b9).lines[0]).toBe('program Kept;');
+    expect(defined(defined(decoded.desktop.buffers.b9).undo[0]).lines[0]).toBe('program Before;');
+    expect(defined(decoded.ide.optionDialogs['env.editor']).tab).toBe('4');
     expect(decoded.output.programOutput).toEqual(['Hello']);
   });
 
@@ -111,11 +112,11 @@ describe('saved workspace validation', () => {
     const source = fixture();
     source.desktop.seq = 0;
     source.desktop.untitled = 0;
-    const buffer = source.desktop.buffers.b9!;
+    const buffer = defined(source.desktop.buffers.b9);
     buffer.cursor = { line: 999, col: 999 };
     buffer.anchor = { line: 0, col: 999 };
     buffer.scroll = { line: 999, col: 999 };
-    buffer.undo[0]!.cursor = { line: 999, col: 999 };
+    defined(buffer.undo[0]).cursor = { line: 999, col: 999 };
     const decoded = decodeWorkspace(source);
     expect(decoded.desktop).toMatchObject({ seq: 12, untitled: 6 });
     expect(decoded.desktop.buffers.b9).toMatchObject({
@@ -128,13 +129,13 @@ describe('saved workspace validation', () => {
 
   it('rejects missing text, sparse arrays and dangling editor references before hydration', () => {
     const empty = fixture();
-    empty.desktop.buffers.b9!.lines = [];
+    defined(empty.desktop.buffers.b9).lines = [];
     expect(() => decodeWorkspace(empty)).toThrow(/lines/);
     const sparse = fixture();
-    sparse.desktop.buffers.b9!.lines = new Array<string>(2);
+    defined(sparse.desktop.buffers.b9).lines = new Array<string>(2);
     expect(() => decodeWorkspace(sparse)).toThrow(/lines/);
     const dangling = fixture();
-    dangling.desktop.windows[0]!.bufferId = 'missing';
+    defined(dangling.desktop.windows[0]).bufferId = 'missing';
     expect(() => decodeWorkspace(dangling)).toThrow(/buffer reference/);
     const active = fixture();
     active.desktop.activeId = 'missing';

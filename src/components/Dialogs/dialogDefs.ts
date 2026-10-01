@@ -1,3 +1,4 @@
+import { DEFAULT_MEMORY_SIZES, type MemorySizes } from '@compiler/directives';
 import { C } from '@/tui/palette';
 import type { ButtonControl, ClusterItem, Control, DialogDef } from './types';
 
@@ -542,7 +543,12 @@ export const compilerOptionsDialog = (): DialogDef => ({
 /** Right-aligns `value` so that it ends in column `end`. */
 const value = (end: number, y: number, v: string): Control => text(end - v.length + 1, y, v);
 
-export const informationDialog = (file: string, lines: number, ok: boolean): DialogDef => ({
+export const informationDialog = (
+  file: string,
+  lines: number,
+  ok: boolean,
+  memory: MemorySizes = DEFAULT_MEMORY_SIZES
+): DialogDef => ({
   id: 'information',
   title: 'Information',
   rect: { x: 12, y: 4, w: 56, h: 16 },
@@ -554,9 +560,9 @@ export const informationDialog = (file: string, lines: number, ok: boolean): Dia
         ['Source compiled:', String(lines), 'lines'],
         ['Code size:', '22848', 'bytes'],
         ['Data size:', '704', 'bytes'],
-        ['Stack size:', '16384', 'bytes'],
-        ['Minimum heap size:', '0', 'bytes'],
-        ['Maximum heap size:', '655360', 'bytes'],
+        ['Stack size:', String(memory.stack), 'bytes'],
+        ['Minimum heap size:', String(memory.heapMin), 'bytes'],
+        ['Maximum heap size:', String(memory.heapMax), 'bytes'],
       ] as const
     ).flatMap(([name, v, unit], i) => [
       text(3, 3 + i, name),

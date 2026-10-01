@@ -142,7 +142,7 @@ export function IDE() {
       return c && 'hint' in c ? c.hint : 'Close this dialog box';
     }
     if (menu.open) {
-      const items = currentMenus()[menu.menuIndex]?.items ?? [];
+      const items = currentMenus(configuredTools)[menu.menuIndex]?.items ?? [];
       const node = items[menu.itemIndex];
       if (node && !isSeparator(node)) {
         if (menu.subOpen && node.submenu) return node.submenu[menu.subIndex]?.hint ?? node.hint;

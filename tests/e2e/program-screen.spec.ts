@@ -49,7 +49,7 @@ end.`);
   await expect
     .poll(() =>
       canvas.evaluate((element: HTMLCanvasElement) =>
-        Array.from(element.getContext('2d')!.getImageData(10, 10, 1, 1).data)
+        Array.from(element.getContext('2d')?.getImageData(10, 10, 1, 1).data ?? [])
       )
     )
     .toEqual([170, 0, 0, 255]);
@@ -104,7 +104,7 @@ end.`);
   const pixel = (x: number, y: number) =>
     canvas.evaluate(
       (element: HTMLCanvasElement, [px, py]) =>
-        Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data),
+        Array.from(element.getContext('2d')?.getImageData(px ?? 0, py ?? 0, 1, 1).data ?? []),
       [x, y]
     );
   // Palette 2: color 3 is yellow and color 2 light red; the turtle walks east from the middle.
@@ -136,7 +136,7 @@ end.`);
   const pixel = (x: number, y: number) =>
     canvas.evaluate(
       (element: HTMLCanvasElement, [px, py]) =>
-        Array.from(element.getContext('2d')!.getImageData(px!, py!, 1, 1).data),
+        Array.from(element.getContext('2d')?.getImageData(px ?? 0, py ?? 0, 1, 1).data ?? []),
       [x, y]
     );
   // Color 4 of the default palette is the EGA's red; 200 is what the program set.

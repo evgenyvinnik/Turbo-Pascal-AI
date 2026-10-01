@@ -290,15 +290,39 @@ filenames to keep both copies. A failed batch preserves existing files. Pascal
 programs cannot access the host filesystem or change the host clock. Source
 printing uses the browser's print dialog; the original DOS printer-filter
 settings are retained as UI preferences. Graph emulates VGA modes 640×200,
-640×350, and 640×480; unsupported drivers report a graphics error. BIOS mode
+640×350, and 640×480; unsupported drivers report a graphics error. `InitGraph` reads
+the driver's `.BGI` file, from its path or else the current directory, as
+Turbo Pascal does, and refuses one whose header is not that driver's
+(`grInvalidDriver`); with no file, the VGA's EGAVGA driver is taken as linked
+into the program. `InstallUserDriver` and `RegisterBGIdriver` (of a driver a
+program read into memory) take drivers by the names in their headers; a
+driver of another maker's, such as an SVGA one, is read but its 8086 code is
+not run, so `InitGraph` reports `grInvalidDriver` for it, or
+`grFileNotFound` without its file. `InstallUserFont` adds `.CHR` fonts from 11
+on, which `SetTextStyle` loads like the ten standard ones, and
+`RegisterBGIfont` takes a font already in memory, needing no file after.
+`GetDriverName`, `GetModeName`, `GetMaxMode`, `GetModeRange`, `GetGraphMode`,
+`SetGraphMode`, `RestoreCrtMode`, `GraphDefaults` and `SetGraphBufSize` are
+there too. BIOS mode
 13h (320×200 in 256 colors), which `INT 10h` sets from `Intr` or assembly,
 shows a dot per byte of `Mem[$A000:0]` onward, with the VGA's default palette,
 which ports 3C7h to 3C9h read and set.
 
 ### Compiler switches and includes
 
-The P-machine implements `$A`, `$B`, `$R`, `$V`, `$P`, `$I`, `$Q`, `$F`, `$G`, `$N`,
-`$T` and `$X`, with Turbo Pascal defaults (`A+ B- R- V+ P- I+ Q- F- G- N- T- X+`).
+The P-machine implements `$A`, `$B`, `$D`, `$E`, `$F`, `$G`, `$I`, `$L`, `$N`, `$O`,
+`$P`, `$Q`, `$R`, `$S`, `$T`, `$V`, `$X` and `$Y`, and `$M`, with Turbo Pascal
+defaults (`A+ B- D+ E+ F- G- I+ L+ N- O- P- Q- R- S+ T- V+ X+ Y+`,
+`$M 16384,0,655360`). `$S+` (Stack checking) makes each routine check, as it is
+entered, that its frame fits the stack, which is error 202 otherwise; `$M`
+sets that stack's size, where `SPtr` starts, and the heap's high limit, which
+`MemAvail` reports, up to the 384K the heap has. Under `$D-` (Debug
+information) a module keeps no line numbers: the debugger cannot stop in it,
+and a run-time error there is found by address alone; under `$L-` (Local
+symbols) its routines' locals are hidden from Watches. `$D`, `$L` and `$Y` are
+global switches, set before the program or unit heading. `$E` changes nothing
+on this PC, which has an 8087, and `$Y` only what the absent Browser would
+show.
 `$A+` (the Word align data option) starts globals and typed constants larger
 than a byte at even offsets in the data segment. `$G+` (the 286 instructions
 option) lets the built-in assembler take 80286 opcodes, which under `$G-` are
@@ -378,7 +402,8 @@ An `interrupt` procedure, of `Word` register parameters from `Flags` to `BP`
 (or only the last of them), installed with `SetIntVec`, handles `INT` from
 assembly, getting the registers and giving back what it changes; interrupts
 08h and 1Ch tick 18.2 times a second, while the program runs and while it
-waits in `ReadKey`, `Read` or `Delay`, and 09h comes with each key. Data
+waits in `ReadKey`, `Read` or `Delay`, on the program screen or in the
+Program input box, and 09h comes with each key. Data
 directives, calls to Pascal routines from assembly, BCD and 386 instructions
 are beyond it: such a program opens the native compiler instead.
 
@@ -410,26 +435,43 @@ too. `Ptr(S, O)` keeps S and O, as does a variable declared `absolute S:O`:
 `Seg` and `Ofs` give them back, and pointers compare by segment and offset,
 so `Ptr($1234, $5678)` reaches the byte `Ptr($179B, 8)` does but is not equal
 to it. A structure, and the data segment, hold up to 65520 bytes, as in Turbo
-Pascal. It does not implement original overlay/linker formats or `.BGI`
-loading. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
+Pascal. Graph3's `Arc` starts at X, Y, the top of its circle, and turns
 clockwise for a positive angle, since the reference manual does not place the
-circle's centre. The Overlays allowed option is retained as an IDE preference,
-since every unit stays resident.
-The VM always enforces its memory/instruction limits. Transcendental functions
-(`Sin`, `Cos`, `ArcTan`, `Ln`, `Exp`) use JavaScript's, which work in doubles,
+circle's centre. Overlays work as in Turbo Pascal: `{$O Name}` overlays a
+unit compiled `{$O+}` (Overlays allowed), which is otherwise error 144, and
+needs Compile > Destination Disk, which is otherwise error 141. Compiling to
+disk writes the program's `.OVR` file beside it, holding each overlaid
+unit's code (P-code here, where Turbo Pascal's holds 8086 code); `OvrInit`
+opens it, setting `OvrResult` to `ovrNotFound` or `ovrError` when it is
+missing or another program's. Entering an overlaid unit before the overlay
+manager is in is run-time error 208, and loading one into the buffer from a
+file that has gone is 209. `OvrSetBuf`, `OvrClearBuf`, `OvrSetRetry` and
+`OvrInitEMS` (with no EMS driver, `ovrNoEMSDriver`) follow Turbo Pascal's
+rules; the buffer does not take its bytes from the heap.
+The VM always enforces its memory/instruction limits. In 8087 code, `Sin`,
+`Cos`, `ArcTan`, `Ln` and `Exp` of an `Extended` or `Comp`, or stored in one,
+give Extended's 64 bits, the exact value rounded to the nearest; the 8087
+itself is within one unit of that last bit. Elsewhere they compute in doubles,
 rounded to Real48 outside 8087 code. Debugger
 expressions take what Turbo Pascal 7's do: data, operators, the functions
 allowed in constant declarations, and `Mem`, `MemW` and `MemL`; as there, they
 do not call the program's routines. Help is newly authored, and recognized diagnostics use
-Borland numbers while preserving explanatory detail; implementation-specific
-errors remain explicitly unnumbered.
+Borland numbers while preserving explanatory detail. Every run-time error has
+one, ending the program with it as the exit code: where Turbo Pascal's
+real-mode library has no check, the closest one, such as 201 for reading or
+writing past a variable through a pointer, 5 for a file DOS would refuse, and
+216, Borland Pascal's general protection fault, for an address or instruction
+that real mode would run into as stray memory. Graph routines before
+`InitGraph` stop with `BGI Error: Graphics not initialized (use InitGraph)` and
+exit code 1, and the IDE's instruction and output limits stop a program as
+Ctrl+Break does, with exit code 255.
 
 ## Testing
 
 ```bash
 bun run typecheck       # TypeScript, including the tests
 bun run format:check    # Prettier, over src and tests (`bun run format` fixes)
-bun run lint            # ESLint: no errors, and no more warnings than its cap
+bun run lint            # ESLint: no errors and no warnings
 bun run test -- --run   # Vitest unit tests once (plain `bun run test` watches)
 bun run test:reference  # Independent Free Pascal comparison (requires fpc)
 bun run fpc-suite:fetch # Download Free Pascal's own test suite (pinned release)
@@ -524,9 +566,9 @@ Contributions are welcome.
 3. Make your changes
 4. Run `bun run format`, `bun run typecheck`, `bun run lint` and
    `bun run test -- --run`, and `bun run test:reference` if you change the
-   compiler. CI rejects unformatted code and any rise in lint warnings; when
-   you remove warnings, lower the `--max-warnings` cap in `package.json` to
-   match. `git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the
+   compiler. CI rejects unformatted code and any lint warning. Where a value
+   is certain but its type does not say so, write `defined(value)` from
+   `src/utils/defined.ts`, which checks, rather than `value!`. `git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the
    formatting-only commits from `git blame`.
 5. Submit a pull request
 

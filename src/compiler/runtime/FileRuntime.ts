@@ -4,6 +4,7 @@ import type { StackValue } from './Machine';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { encodeBinary, decodeBinary, type BinaryCell } from './BinaryCodec';
 import { parseReal } from '../codegen/float80';
+import { defined } from '../../utils/defined';
 
 export interface MemoryAccess {
   read(address: number): StackValue;
@@ -292,9 +293,12 @@ export class FileRuntime {
         this.handle(address, 'read');
         const text = this.disk.read(file.name);
         const blank = index === 97 ? /[ \t\r\n]/ : /[ \t]/;
-        while (file.position < text.length && blank.test(text[file.position]!)) file.position++;
+        while (file.position < text.length && blank.test(defined(text[file.position])))
+          file.position++;
         const end = file.position >= text.length;
-        return { result: end || (index === 98 && /[\r\n]/.test(text[file.position]!)) ? 1 : 0 };
+        return {
+          result: end || (index === 98 && /[\r\n]/.test(defined(text[file.position]))) ? 1 : 0,
+        };
       }
       case 66:
         return { result: file.position };
@@ -345,16 +349,18 @@ export class FileRuntime {
           let value: StackValue;
           if (type === TypeCode.S) {
             const start = file.position;
-            while (file.position < text.length && !/[\r\n]/.test(text[file.position]!))
+            while (file.position < text.length && !/[\r\n]/.test(defined(text[file.position])))
               file.position++;
             value = text.slice(start, file.position);
           } else if (type === TypeCode.C) {
             if (file.position >= text.length) throw new PascalError('Read past end of file');
-            value = text[file.position++]!;
+            value = defined(text[file.position++]);
           } else {
-            while (file.position < text.length && /\s/.test(text[file.position]!)) file.position++;
+            while (file.position < text.length && /\s/.test(defined(text[file.position])))
+              file.position++;
             const start = file.position;
-            while (file.position < text.length && !/\s/.test(text[file.position]!)) file.position++;
+            while (file.position < text.length && !/\s/.test(defined(text[file.position])))
+              file.position++;
             const token = text.slice(start, file.position);
             if (!token) throw new PascalError('Read past end of file');
             if (type === TypeCode.B) {
@@ -375,7 +381,7 @@ export class FileRuntime {
           this.memory.write(target, value);
         }
         if (index === 73) {
-          while (file.position < text.length && !/[\r\n]/.test(text[file.position]!))
+          while (file.position < text.length && !/[\r\n]/.test(defined(text[file.position])))
             file.position++;
           if (text[file.position] === '\r') file.position++;
           if (text[file.position] === '\n') file.position++;
@@ -460,7 +466,7 @@ export class FileRuntime {
             this.memory.bytesAt?.(Number(args[1]), layout, size) ??
             encodeBinary(this.memory, Number(args[1]), layout).subarray(0, size);
           let text = '';
-          for (let i = 0; i < data.length; i++) text += String.fromCharCode(data[i]!);
+          for (let i = 0; i < data.length; i++) text += String.fromCharCode(defined(data[i]));
           this.disk.write(
             file.name,
             content.slice(0, position) + text + content.slice(position + size)

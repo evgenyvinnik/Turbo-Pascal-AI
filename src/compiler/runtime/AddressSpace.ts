@@ -23,6 +23,7 @@ import type { Heap, HeapBlock } from './Heap';
 import { BIOS_DATA, VIDEO_TEXT, type LowMemory } from './LowMemory';
 import type { StackValue } from './Machine';
 import type { VariantRuntime } from './Variants';
+import { defined } from '../../utils/defined';
 
 /** The segments Turbo Pascal's program lives in: CSeg, DSeg and SSeg, and
  * the heap from HeapOrg to HeapEnd. */
@@ -34,8 +35,10 @@ export const HEAP_END_SEGMENT = 0xa000;
 const HEAP_START = HEAP_SEGMENT * 16;
 /** How many bytes the heap holds. */
 export const HEAP_BYTES = (HEAP_END_SEGMENT - HEAP_SEGMENT) * 16;
-/** Where SP starts, at the top of the stack segment. */
-export const STACK_TOP = 0xfff0;
+/** Where SP starts: the top of the stack segment, as large as {$M} makes it. */
+export function stackTop(bytecode: Bytecode): number {
+  return bytecode.memorySizes.stack & ~1;
+}
 /* Addresses are numbers in ranges that stay below 2^31, so the store and the
  * stack hold only small integers, which JavaScript engines keep fast:
  *   cells             from 0
@@ -459,7 +462,7 @@ export class AddressSpace {
   /** SPtr: the offset of the stack's top, below the innermost frame. */
   stackPointer(): number {
     const innermost = this.frame(() => true);
-    return innermost ? innermost.linear - STACK_SEGMENT * 16 : STACK_TOP;
+    return innermost ? innermost.linear - STACK_SEGMENT * 16 : stackTop(this.host.bytecode);
   }
 
   /** A pointer's bytes: its segment and offset. */
@@ -928,7 +931,7 @@ export class AddressSpace {
       region = view.region;
     const at = cellAtByte(region.layout, start);
     if (at?.at !== start) return undefined;
-    const found = region.layout[at.index]!;
+    const found = defined(region.layout[at.index]);
     if (
       found.kind !== cell.kind ||
       found.bytes !== cell.bytes ||

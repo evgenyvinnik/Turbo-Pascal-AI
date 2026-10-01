@@ -1,15 +1,16 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
+import { defined } from '../../src/utils/defined';
 
 /** Import actual browser Files through the same drop event as a user. */
 async function importProject(ide: Ide, files: Record<string, string>, main: string): Promise<void> {
   const entries = [
     ...Object.entries(files).filter(([name]) => name !== main),
-    [main, files[main]!],
+    [main, defined(files[main])],
   ];
   await ide.page.evaluate((sources) => {
     const transfer = new DataTransfer();
-    for (const [name, source] of sources) transfer.items.add(new File([source!], name!));
+    for (const [name, source] of sources) transfer.items.add(new File([source ?? ''], name ?? ''));
     document.dispatchEvent(
       new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
     );
@@ -464,4 +465,39 @@ end.`);
   await runCompiled(ide);
   await ide.waitForText('COUNT=0');
   await ide.waitForText('MISSING=[]');
+});
+
+test('overlays need Destination Disk, which writes the .OVR file OvrInit opens', async ({
+  page,
+}) => {
+  const ide = await Ide.open(page);
+  await importProject(
+    ide,
+    {
+      'OVLUNIT.PAS': `{$O+}
+unit OvlUnit;
+interface
+procedure Greet;
+implementation
+procedure Greet;
+begin WriteLn('OVERLAID GREETING') end;
+end.`,
+      'OVLMAIN.PAS': `program OvlMain;
+uses Overlay, OvlUnit;
+{$O OvlUnit}
+begin
+  OvrInit('OVLMAIN.OVR');
+  WriteLn('OVRRESULT=', OvrResult);
+  Greet;
+end.`,
+    },
+    'OVLMAIN.PAS'
+  );
+  await ide.press('Control+F9');
+  await ide.waitForText('Error 141: Cannot compile overlays to memory');
+  await ide.openMenu('C');
+  await ide.chooseItem('d');
+  await runCompiled(ide);
+  await ide.waitForText('OVERLAID GREETING');
+  await ide.waitForText('OVRRESULT=0');
 });

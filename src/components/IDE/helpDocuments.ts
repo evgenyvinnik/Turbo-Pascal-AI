@@ -1,5 +1,6 @@
 import { HELP_TOPICS, helpTopic, type HelpLink, type HelpTopic } from './helpTopics';
 import { REFERENCE_CONTEXT_HELP, REFERENCE_HELP } from './referenceHelp';
+import { defined } from '../../utils/defined';
 
 export const REFERENCE_TOPICS: Record<string, string> = {
   index: 'Help-index',
@@ -130,7 +131,10 @@ const continuations: Record<string, string[]> = {
     ...Object.keys(HELP_TOPICS)
       .filter((name) => /^\$[a-z]$/.test(name))
       .map((name) =>
-        l(`${name.toUpperCase()} - ${HELP_TOPICS[name]!.title.split(' - ')[1]!}`, name)
+        l(
+          `${name.toUpperCase()} - ${defined(defined(HELP_TOPICS[name]).title.split(' - ')[1])}`,
+          name
+        )
       ),
   ],
   errors: [
@@ -286,23 +290,23 @@ const routineNames = [
   'writeln',
 ];
 const groupFor = (name: string): string =>
-  name[0]! <= 'b'
+  defined(name[0]) <= 'b'
     ? 'A-B'
-    : name[0]! <= 'd'
+    : defined(name[0]) <= 'd'
       ? 'C-D'
-      : name[0]! <= 'f'
+      : defined(name[0]) <= 'f'
         ? 'E-F'
         : name[0] === 'g'
           ? 'G'
           : name[0] === 'h'
             ? 'H'
-            : name[0]! <= 'l'
+            : defined(name[0]) <= 'l'
               ? 'I-L'
-              : name[0]! <= 'p'
+              : defined(name[0]) <= 'p'
                 ? 'M-P'
-                : name[0]! <= 'r'
+                : defined(name[0]) <= 'r'
                   ? 'Q-R'
-                  : name[0]! <= 's'
+                  : defined(name[0]) <= 's'
                     ? 'S-SS'
                     : name[0] === 't'
                       ? 'ST-T'
@@ -312,7 +316,7 @@ for (const group of groups) {
   HELP_TOPICS[`routines-${group.toLowerCase()}`] = helpTopic(`Routines ${group}`, [
     `Functions and Procedures ${group}`,
     '',
-    ...entries.map((name) => l(HELP_TOPICS[name]!.title.replace(' routine', ''), name)),
+    ...entries.map((name) => l(defined(HELP_TOPICS[name]).title.replace(' routine', ''), name)),
     ...(entries.length ? [] : ['Consult the function categories below.']),
     '',
     l('Numeric and ordinal routines', 'numeric-routines'),
@@ -338,7 +342,7 @@ export function identifierTopic(identifier: string): string {
   const key = identifier.trim().toLowerCase();
   // This function is also used while constructing the static reserved-word page.
   return Object.hasOwn(aliases, key)
-    ? aliases[key]!
+    ? defined(aliases[key])
     : Object.hasOwn(HELP_TOPICS, key) || Object.hasOwn(REFERENCE_TOPICS, key)
       ? key
       : 'language';
@@ -476,7 +480,7 @@ export function getHelpDocument(topic: string): HelpTopic {
   if (cached) return cached;
   let document: HelpTopic;
   if (topic === 'contents')
-    document = { title: 'Help', lines: REFERENCE_HELP['Help-contents']!, links: [] };
+    document = { title: 'Help', lines: defined(REFERENCE_HELP['Help-contents']), links: [] };
   else if (topic.startsWith('context:')) {
     const name = topic.slice(8);
     const prefix = REFERENCE_CONTEXT_HELP[name] ?? REFERENCE_HELP[name];
@@ -486,7 +490,7 @@ export function getHelpDocument(topic: string): HelpTopic {
       ? append(prefix, ['', l('Related topic', target), '', ...(detail?.lines ?? [])])
       : { title: 'Help', lines: [], links: [] };
   } else if (Object.hasOwn(REFERENCE_TOPICS, topic)) {
-    const reference = REFERENCE_TOPICS[topic]!;
+    const reference = defined(REFERENCE_TOPICS[topic]);
     const prefix = [
       ...(REFERENCE_HELP[reference] ?? REFERENCE_CONTEXT_HELP[reference] ?? []),
       ...(topic === 'edit' ? (REFERENCE_HELP['Help-2'] ?? []) : []),
@@ -500,14 +504,17 @@ export function getHelpDocument(topic: string): HelpTopic {
             ...Object.keys(HELP_TOPICS)
               .filter((name) => name !== 'contents' && !name.startsWith('routines-'))
               .sort((a, b) => a.localeCompare(b))
-              .map((name) => l(HELP_TOPICS[name]!.title, name)),
+              .map((name) => l(defined(HELP_TOPICS[name]).title, name)),
           ]
         : (continuations[topic === 'welcome' ? 'using' : topic] ?? [])
     );
-  } else document = Object.hasOwn(HELP_TOPICS, topic) ? HELP_TOPICS[topic]! : HELP_TOPICS.glossary!;
+  } else
+    document = Object.hasOwn(HELP_TOPICS, topic)
+      ? defined(HELP_TOPICS[topic])
+      : defined(HELP_TOPICS.glossary);
   const links = [...document.links];
   for (const [label, target] of Object.hasOwn(referenceLabels, topic)
-    ? referenceLabels[topic]!
+    ? defined(referenceLabels[topic])
     : []) {
     document.lines.forEach((line, row) => {
       // Exact table entries: do not turn a prose occurrence into a link.

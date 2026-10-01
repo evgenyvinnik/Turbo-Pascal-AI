@@ -4,6 +4,6 @@ export const Route = createFileRoute('/help')({
   component: HelpPage,
 });
 
-function HelpPage() {
+export function HelpPage() {
   return <div>Help Page - Coming Soon</div>;
 }

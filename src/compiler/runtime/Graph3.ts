@@ -3,6 +3,7 @@ import type { GraphicsRuntime } from './GraphicsRuntime';
 import type { TextCanvas, TextConsole } from './TextConsole';
 import { BGI_FONT } from '../../tui/bgiFont';
 import { glyphCode } from '../../tui/vgaFont';
+import { defined } from '../../utils/defined';
 
 /** Colors 1 to 3 of Palette(0) to Palette(3) in GraphColorMode. */
 const COLOR_PALETTES = [
@@ -142,7 +143,7 @@ export class Graph3 implements TextCanvas {
         ? [0, this.hiResColor]
         : [
             this.background,
-            ...(this.mode === 'mono' ? MONO_PALETTES : COLOR_PALETTES)[this.paletteNumber]!,
+            ...defined((this.mode === 'mono' ? MONO_PALETTES : COLOR_PALETTES)[this.paletteNumber]),
           ];
     this.showTurtle();
     this.g.revision++;
@@ -201,7 +202,8 @@ export class Graph3 implements TextCanvas {
     if (!this.inside(x, y)) return;
     const index = y * this.g.width + x,
       mask = this.mode === 'hires' ? 1 : 3;
-    this.g.pixels[index] = (color === -1 ? this.table[this.g.pixels[index]!]! : color) & mask;
+    this.g.pixels[index] =
+      (color === -1 ? defined(this.table[defined(this.g.pixels[index])]) : color) & mask;
   }
   /** Draw a set of dots once each, so a color table applies once per dot. */
   private putAll(points: Iterable<[number, number]>, color: number): void {
@@ -276,7 +278,7 @@ export class Graph3 implements TextCanvas {
   }
   getDotColor(x: number, y: number): number {
     this.require();
-    return this.inside(x, y) ? this.g.pixels[y * this.g.width + x]! : -1;
+    return this.inside(x, y) ? defined(this.g.pixels[y * this.g.width + x]) : -1;
   }
   fillScreen(color: number): void {
     this.require();
@@ -303,7 +305,7 @@ export class Graph3 implements TextCanvas {
     };
     visit(x, y);
     while (pending.length) {
-      const index = pending.pop()!,
+      const index = defined(pending.pop()),
         xx = index % width,
         yy = Math.floor(index / width);
       this.g.pixels[index] = fillColor & mask;
@@ -348,10 +350,11 @@ export class Graph3 implements TextCanvas {
           y = top + row;
         const dot =
           x < this.g.width && y < this.g.height && x >= 0 && y >= 0
-            ? this.g.pixels[y * this.g.width + x]!
+            ? defined(this.g.pixels[y * this.g.width + x])
             : 0;
         const bit = col * bits;
-        buffer[6 + row * rowBytes + (bit >> 3)]! |= dot << (8 - bits - (bit & 7));
+        const at = 6 + row * rowBytes + (bit >> 3);
+        buffer[at] = (buffer[at] ?? 0) | (dot << (8 - bits - (bit & 7)));
       }
     return buffer;
   }
@@ -371,7 +374,7 @@ export class Graph3 implements TextCanvas {
         const dot =
           ((buffer[6 + row * rowBytes + (bit >> 3)] ?? 0) >> (8 - bits - (bit & 7))) &
           ((1 << bits) - 1);
-        this.put(x + col, top + row, this.table[dot]!);
+        this.put(x + col, top + row, defined(this.table[dot]));
       }
     this.showTurtle();
     this.g.revision++;

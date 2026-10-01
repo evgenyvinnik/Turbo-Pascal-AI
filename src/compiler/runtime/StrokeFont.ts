@@ -1,3 +1,5 @@
+import { defined } from '../../utils/defined';
+
 /** Borland CHR binary structure: https://github.com/DosWorld/dwbgi/blob/master/DOCS/CHR.MD */
 export interface Stroke {
   x: number;
@@ -20,7 +22,7 @@ export function parseStrokeFont(data: Uint8Array): StrokeFont {
   };
   const word = (at: number): number => {
     if (at < 0 || at + 1 >= data.length) return invalid();
-    return data[at]! | (data[at + 1]! << 8);
+    return defined(data[at]) | (defined(data[at + 1]) << 8);
   };
   if (data[0] !== 0x50 || data[1] !== 0x4b || data[2] !== 8 || data[3] !== 8) invalid();
   const marker = data.indexOf(26, 4);
@@ -48,8 +50,8 @@ export function parseStrokeFont(data: Uint8Array): StrokeFont {
     let position = base + word(header + 16 + i * 2),
       ended = false;
     for (; position + 1 < data.length; position += 2) {
-      const x = data[position]!,
-        y = data[position + 1]!,
+      const x = defined(data[position]),
+        y = defined(data[position + 1]),
         operation = ((x >>> 7) << 1) | (y >>> 7);
       if (operation === 0) {
         ended = true;

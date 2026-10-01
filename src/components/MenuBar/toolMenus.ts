@@ -1,5 +1,6 @@
 import type { ToolSettings } from '../../stores/ideStore';
 import type { MenuEntry, MenuNode } from './menuDefs';
+import { defined } from '../../utils/defined';
 
 /** Derive both presentation and command identity from the saved tool order. */
 export function buildToolsMenuItems(
@@ -27,7 +28,7 @@ export function buildToolsMenuItems(
       if (hotkey) {
         used.add(hotkey.toLowerCase());
         const at = label.toLowerCase().indexOf(hotkey.toLowerCase());
-        label = `${label.slice(0, at)}~${label[at]!}~${label.slice(at + 1)}`;
+        label = `${label.slice(0, at)}~${defined(label[at])}~${label.slice(at + 1)}`;
       }
     }
     return {

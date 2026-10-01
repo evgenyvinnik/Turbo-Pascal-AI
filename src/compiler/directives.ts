@@ -1,5 +1,6 @@
 import { PascalError } from './errors/PascalError';
 import type { Node } from './parser/Node';
+import { defined } from '../utils/defined';
 
 export interface CompilerSwitches {
   completeBooleanEvaluation: boolean;
@@ -20,6 +21,61 @@ export interface CompilerSwitches {
   alignData: boolean;
   /** $G: 80286 code generation, and 80286 opcodes in the built-in assembler. */
   instructions286: boolean;
+  /** $S: each routine checks, as it is entered, that its frame fits the stack. */
+  stackChecking: boolean;
+  /** $D, a global switch: the module's line numbers, which the debugger steps
+   * by and a run-time error is found by. */
+  debugInfo: boolean;
+  /** $L, a global switch: the names of the module's routines' locals, which
+   * the debugger shows. */
+  localSymbols: boolean;
+  /** $Y, a global switch: symbol reference information. */
+  symbolInfo: boolean;
+  /** $E: the 8087 emulator, which a PC with an 8087, as this one has, leaves
+   * to the chip. */
+  emulation: boolean;
+  /** $O: code that can be overlaid, which a unit {$O Name} names must have. */
+  overlaysAllowed: boolean;
+}
+
+/** $M stack size, low heap limit, high heap limit: the program's memory. */
+export interface MemorySizes {
+  stack: number;
+  heapMin: number;
+  heapMax: number;
+}
+export const DEFAULT_MEMORY_SIZES: Readonly<MemorySizes> = Object.freeze({
+  stack: 16384,
+  heapMin: 0,
+  heapMax: 655360,
+});
+/** The sizes a {$M stack, low, high} directive gives, if the comment is one;
+ * numbers may be decimal or $hex. */
+export function memorySizesDirective(comment: string, line = -1): MemorySizes | undefined {
+  const match = /^\$M\s+(.*)$/is.exec(comment.trim());
+  if (!match) return undefined;
+  const parts = (match[1] ?? '').split(',').map((part) => part.trim());
+  const values = parts.map((part) =>
+    /^\$[0-9a-f]+$/i.test(part)
+      ? parseInt(part.slice(1), 16)
+      : /^\d+$/.test(part)
+        ? Number(part)
+        : NaN
+  );
+  const [stack, heapMin, heapMax] = values;
+  if (
+    values.length !== 3 ||
+    stack === undefined ||
+    heapMin === undefined ||
+    heapMax === undefined ||
+    values.some((value) => !Number.isFinite(value))
+  )
+    throw new PascalError('Invalid compiler directive', line);
+  // As Turbo Pascal allows: a stack of 1024 to 65520 bytes, and heap limits
+  // up to 655360 with the low one at most the high.
+  if (stack < 1024 || stack > 65520 || heapMax > 655360 || heapMin > heapMax)
+    throw new PascalError('Invalid compiler directive', line);
+  return { stack, heapMin, heapMax };
 }
 
 export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
@@ -35,6 +91,12 @@ export const DEFAULT_SWITCHES: Readonly<CompilerSwitches> = Object.freeze({
   typedPointers: false,
   alignData: true,
   instructions286: false,
+  stackChecking: true,
+  debugInfo: true,
+  localSymbols: true,
+  symbolInfo: true,
+  emulation: true,
+  overlaysAllowed: false,
 });
 
 const switchNames: Record<string, keyof CompilerSwitches> = {
@@ -50,6 +112,12 @@ const switchNames: Record<string, keyof CompilerSwitches> = {
   T: 'typedPointers',
   A: 'alignData',
   G: 'instructions286',
+  S: 'stackChecking',
+  D: 'debugInfo',
+  L: 'localSymbols',
+  Y: 'symbolInfo',
+  E: 'emulation',
+  O: 'overlaysAllowed',
 };
 
 /** Apply a switch list such as $B+,R-,I+; include filenames are not switches. */
@@ -57,8 +125,8 @@ export function applyCompilerSwitches(comment: string, switches: CompilerSwitche
   const text = comment.trim().replace(/^\$/, '');
   if (!/^[A-Z]\s*[+-](?:\s*,\s*[A-Z]\s*[+-])*\s*$/i.test(text)) return false;
   for (const option of text.split(',')) {
-    const match = /^\s*([A-Z])\s*([+-])\s*$/i.exec(option)!;
-    const key = switchNames[match[1]!.toUpperCase()];
+    const match = defined(/^\s*([A-Z])\s*([+-])\s*$/i.exec(option));
+    const key = switchNames[defined(match[1]).toUpperCase()];
     if (key) switches[key] = match[2] === '+';
   }
   return true;
@@ -139,17 +207,19 @@ export function preprocessPascal(
         const directive =
           /^\$(IFDEF|IFNDEF|IFOPT|ELSE|ENDIF|DEFINE|UNDEF|INCLUDE|I)\b\s*(.*?)\s*$/is.exec(body);
         if (directive && !/^\$I\s*[+-]/i.test(body)) {
-          const command = directive[1]!.toUpperCase(),
-            value = directive[2]!.trim();
+          const command = defined(directive[1]).toUpperCase(),
+            value = defined(directive[2]).trim();
           if (['IFDEF', 'IFNDEF', 'IFOPT'].includes(command)) {
             if (frames.length >= 64)
               fail('Too many nested conditional directives', file, startLine);
             let condition: boolean;
             if (command === 'IFOPT') {
               const match = /^([A-Z])\s*([+-])$/i.exec(value);
-              if (!match || !switchNames[match[1]!.toUpperCase()])
+              if (!match || !switchNames[defined(match[1]).toUpperCase()])
                 fail(`Invalid compiler switch in IFOPT: ${value}`, file, startLine);
-              condition = switches[switchNames[match[1]!.toUpperCase()]!] === (match[2] === '+');
+              condition =
+                switches[defined(switchNames[defined(match[1]).toUpperCase()])] ===
+                (match[2] === '+');
             } else {
               if (!/^[A-Z_]\w*$/i.test(value)) fail('Conditional symbol expected', file, startLine);
               condition = defines.has(value.toUpperCase()) === (command === 'IFDEF');
@@ -164,7 +234,7 @@ export function preprocessPascal(
             active = frame.parent && !frame.condition;
           } else if (command === 'ENDIF') {
             if (frames.length <= initialDepth) fail('Unexpected ENDIF directive', file, startLine);
-            active = frames.pop()!.parent;
+            active = defined(frames.pop()).parent;
           } else if (active && ['DEFINE', 'UNDEF'].includes(command)) {
             if (!/^[A-Z_]\w*$/i.test(value)) fail('Conditional symbol expected', file, startLine);
             if (command === 'DEFINE') defines.add(value.toUpperCase());

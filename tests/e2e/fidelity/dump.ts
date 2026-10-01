@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { COLS, NAMES, ROWS, refGrid } from './grid';
+import { defined } from '../../../src/utils/defined';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'reference');
 const names = process.argv.slice(2);
@@ -32,8 +33,8 @@ for (const name of names) {
         x === COLS
           ? ''
           : g.blank[i]
-            ? `_${String(NAMES[g.bg[i]!])}`
-            : `${String(NAMES[g.fg[i]!])}${String(NAMES[g.bg[i]!])}`;
+            ? `_${String(NAMES[defined(g.bg[i])])}`
+            : `${String(NAMES[defined(g.fg[i])])}${String(NAMES[defined(g.bg[i])])}`;
       if (x === 0) key = k;
       if (k !== key) {
         runs.push(`${String(start)}-${String(x - 1)}:${key}`);

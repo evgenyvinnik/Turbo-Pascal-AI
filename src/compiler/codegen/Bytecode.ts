@@ -9,6 +9,8 @@ import { inst, Opcode } from '../types';
 import type { AsmBlock } from '../asm/types';
 import type { BinaryCell } from '../runtime/BinaryCodec';
 import type { Float80 } from './float80';
+import { DEFAULT_MEMORY_SIZES, type MemorySizes } from '../directives';
+import { defined } from '../../utils/defined';
 
 /** How a type's cells lie in its bytes: one cell, an array of elements that
  * are `cells` cells and `bytes` bytes each, or a record's fields, each at a
@@ -57,7 +59,7 @@ function fieldAt(shape: RecordShape, offset: number): RecordShape['fields'][numb
     high = fields.length - 1;
   while (low < high) {
     const middle = (low + high + 1) >> 1;
-    if (fields[middle]!.offset <= offset) low = middle;
+    if (defined(fields[middle]).offset <= offset) low = middle;
     else high = middle - 1;
   }
   const field = fields[low];
@@ -119,6 +121,8 @@ export interface SegmentLayout {
    * stores that go through their bytes. */
   variantCells: [number, number][];
   bytes: number;
+  /** A routine's frame under {$S+}: its entry checks that the stack has room. */
+  stackCheck?: boolean;
 }
 export const EMPTY_SEGMENT: SegmentLayout = {
   layout: [],
@@ -231,6 +235,10 @@ export class Bytecode {
   /** The data segment: the globals and typed constants, in the main frame. */
   public dataSegment: SegmentLayout = EMPTY_SEGMENT;
 
+  /** The units {$O} overlays, in order, with their code: what the .OVR file
+   * holds and the overlay manager loads. */
+  public overlays: { name: string; code: number[] }[] = [];
+
   /** Each routine's frame on the stack, by the address the routine starts at. */
   public frames: Record<number, SegmentLayout> = {};
 
@@ -254,6 +262,10 @@ export class Bytecode {
 
   /** Source line for each instruction, used to report runtime errors. */
   public sourceLines: Record<number, number> = {};
+  /** Instructions of modules compiled {$D-}, which have no line to report. */
+  public lineless: Record<number, true> = {};
+  /** The program's {$M stack, low heap, high heap}. */
+  public memorySizes: MemorySizes = { ...DEFAULT_MEMORY_SIZES };
   public sourceFiles: Record<number, string> = {};
   public sources: Record<string, string> = {};
   public statementLines: Record<number, number> = {};
@@ -332,7 +344,7 @@ export class Bytecode {
    * @param operand2 - The new value for operand2
    */
   setOperand2(address: number, operand2: number): void {
-    const instruction = this.istore[address]!;
+    const instruction = defined(this.istore[address]);
     const newInstruction = inst.make(
       inst.getOpcode(instruction),
       inst.getOperand1(instruction),
@@ -401,7 +413,7 @@ export class Bytecode {
   printIstore(): string {
     const lines: string[] = [];
     for (let address = 0; address < this.istore.length; address++) {
-      const instruction = this.istore[address]!;
+      const instruction = defined(this.istore[address]);
       let line =
         this.rightAlign(address, 4) + ': ' + this.leftAlign(inst.disassemble(instruction), 11);
       const comment = this.comments[address];
@@ -441,7 +453,7 @@ export class Bytecode {
    * @returns The encoded instruction
    */
   getInstruction(address: number): number {
-    return this.istore[address]!;
+    return defined(this.istore[address]);
   }
 
   /**
@@ -458,7 +470,7 @@ export class Bytecode {
    * @returns The constant value
    */
   getConstant(index: number): number | string | boolean | null | Float80 {
-    return this.constants[index]!;
+    return defined(this.constants[index]);
   }
 
   /**
