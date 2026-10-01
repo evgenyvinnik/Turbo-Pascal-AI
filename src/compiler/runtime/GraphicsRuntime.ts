@@ -511,7 +511,8 @@ export class GraphicsRuntime {
   }
   line(x1: number, y1: number, x2: number, y2: number, xor = false): void {
     const backend = this.external;
-    if (backend && !xor) {
+    // XORed through the driver's own write mode, where it has one.
+    if (backend && (!xor || backend.setWriteMode(1))) {
       this.sendSettings(backend);
       const [ax, ay] = this.onScreen(x1, y1),
         [bx, by] = this.onScreen(x2, y2);
@@ -523,6 +524,8 @@ export class GraphicsRuntime {
           if (steep) backend.line(ax + side, ay, bx + side, by);
           else backend.line(ax, ay + side, bx, by + side);
       }
+      // Only lines XOR: what is drawn next copies.
+      if (xor) backend.setWriteMode(0);
       this.revision++;
       return;
     }
@@ -582,15 +585,20 @@ export class GraphicsRuntime {
     if (this.external) return this.external.getPixel(x, y);
     return this.pixels[y * this.width + x] ?? 0;
   }
-  /** The bit planes an image's rows hold: four for 16 colours, two for
-   * four, one for two. */
-  private get planes(): number {
-    return Math.log2(this.modeInfo.colours);
+  /** The bits a dot takes in an image: its mode's, or a loaded driver's. */
+  private get bitsPerDot(): number {
+    return this.external?.bitsPerPixel ?? Math.log2(this.modeInfo.colours);
   }
-  /** The bytes an image's rows take: a byte a dot under a loaded driver's
-   * 256 colours, or a bit plane after another of eight dots a byte. */
+  /** The bit planes an image's rows hold: four for 16 colours, two for
+   * four, one for two; none where a dot takes a byte or more. */
+  private get planes(): number {
+    return this.bitsPerDot < 8 ? this.bitsPerDot : 0;
+  }
+  /** The bytes an image's rows take: the bit planes from the highest down,
+   * as the BGI's 16-colour drivers save them, of eight dots a byte; or
+   * whole bytes a dot. */
   private rowBytes(width: number): number {
-    return this.external ? width : Math.ceil(width / 8) * this.planes;
+    return this.planes ? Math.ceil(width / 8) * this.planes : (width * this.bitsPerDot) / 8;
   }
   /** ImageSize: GetImage's bytes, a word each for the width and height less
    * one, the rows, and a spare word; 0 if that reaches 64K. */
@@ -609,6 +617,12 @@ export class GraphicsRuntime {
       height = Math.abs(y2 - y1) + 1,
       row = this.rowBytes(width);
     const image = new Uint8Array(6 + row * height);
+    // The driver's own SAVEBITMAP, where it has one.
+    const saved = this.external?.saveImage(left, top, width, height, row);
+    if (saved) {
+      image.set(saved);
+      return image;
+    }
     const view = new DataView(image.buffer);
     view.setUint16(0, width - 1, true);
     view.setUint16(2, height - 1, true);
@@ -616,11 +630,13 @@ export class GraphicsRuntime {
       for (let x = 0; x < width; x++) {
         const dot = this.screenDot(left + x, top + y),
           at = 4 + y * row;
-        if (this.external) image[at + x] = dot;
+        if (!this.planes)
+          for (let byte = 0; byte < this.bitsPerDot / 8; byte++)
+            image[at + (x * this.bitsPerDot) / 8 + byte] = (dot >> (byte * 8)) & 0xff;
         else
           for (let plane = 0; plane < this.planes; plane++)
             if ((dot >> plane) & 1) {
-              const index = at + plane * (row / this.planes) + (x >> 3);
+              const index = at + (this.planes - 1 - plane) * (row / this.planes) + (x >> 3);
               image[index] = (image[index] ?? 0) | (0x80 >> (x & 7));
             }
       }
@@ -639,14 +655,24 @@ export class GraphicsRuntime {
     const { width, height } = this.imageExtent(image),
       row = this.rowBytes(width),
       mask = this.maxColor();
+    if (this.external?.restoreImage(...this.onScreen(x, y), image, operation)) {
+      this.revision++;
+      return;
+    }
     for (let yy = 0; yy < height; yy++)
       for (let xx = 0; xx < width; xx++) {
         const at = 4 + yy * row;
         let dot = 0;
-        if (this.external) dot = image[at + xx] ?? 0;
+        if (!this.planes)
+          for (let byte = 0; byte < this.bitsPerDot / 8; byte++)
+            dot |= (image[at + (xx * this.bitsPerDot) / 8 + byte] ?? 0) << (byte * 8);
         else
           for (let plane = 0; plane < this.planes; plane++)
-            if (((image[at + plane * (row / this.planes) + (xx >> 3)] ?? 0) << (xx & 7)) & 0x80)
+            if (
+              ((image[at + (this.planes - 1 - plane) * (row / this.planes) + (xx >> 3)] ?? 0) <<
+                (xx & 7)) &
+              0x80
+            )
               dot |= 1 << plane;
         if (this.position(x + xx, y + yy) < 0) continue;
         const old = this.getPixel(x + xx, y + yy);
@@ -656,6 +682,14 @@ export class GraphicsRuntime {
   }
   /** SetActivePage and SetVisualPage, of the pages the mode has. */
   setPage(page: number, visual: boolean): void {
+    if (this.external) {
+      if (this.external.setPage(page, visual)) {
+        if (visual) this.visualPage = page;
+        else this.activePage = page;
+        this.revision++;
+      }
+      return;
+    }
     const screen = this.pages[page];
     if (!screen) return;
     if (visual) this.visualPage = page;

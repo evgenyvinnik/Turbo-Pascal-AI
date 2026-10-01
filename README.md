@@ -308,7 +308,12 @@ executed on an emulated PC with a VGA, a VESA 1.2 BIOS (640×400 up to
 1024×768 in 256 colours) and banked video memory. `InitGraph` installs it for
 the mode asked, reads its device status table and mode names, and the Graph
 unit then draws through its functions, filling, writing text and drawing
-curves itself where the driver leaves those to the kernel. Drivers for
+curves itself where the driver leaves those to the kernel. `SetWriteMode`,
+`SetActivePage` and `SetVisualPage` go to the routines its BITMAPUTIL table
+gives, and `GetImage` and `PutImage` to its SAVEBITMAP and RESTOREBITMAP;
+images take the bits a dot its GETPIXBYTE gives. The built-in VGA's images
+hold each row's bit planes from the highest down, as the BGI's 16-colour
+drivers save them. Drivers for
 packed 256-colour modes work; ones that program the VGA's 16-colour bit
 planes, which are not emulated, do not, and a file whose code is no driver
 gives `grInvalidDriver`, as no file gives `grFileNotFound`. `InstallUserFont` adds `.CHR` fonts from 11

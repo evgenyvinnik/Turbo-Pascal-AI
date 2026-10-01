@@ -9,7 +9,13 @@
  * at 10h the kernel would patch with a far jump) are drawn from those.
  */
 import { CpuFault } from './Cpu86';
-import { BgiMachine, SCRATCH_SEGMENT, type ProgramMemory } from './BgiMachine';
+import {
+  BgiMachine,
+  DRIVER_SEGMENT,
+  SCRATCH_SEGMENT,
+  type ProgramMemory,
+  type Registers,
+} from './BgiMachine';
 
 /** The driver functions, by their number in its vector table. */
 export const enum DriverFunction {
@@ -48,6 +54,17 @@ const EMULATE = 0x10;
 const DIT_OFFSET = 0x0000;
 const TEXT_OFFSET = 0x0100;
 const PATTERN_OFFSET = 0x0200;
+/** Where an image goes to and from the driver, and the most it may take,
+ * short of the stack at the segment's top. */
+const IMAGE_OFFSET = 0x1000;
+const IMAGE_LIMIT = 0xe000;
+/** The routines BITMAPUTIL's table points at, in its order. */
+const enum Utility {
+  GetPixByte = 4,
+  SetDrawPage = 5,
+  SetVisualPage = 6,
+  SetWriteMode = 7,
+}
 
 /** A driver that could not be opened: Graph's error code for it. */
 export class DriverRefused extends Error {
@@ -76,6 +93,10 @@ export class BgiDriverBackend {
   private clip = '';
   private fontSize = -1;
   private fontDirection = -1;
+  private writeMode = 0;
+  /** BITMAPUTIL's table of far routines, once asked for; null when the
+   * driver leaves it to the kernel. */
+  private utilities: number[] | null | undefined;
 
   private constructor(machine: BgiMachine, mode: number) {
     this.machine = machine;
@@ -281,6 +302,82 @@ export class BgiDriverBackend {
   setRgb(entry: number, red: number, green: number, blue: number): void {
     this.machine.dac.set([red & 63, green & 63, blue & 63], (entry & 0xff) * 3);
     this.machine.revision++;
+  }
+  /** BITMAPUTIL's routines: GotoGraphic, ExitGraphic, PutPixel, GetPixel,
+   * GetPixByte, SetDrawPage, SetVisualPage and SetWriteMode. */
+  private utility(index: Utility, registers: Registers = {}): Registers | undefined {
+    if (this.utilities === undefined) {
+      if (this.emulated(DriverFunction.BitmapUtil)) this.utilities = null;
+      else {
+        const table = this.call(DriverFunction.BitmapUtil);
+        const at = ((table.es ?? 0) << 4) + (table.bx ?? 0);
+        this.utilities = Array.from(
+          { length: 8 },
+          (_, i) => this.machine.read8(at + i * 2) | (this.machine.read8(at + i * 2 + 1) << 8)
+        );
+      }
+    }
+    const offset = this.utilities?.[index];
+    return offset === undefined
+      ? undefined
+      : this.machine.callFar(DRIVER_SEGMENT, offset, registers);
+  }
+  /** The bits a dot takes in the driver's images. */
+  get bitsPerPixel(): number {
+    if (this.bits === undefined) {
+      const answer = this.utility(Utility.GetPixByte)?.ax ?? 8;
+      this.bits = [1, 2, 4, 8, 16, 24, 32].includes(answer) ? answer : 8;
+    }
+    return this.bits;
+  }
+  private bits: number | undefined;
+  /** SetWriteMode for the driver's lines: false when it has no way to. */
+  setWriteMode(mode: number): boolean {
+    if (mode === this.writeMode) return true;
+    if (!this.utility(Utility.SetWriteMode, { ax: mode })) return false;
+    this.writeMode = mode;
+    return true;
+  }
+  /** SetActivePage and SetVisualPage: false when the driver has no pages. */
+  setPage(page: number, visual: boolean): boolean {
+    return (
+      this.utility(visual ? Utility.SetVisualPage : Utility.SetDrawPage, { ax: page & 0xff }) !==
+      undefined
+    );
+  }
+  /** SAVEBITMAP: a rectangle into GetImage's layout, its rows `rowBytes`
+   * long; null when the kernel must save it. */
+  saveImage(x: number, y: number, width: number, height: number, rowBytes: number) {
+    const size = 4 + rowBytes * height;
+    if (this.emulated(DriverFunction.SaveBitmap) || IMAGE_OFFSET + size > IMAGE_LIMIT) return null;
+    const scratch = this.machine.scratchBytes();
+    scratch.fill(0, IMAGE_OFFSET, IMAGE_OFFSET + size);
+    scratch.set(
+      [(width - 1) & 0xff, (width - 1) >> 8, (height - 1) & 0xff, (height - 1) >> 8],
+      IMAGE_OFFSET
+    );
+    this.call(DriverFunction.SaveBitmap, {
+      es: SCRATCH_SEGMENT,
+      bx: IMAGE_OFFSET,
+      cx: x & 0xffff,
+      dx: y & 0xffff,
+    });
+    return scratch.slice(IMAGE_OFFSET, IMAGE_OFFSET + size);
+  }
+  /** RESTOREBITMAP: an image put with one of PutImage's operations; false
+   * when the kernel must put it. */
+  restoreImage(x: number, y: number, image: Uint8Array, operation: number): boolean {
+    if (this.emulated(DriverFunction.RestoreBitmap) || IMAGE_OFFSET + image.length > IMAGE_LIMIT)
+      return false;
+    this.machine.scratchBytes().set(image, IMAGE_OFFSET);
+    this.call(DriverFunction.RestoreBitmap, {
+      ax: operation & 0xff,
+      es: SCRATCH_SEGMENT,
+      bx: IMAGE_OFFSET,
+      cx: x & 0xffff,
+      dx: y & 0xffff,
+    });
+    return true;
   }
   /** Leaves graphics. */
   close(): void {
