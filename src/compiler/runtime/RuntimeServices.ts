@@ -7,7 +7,7 @@ import { Graph3 } from './Graph3';
 import { DosUnit, ENVIRONMENT } from './DosUnit';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
-import { parseStrokeFont, type StrokeFont } from './StrokeFont';
+import { hersheyFont, parseStrokeFont, type StrokeFont } from './StrokeFont';
 import { BGI_HEADER_BYTES, parseBgiDriver } from './BgiDriver';
 import { BgiDriverBackend, DriverRefused } from './BgiKernel';
 import { decodeOverlayFile, overlaySize, type OverlayUnit } from './OverlayFile';
@@ -1267,16 +1267,19 @@ export class RuntimeServices {
           else {
             const name = (STANDARD_FONTS[a] ?? this.userFonts[a - 11] ?? '') + '.CHR';
             const path = this.find(name);
-            if (!path) {
+            // With no file, a standard font's Hershey stand-in, as if linked in.
+            const builtIn = path ? undefined : hersheyFont(STANDARD_FONTS[a] ?? '');
+            if (builtIn) g.strokeFont = builtIn;
+            else if (!path) {
               g.result = -8;
               return {};
-            }
-            try {
-              g.strokeFont = parseStrokeFont(this.fileBytes(path));
-            } catch {
-              g.result = -13;
-              return {};
-            }
+            } else
+              try {
+                g.strokeFont = parseStrokeFont(this.fileBytes(path));
+              } catch {
+                g.result = -13;
+                return {};
+              }
           }
         }
         g.font = a;

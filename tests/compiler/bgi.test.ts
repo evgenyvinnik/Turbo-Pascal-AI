@@ -127,6 +127,7 @@ describe('BGI fonts', () => {
         Erase(f); Write(RegisterBGIfont(p), ' '); d := Detect; InitGraph(d, m, '');
         SetTextStyle(TriplexFont, HorizDir, 4); WriteLn(GraphResult, ' ', TextWidth('AA')) end.`;
     expect(run(source, { 'TRIP.CHR': fontFile('TRIP') })).toEqual(['1 0 16']);
-    expect(run(source, { 'TRIP.CHR': fontFile('NONE') })).toEqual(['-14 -8 16']);
+    // A file of another font's is refused; TriplexFont is then its Hershey stand-in.
+    expect(run(source, { 'TRIP.CHR': fontFile('NONE') })).toEqual(['-14 0 60']);
   });
 });

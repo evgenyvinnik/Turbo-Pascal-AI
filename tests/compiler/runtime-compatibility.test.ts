@@ -91,12 +91,36 @@ describe('Turbo Pascal runtime compatibility', () => {
     expect(machine.getGraphics().pixels[10 * 640 + 13]).toBe(15);
   });
 
-  it('returns a GraphResult error when a requested font file is absent', () => {
-    const machine = machineFor(`program MissingFont; uses Graph; var driver,mode: Integer;
-      begin driver:=Detect; InitGraph(driver,mode,''); SetTextStyle(TriplexFont,HorizDir,4);
-        WriteLn(GraphResult,',',GraphResult,',',TextWidth('A')) end.`);
+  it("returns a GraphResult error when an installed font's file is absent", () => {
+    const machine = machineFor(`program MissingFont; uses Graph; var driver,mode,font: Integer;
+      begin driver:=Detect; InitGraph(driver,mode,''); font:=InstallUserFont('MISSING');
+        SetTextStyle(font,HorizDir,4); WriteLn(GraphResult,',',GraphResult,',',TextWidth('A')) end.`);
     machine.run();
     expect(machine.getOutput()).toEqual(['-8,0,8']);
+  });
+
+  it('draws the standard fonts in their Hershey stand-ins when no .CHR file is there', () => {
+    const machine = machineFor(`program Fonts; uses Graph; var driver,mode,font: Integer;
+      begin driver:=VGA; mode:=VGAHi; InitGraph(driver,mode,'');
+        for font:=TriplexFont to BoldFont do begin
+          SetTextStyle(font,HorizDir,4); Write(GraphResult,':',TextHeight('H'),' ') end;
+        SetTextStyle(TriplexFont,HorizDir,4); OutTextXY(10,10,'H'); WriteLn(TextWidth('H'),',',TextWidth('HH')) end.`);
+    machine.run();
+    expect(machine.getOutput()).toEqual([
+      '0:43 0:18 0:43 0:43 0:43 0:43 0:43 0:43 0:43 0:43 36,72',
+    ]);
+    // The H's stems run down from its cap to its baseline, 31 dots or so.
+    const pixels = machine.getGraphics().pixels;
+    const stem = Math.max(
+      ...Array.from(
+        { length: 36 },
+        (_, x) =>
+          Array.from({ length: 50 }, (_, y) => pixels[(10 + y) * 640 + 10 + x]).filter(
+            (dot) => dot === 15
+          ).length
+      )
+    );
+    expect(stem).toBeGreaterThanOrEqual(30);
   });
 
   it('declares ClipOn and ClipOff as the Booleans SetViewPort takes', () => {
