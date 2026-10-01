@@ -134,8 +134,8 @@ export class BgiMachine implements Bus {
       cpu.set16(index, registers[name as keyof typeof REGISTER_INDEX] ?? 0);
     cpu.halted = false;
     cpu.farCall(segment, offset, BIOS_SEGMENT, RETURN_OFFSET);
-    cpu.run(CALL_BUDGET);
-    if (!cpu.halted) throw new CpuFault('The graphics driver did not return');
+    if (cpu.run(CALL_BUDGET) >= CALL_BUDGET)
+      throw new CpuFault('The graphics driver did not return');
     if (cpu.segment(CS) !== BIOS_SEGMENT || cpu.ip !== RETURN_OFFSET + 1)
       throw new CpuFault('The graphics driver halted');
     const out: Registers = { es: cpu.segment(ES), ds: cpu.segment(DS) };
@@ -360,14 +360,14 @@ export class BgiMachine implements Bus {
     const es = cpu.segment(ES),
       di = cpu.get16(DI);
     const word = (offset: number, value: number) =>
-      cpu.writeWord(es, (di + offset) & 0xffff, value);
+      { cpu.writeWord(es, (di + offset) & 0xffff, value); };
     const byte = (offset: number, value: number) =>
-      cpu.writeByte(es, (di + offset) & 0xffff, value);
+      { cpu.writeByte(es, (di + offset) & 0xffff, value); };
     let ok = true;
     switch (al) {
       case 0x00:
         for (let i = 0; i < 256; i++) byte(i, 0);
-        'VESA'.split('').forEach((char, i) => byte(i, char.charCodeAt(0)));
+        'VESA'.split('').forEach((char, i) => { byte(i, char.charCodeAt(0)); });
         word(4, 0x0102);
         word(6, OEM_OFFSET);
         word(8, BIOS_SEGMENT);
