@@ -346,6 +346,11 @@ const STANDARD_VARIABLES: readonly StandardVariable[] = [
   { name: 'OvrTrapCount', kind: 'word', initial: 0, unit: 'overlay' },
   { name: 'OvrLoadCount', kind: 'word', initial: 0, unit: 'overlay' },
   { name: 'OvrFileMode', kind: 'byte', initial: 0, unit: 'overlay' },
+  // Where Graph would take memory for drivers, fonts and buffers, which a
+  // program may point at its own routines. Graph here takes none of the
+  // program's heap, so it never calls them.
+  { name: 'GraphGetMemPtr', kind: 'pointer', initial: 0, unit: 'graph' },
+  { name: 'GraphFreeMemPtr', kind: 'pointer', initial: 0, unit: 'graph' },
   // Turbo3's keyboard file, read without echo, and its Ctrl+Break switch.
   { name: 'Kbd', kind: 'text', initial: CONSOLE_KEYBOARD, unit: 'turbo3' },
   { name: 'CBreak', kind: 'boolean', initial: 1, unit: 'turbo3' },

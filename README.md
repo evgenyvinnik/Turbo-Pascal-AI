@@ -289,8 +289,15 @@ Imports are atomic and subject to browser storage capacity; rename conflicting
 filenames to keep both copies. A failed batch preserves existing files. Pascal
 programs cannot access the host filesystem or change the host clock. Source
 printing uses the browser's print dialog; the original DOS printer-filter
-settings are retained as UI preferences. Graph emulates VGA modes 640×200,
-640×350, and 640×480; unsupported drivers report a graphics error. `InitGraph` reads
+settings are retained as UI preferences. Graph runs on an emulated VGA,
+which has the graphics modes of the adapters before it: VGA's 640×200,
+640×350 and 640×480 in 16 colours, EGA's and EGA64's (EGA64Hi in four
+colours), EGA monochrome, MCGA's and CGA's four-colour 320×200 modes with
+their four palettes and colour 0 showing `SetBkColor`'s colour, and their
+two-colour modes. `DetectGraph` answers VGA, as on a VGA PC; Hercules, AT&T,
+PC3270 and IBM 8514 need their own driver files, as there. `GraphGetMemPtr`
+and `GraphFreeMemPtr` are declared, but Graph takes none of the program's
+heap, so it never calls them. `InitGraph` reads
 the driver's `.BGI` file, from its path or else the current directory, as
 Turbo Pascal does, and refuses one whose header is not that driver's
 (`grInvalidDriver`); with no file, the VGA's EGAVGA driver is taken as linked
