@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Ide } from './ide';
+import { testDriver } from '../fixtures/x86/testDriver';
 
 test('CRT video memory renders colors, cursor positions and interactive input', async ({
   page,
@@ -259,4 +260,52 @@ end.`);
   await ide.press('ArrowUp');
   await ide.waitForText('Prefix=0');
   await ide.waitForText('Scan=72');
+});
+
+test("a dropped third-party BGI driver's own code draws the screen", async ({ page }) => {
+  const ide = await Ide.open(page);
+  const source = `program Driver;
+uses Graph;
+var d, m: Integer;
+begin
+  d := InstallUserDriver('TESTBGI', nil); m := 0; InitGraph(d, m, '');
+  SetColor(4); Line(0, 0, 99, 0);
+  SetFillStyle(SolidFill, 14); Bar(10, 10, 20, 20);
+  ReadLn;
+  CloseGraph;
+end.`;
+  await page.evaluate(
+    (items) => {
+      const transfer = new DataTransfer();
+      for (const item of items)
+        transfer.items.add(new File([new Uint8Array(item.bytes)], item.name));
+      document.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
+      );
+    },
+    [
+      { name: 'testbgi.bgi', bytes: Array.from(testDriver()) },
+      { name: 'driver.pas', bytes: Array.from(source, (char) => char.charCodeAt(0)) },
+    ]
+  );
+  await expect(ide.row(1)).toContainText('DRIVER.PAS');
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('width', '320');
+  await expect(canvas).toHaveAttribute('height', '200');
+  const pixel = (x: number, y: number) =>
+    canvas.evaluate(
+      (element: HTMLCanvasElement, [px, py]) =>
+        Array.from(element.getContext('2d')?.getImageData(px ?? 0, py ?? 0, 1, 1).data ?? []),
+      [x, y]
+    );
+  // Colours 4 and 14 of the VGA's default palette: red and yellow.
+  await expect.poll(() => pixel(50, 0)).toEqual([170, 0, 0, 255]);
+  await expect.poll(() => pixel(15, 15)).toEqual([255, 255, 85, 255]);
+  await expect.poll(() => pixel(50, 50)).toEqual([0, 0, 0, 255]);
+  await ide.press('Enter');
+  await expect(canvas).toHaveCount(0);
 });

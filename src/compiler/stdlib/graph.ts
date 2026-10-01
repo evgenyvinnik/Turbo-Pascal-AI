@@ -161,12 +161,16 @@ export enum VertJust {
 }
 
 /**
- * Clip modes
+ * Clip modes: SetViewPort's Boolean, declared in Pascal as Graph's own
+ * constants (see GRAPH_DECLARATIONS).
  */
 export enum ClipMode {
   ClipOn = 1,
   ClipOff = 0,
 }
+
+/** Graph's constants that are not integers, in Pascal. */
+export const GRAPH_DECLARATIONS = 'const ClipOn = True; ClipOff = False;';
 
 /**
  * Graphics result codes
@@ -957,10 +961,6 @@ export const GRAPH_CONSTANTS: Map<string, number> = new Map<string, number>([
   ['RIGHTTEXT', HorizJust.RightText],
   ['BOTTOMTEXT', VertJust.BottomText],
   ['TOPTEXT', VertJust.TopText],
-
-  // Clip modes
-  ['CLIPON', ClipMode.ClipOn],
-  ['CLIPOFF', ClipMode.ClipOff],
 
   // Graphics result codes
   ['GROK', GraphResult.grOk],

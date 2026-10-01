@@ -8,7 +8,7 @@
 import { TypeKind, SymbolKind, type TypeInfo, Symbol } from '../symbols/Symbol';
 import { type BuiltinDef, ALL_BUILTINS, isBuiltin, getBuiltin, ParamMode } from './builtin';
 import { CRT_CONSTANTS, ALL_CRT_PROCS } from './crt';
-import { GRAPH_CONSTANTS, ALL_GRAPH_PROCS } from './graph';
+import { GRAPH_CONSTANTS, GRAPH_DECLARATIONS, ALL_GRAPH_PROCS } from './graph';
 
 /**
  * Unit definition interface
@@ -106,6 +106,7 @@ export class ModuleLoader {
       name: StandardUnit.GRAPH,
       procedures: ALL_GRAPH_PROCS,
       constants: GRAPH_CONSTANTS,
+      declarations: GRAPH_DECLARATIONS,
       needsInit: true,
       needsFinal: true,
     });

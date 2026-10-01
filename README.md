@@ -296,9 +296,15 @@ Turbo Pascal does, and refuses one whose header is not that driver's
 (`grInvalidDriver`); with no file, the VGA's EGAVGA driver is taken as linked
 into the program. `InstallUserDriver` and `RegisterBGIdriver` (of a driver a
 program read into memory) take drivers by the names in their headers; a
-driver of another maker's, such as an SVGA one, is read but its 8086 code is
-not run, so `InitGraph` reports `grInvalidDriver` for it, or
-`grFileNotFound` without its file. `InstallUserFont` adds `.CHR` fonts from 11
+driver of another maker's, such as an SVGA one, runs: its 8086 code is
+executed on an emulated PC with a VGA, a VESA 1.2 BIOS (640×400 up to
+1024×768 in 256 colours) and banked video memory. `InitGraph` installs it for
+the mode asked, reads its device status table and mode names, and the Graph
+unit then draws through its functions, filling, writing text and drawing
+curves itself where the driver leaves those to the kernel. Drivers for
+packed 256-colour modes work; ones that program the VGA's 16-colour bit
+planes, which are not emulated, do not, and a file whose code is no driver
+gives `grInvalidDriver`, as no file gives `grFileNotFound`. `InstallUserFont` adds `.CHR` fonts from 11
 on, which `SetTextStyle` loads like the ten standard ones, and
 `RegisterBGIfont` takes a font already in memory, needing no file after.
 `GetDriverName`, `GetModeName`, `GetMaxMode`, `GetModeRange`, `GetGraphMode`,
