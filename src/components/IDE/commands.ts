@@ -537,6 +537,7 @@ async function doCompile(
     farCalls: ide().compilerOptions.codegen?.[0] ?? false,
     alignData: ide().compilerOptions.codegen?.[2] ?? true,
     instructions286: ide().compilerOptions.codegen?.[3] ?? false,
+    numericProcessing: ide().compilerOptions.numeric?.[0] ?? false,
     sources,
     defines: ide()
       .defines.split(/[;,\s]+/)

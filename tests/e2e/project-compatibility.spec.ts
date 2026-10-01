@@ -381,3 +381,87 @@ begin S:='x';Change(S);WriteLn('STRING=',S)end.`);
   await ide.chooseItem('c');
   await ide.waitForText('[ ] Strict var-strings');
 });
+
+test('8087 Compiler Option changes Real arithmetic, persists, and yields to a source directive', async ({
+  page,
+}) => {
+  const ide = await Ide.open(page);
+  // The extra fraction is lost by Real48 arithmetic and by a store to Real,
+  // but the 8087 keeps it in an expression until it is stored.
+  await ide.typeSource(`program NumericOption;
+var R,S:Real;
+begin
+  R:=0.1;S:=R+1.0/35184372088832.0;
+  WriteLn('NUMERIC=',R=0.1,',',S=R,',',R+1.0/35184372088832.0=R);
+end.`);
+  await runCompiled(ide);
+  await ide.waitForText('NUMERIC=TRUE,TRUE,TRUE');
+  await ide.press('Alt+F3');
+  await ide.openMenu('O');
+  await ide.chooseItem('c');
+  await ide.press('Alt+8');
+  await ide.waitForText('[X] 8087/80287');
+  await ide.press('Enter');
+  await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-status', 'saved');
+  await page.reload();
+  await expect(page.getByTestId('workspace-status')).toHaveAttribute(
+    'data-workspace-ready',
+    'true'
+  );
+  await runCompiled(ide);
+  await ide.waitForText('NUMERIC=FALSE,TRUE,FALSE');
+  await ide.press('Alt+F3');
+  await ide.moveTo(1, 1);
+  await ide.type('{$N-}');
+  await runCompiled(ide);
+  await ide.waitForText('NUMERIC=TRUE,TRUE,TRUE');
+  await ide.openMenu('O');
+  await ide.chooseItem('c');
+  await ide.waitForText('[X] 8087/80287');
+});
+
+test('Program Parameters reach Pascal after reload and clearing them affects the next run', async ({
+  page,
+}) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program Arguments;
+var I:Integer;
+begin
+  WriteLn('COUNT=',ParamCount);
+  WriteLn('PROGRAM=',ParamStr(0));
+  for I:=1 to ParamCount do WriteLn('ARG',I,'=[',ParamStr(I),']');
+  WriteLn('MISSING=[',ParamStr(ParamCount+1),']');
+end.`);
+  await ide.openMenu('R');
+  await ide.chooseItem('a');
+  await ide.waitForDialog('Program Parameters');
+  await ide.type('alpha "two words" "" C:\\DATA\\A.PAS');
+  await ide.press('Enter');
+  await expect(page.getByTestId('workspace-status')).toHaveAttribute('data-status', 'saved');
+  await page.reload();
+  await expect(page.getByTestId('workspace-status')).toHaveAttribute(
+    'data-workspace-ready',
+    'true'
+  );
+  await runCompiled(ide);
+  // Output initially shows its last five lines. Wait for completion, then
+  // inspect both ends of the output through the window's scrolling keys.
+  await ide.waitForText('MISSING=[]');
+  await ide.press('Home');
+  await ide.waitForText('COUNT=4');
+  await ide.waitForText('PROGRAM=C:\\ARGUMENTS.EXE');
+  await ide.press('End');
+  await ide.waitForText('ARG1=[alpha]');
+  await ide.waitForText('ARG2=[two words]');
+  await ide.waitForText('ARG3=[]');
+  await ide.waitForText('ARG4=[C:\\DATA\\A.PAS]');
+  await ide.openMenu('R');
+  await ide.chooseItem('a');
+  await ide.waitForDialog('Program Parameters');
+  // Dialog inputs select their existing value when opened.
+  await ide.press('Backspace');
+  await ide.press('Enter');
+  await runCompiled(ide);
+  await ide.waitForText('COUNT=0');
+  await ide.waitForText('MISSING=[]');
+});

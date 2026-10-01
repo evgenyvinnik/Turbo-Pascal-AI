@@ -15,6 +15,8 @@ export interface ReferenceCase {
   name: string;
   source: string;
   input?: string;
+  /** Already-tokenized command-line parameters passed to both engines. */
+  arguments?: string[];
   output?: string[];
   /** Expected exit status (default 0). A run-time error exits with its error number. */
   exitCode?: number;
