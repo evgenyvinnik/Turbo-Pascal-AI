@@ -77,4 +77,30 @@ describe("a third-party BGI driver's code", () => {
         SetTextStyle(DefaultFont, HorizDir, 2); OutTextXY(200, 150, 'I'); WriteLn(GetPixel(207, 155)) end.`)
     ).toEqual(['4 4 15 0', '9 0', '14 14 14']);
   });
+
+  it('XORs lines with its own write mode, and copies what is drawn after', () => {
+    expect(
+      run(`program T; uses Graph; var d, m: Integer;
+      begin ${open}
+        SetColor(12); SetWriteMode(XORPut); Line(0, 0, 20, 0); Line(0, 0, 10, 0); Rectangle(30, 0, 40, 10);
+        Rectangle(30, 0, 40, 10); PutPixel(50, 50, 3); PutPixel(50, 50, 3);
+        WriteLn(GetPixel(5, 0), ' ', GetPixel(15, 0), ' ', GetPixel(30, 5), ' ', GetPixel(50, 50));
+        SetWriteMode(CopyPut); Line(0, 0, 20, 0); Line(0, 0, 10, 0); WriteLn(GetPixel(5, 0)) end.`)
+    ).toEqual(['0 12 0 3', '12']);
+  });
+
+  it('saves and puts images with its own SAVEBITMAP and RESTOREBITMAP', () => {
+    expect(
+      run(`program T; uses Graph; var d, m, i: Integer; Image: Pointer; Size: Word;
+      begin ${open}
+        SetFillStyle(SolidFill, 100); Bar(10, 10, 19, 14); PutPixel(10, 10, 200);
+        Size := ImageSize(10, 10, 19, 14); GetMem(Image, Size); GetImage(10, 10, 19, 14, Image^);
+        WriteLn(Size, ' ', ImageSize(0, 0, 319, 199), ' ', GraphResult);
+        SetFillStyle(SolidFill, 7); Bar(100, 100, 120, 120);
+        for i := 0 to 4 do PutImage(100, 100, Image^, i);
+        { 7, then 100 copied, 100 XOR 100, OR 100, AND 100, NOT 100. }
+        WriteLn(GetPixel(105, 102), ' ', GetPixel(100, 100));
+        PutImage(200, 100, Image^, NormalPut); PutImage(200, 100, Image^, XORPut); WriteLn(GetPixel(205, 102)) end.`)
+    ).toEqual(['56 64006 0', '155 55', '0']);
+  });
 });

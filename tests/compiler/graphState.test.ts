@@ -185,7 +185,7 @@ describe('pages and the aspect ratio', () => {
           SetGraphMode(VGAHi); GetAspectRatio(x, y); Write(x, ' ', y, ' ');
           SetAspectRatio(5000, 10000); Circle(100, 100, 20);
           WriteLn(GetPixel(120, 100), ' ', GetPixel(100, 90), ' ', GetPixel(100, 80)) end.`)
-    ).toEqual(['4167 10000 10000 10000 15 15 0']);
+    ).toEqual(['4500 10000 10000 10000 15 15 0']);
   });
 
   it("take a loaded driver's aspect ratio and 256 colors", () => {
@@ -200,5 +200,55 @@ describe('pages and the aspect ratio', () => {
     );
     expect(machine.getOutput()).toEqual(['8333 10000 256']);
     expect(machine.getGraphics().colors()?.[200]).toBe(0xff0000);
+  });
+});
+
+describe('the adapters a VGA can stand in for', () => {
+  it("opens CGA's four-color modes, whose color 0 shows the background", () => {
+    const machine = start(`program T; uses Graph; var Driver, Mode: Integer;
+      begin Driver := CGA; Mode := CGAC1; InitGraph(Driver, Mode, '');
+        WriteLn(GraphResult, ' ', Driver, ' ', Mode, ' ', GetMaxX, 'x', GetMaxY, ' ', GetMaxColor, ' ', GetColor, ' ',
+          GetDriverName, ' ', GetModeName(Mode), ' ', GetMaxMode);
+        SetBkColor(Blue); PutPixel(0, 0, 2); PutPixel(1, 0, 7);
+        WriteLn(GetPixel(0, 0), ' ', GetPixel(1, 0), ' ', GetPixel(5, 5), ' ', GetBkColor) end.`);
+    expect(machine.getOutput()).toEqual(['0 1 1 319x199 3 3 CGA 320 x 200 CGA C1 4', '2 3 0 1']);
+    // Palette 1: cyan, magenta and white over the background.
+    expect(machine.getGraphics().colors()).toEqual([0x0000aa, 0x55ffff, 0xff55ff, 0xffffff]);
+  });
+
+  it('opens the MCGA, EGA, EGA64 and EGA monochrome modes', () => {
+    expect(
+      run(`program T; uses Graph; var Driver, Mode: Integer;
+      procedure Open(D, M: Integer);
+      begin Driver := D; Mode := M; InitGraph(Driver, Mode, '');
+        WriteLn(GraphResult, ' ', GetModeName(Mode), ' ', GetMaxX, 'x', GetMaxY, ' ', GetMaxColor) end;
+      begin Open(MCGA, MCGAHi); Open(EGA, EGALo); Open(EGA, EGAHi); Open(EGA64, EGA64Hi); Open(EGAMono, EGAMonoHi);
+        Open(CGA, CGAHi); Driver := CGA; Mode := 7; InitGraph(Driver, Mode, ''); WriteLn(GraphResult) end.`)
+    ).toEqual([
+      '0 640 x 480 MCGA 639x479 1',
+      '0 640 x 200 EGA 639x199 15',
+      '0 640 x 350 EGA 639x349 15',
+      '0 640 x 350 EGA64 639x349 3',
+      '0 640 x 350 EGA MONO 639x349 1',
+      '0 640 x 200 CGA 639x199 1',
+      '-10',
+    ]);
+  });
+
+  it('needs the driver file for an adapter a VGA cannot be', () => {
+    expect(
+      run(`program T; uses Graph; var Driver, Mode: Integer;
+      begin Driver := HercMono; Mode := HercMonoHi; InitGraph(Driver, Mode, ''); WriteLn(GraphResult) end.`)
+    ).toEqual(['-3']);
+  });
+
+  it('declares GraphGetMemPtr and GraphFreeMemPtr for a program to set', () => {
+    expect(
+      run(`program T; uses Graph;
+      procedure MyGet(var P: Pointer; Size: Word); far; begin GetMem(P, Size) end;
+      var Old: Pointer;
+      begin Old := GraphGetMemPtr; GraphGetMemPtr := @MyGet;
+        WriteLn(Old = nil, ' ', Graph.GraphFreeMemPtr = nil, ' ', GraphGetMemPtr <> nil) end.`)
+    ).toEqual(['TRUE TRUE TRUE']);
   });
 });

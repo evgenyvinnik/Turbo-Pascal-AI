@@ -341,3 +341,73 @@ end.`);
   await ide.press('Enter');
   await expect(canvas).toHaveCount(0);
 });
+
+test('the bundled BGIDEMO.PAS tours Graph from the Open dialog to its last screen', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const ide = await Ide.open(page);
+  await ide.openFile('BGIDEMO.PAS');
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
+  await expect(canvas).toBeVisible();
+  const pixel = (x: number, y: number) =>
+    canvas.evaluate(
+      (element: HTMLCanvasElement, [px, py]) =>
+        Array.from(element.getContext('2d')?.getImageData(px ?? 0, py ?? 0, 1, 1).data ?? []),
+      [x, y]
+    );
+  // Every screen has the blue title bar and the light gray hint line.
+  for (let screen = 1; screen <= 12; screen++) {
+    await expect.poll(() => pixel(5, 5), { timeout: 15_000 }).toEqual([0, 0, 170, 255]);
+    await expect.poll(() => pixel(5, 470)).toEqual([170, 170, 170, 255]);
+    // The sixth screen's flood fill is green; the seventh's star is red.
+    if (screen === 6) await expect.poll(() => pixel(451, 291)).toEqual([0, 170, 0, 255]);
+    if (screen === 7) await expect.poll(() => pixel(181, 211)).toEqual([170, 0, 0, 255]);
+    await page.keyboard.press('Space');
+  }
+  // The keys wait in the buffer while the animations finish.
+  await expect(canvas).toHaveCount(0, { timeout: 30_000 });
+});
+
+test('the bundled CRTDEMO.PAS tours Crt to its last screen', async ({ page }) => {
+  test.setTimeout(120_000);
+  const ide = await Ide.open(page);
+  await ide.openFile('CRTDEMO.PAS');
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  await expect(ide.row(0)).toContainText('Turbo Pascal Crt unit');
+  await expect(ide.row(7)).toContainText('C R T   D E M O');
+  for (const title of [
+    'TextColor and TextBackground',
+    'Window, and text scrolling in it',
+    'InsLine and DelLine',
+    'GotoXY, WhereX and WhereY',
+    'ReadKey',
+  ]) {
+    await page.keyboard.press('Space');
+    await expect(ide.row(0)).toContainText(title, { timeout: 15_000 });
+  }
+  // The keyboard screen names the keys it reads; Enter ends it.
+  await page.keyboard.press('a');
+  await expect(ide.row(4)).toContainText("Key 'a', character 97");
+  await page.keyboard.press('ArrowUp');
+  await expect(ide.row(5)).toContainText('Extended key, scan code 72');
+  await page.keyboard.press('Enter');
+  await expect(ide.row(0)).toContainText('Sound and NoSound', { timeout: 15_000 });
+  await page.keyboard.press('Space');
+  await expect(ide.row(0)).toContainText('KeyPressed', { timeout: 15_000 });
+  // A key stops the ball, and another goes on.
+  await page.keyboard.press('Space');
+  await expect(ide.row(11)).toContainText('Stopped after');
+  await page.keyboard.press('Space');
+  await expect(ide.row(0)).toContainText('The end', { timeout: 15_000 });
+  await page.keyboard.press('Space');
+  // The program has ended with the screen cleared; Escape goes back to the IDE.
+  await expect(ide.row(0)).not.toContainText('The end');
+  await ide.press('Escape');
+  await expect(page.getByTestId('program-text-screen')).toHaveCount(0);
+});

@@ -89,8 +89,71 @@ export function egaDac(): [number, number, number][] {
 /** The palette registers the EGA and VGA start with: the sixteen colours
  * as entries of the 64, brown being 20. */
 export const DEFAULT_PALETTE = [0, 1, 2, 3, 4, 5, 20, 7, 56, 57, 58, 59, 60, 61, 62, 63];
-/** How many screens each VGA mode's 256K holds: VGALo four, VGAMed two. */
-const PAGES = [4, 2, 1];
+/** A built-in driver's mode: its name, size, colours and pages, and for
+ * CGA's four-colour modes which of its palettes it shows. */
+export interface GraphMode {
+  name: string;
+  width: number;
+  height: number;
+  colours: 2 | 4 | 16;
+  pages: number;
+  cga?: number;
+  /** GetAspectRatio's Xasp, over a Yasp of 10000, where it is known: the
+   * numbers 16-colour BGI drivers give their EGA and VGA modes. */
+  aspect?: number;
+}
+const cga = (adapter: string): Record<number, GraphMode> =>
+  Object.fromEntries(
+    [0, 1, 2, 3].map((palette): [number, GraphMode] => [
+      palette,
+      {
+        name: `320 x 200 ${adapter} C${String(palette)}`,
+        width: 320,
+        height: 200,
+        colours: 4,
+        pages: 1,
+        cga: palette,
+      },
+    ])
+  );
+/** The drivers the emulated VGA runs as Borland's CGA and EGAVGA drivers do,
+ * by number, and their modes. A VGA has the modes of the CGA, MCGA and EGA
+ * before it; the pages are what each mode's share of its 256K holds. */
+export const BUILT_IN_MODES: Record<number, Record<number, GraphMode>> = {
+  1: {
+    ...cga('CGA'),
+    4: { name: '640 x 200 CGA', width: 640, height: 200, colours: 2, pages: 1 },
+  },
+  2: {
+    ...cga('MCGA'),
+    4: { name: '640 x 200 MCGA', width: 640, height: 200, colours: 2, pages: 1 },
+    5: { name: '640 x 480 MCGA', width: 640, height: 480, colours: 2, pages: 1 },
+  },
+  3: {
+    0: { name: '640 x 200 EGA', width: 640, height: 200, colours: 16, pages: 4, aspect: 4500 },
+    1: { name: '640 x 350 EGA', width: 640, height: 350, colours: 16, pages: 2, aspect: 7750 },
+  },
+  4: {
+    0: { name: '640 x 200 EGA64', width: 640, height: 200, colours: 16, pages: 1, aspect: 4500 },
+    1: { name: '640 x 350 EGA64', width: 640, height: 350, colours: 4, pages: 1, aspect: 7750 },
+  },
+  5: {
+    3: { name: '640 x 350 EGA MONO', width: 640, height: 350, colours: 2, pages: 2, aspect: 7750 },
+  },
+  9: {
+    0: { name: '640 x 200 VGA', width: 640, height: 200, colours: 16, pages: 4, aspect: 4500 },
+    1: { name: '640 x 350 VGA', width: 640, height: 350, colours: 16, pages: 2, aspect: 7750 },
+    2: { name: '640 x 480 VGA', width: 640, height: 480, colours: 16, pages: 1, aspect: 10000 },
+  },
+};
+/** CGA's four-colour palettes 0 to 3: colours 1, 2 and 3 of each, as the
+ * sixteen colours number them; colour 0 is the background. */
+const CGA_PALETTES = [
+  [10, 12, 14],
+  [11, 13, 15],
+  [2, 4, 6],
+  [3, 5, 7],
+];
 
 /** Deterministic, palette-index BGI framebuffer. Drawing works in Node and browsers. */
 export class GraphicsRuntime {
@@ -109,6 +172,8 @@ export class GraphicsRuntime {
   fillColor = 15;
   fillPattern = 1;
   linePattern = 0xffff;
+  /** The built-in driver's mode, while one is on. */
+  modeInfo: GraphMode = defined(BUILT_IN_MODES[9]?.[2]);
   /** SetLineStyle's style, 0 to 4, of which UserBitLn uses linePattern. */
   lineStyle = 0;
   thickness = 1;
@@ -188,7 +253,12 @@ export class GraphicsRuntime {
   }
   /** The highest colour the screen shows. */
   maxColor(): number {
-    return this.external?.maxColour ?? 15;
+    return this.external?.maxColour ?? this.modeInfo.colours - 1;
+  }
+  /** What clearing writes: the background colour's number in the 16-colour
+   * modes, and colour 0, which shows the background, in the others. */
+  private get blank(): number {
+    return this.modeInfo.colours === 16 ? this.background : 0;
   }
   /** A circle's height for its radius, in the aspect ratio. */
   circleHeight(radius: number): number {
@@ -243,35 +313,40 @@ export class GraphicsRuntime {
     return [Math.round(x) + this.viewport.left, Math.round(y) + this.viewport.top];
   }
   init(driver: number, mode: number): void {
-    if ((driver !== 0 && driver !== 9) || (driver === 9 && (mode < 0 || mode > 2))) {
+    if (driver === 0) [driver, mode] = [9, 2];
+    const modes = BUILT_IN_MODES[driver],
+      info = modes?.[mode];
+    if (!info) {
       this.initialized = false;
-      this.result = driver !== 0 && driver !== 9 ? -4 : -10;
+      this.result = modes ? -10 : -4;
       this.revision++;
       return;
     }
     this.palette = null;
     this.dac = null;
     this.decoration = [];
-    this.driver = driver === 0 ? 9 : driver;
-    this.mode = driver === 0 ? 2 : mode;
-    this.width = 640;
-    this.height = this.mode === 0 ? 200 : this.mode === 1 ? 350 : 480;
-    this.pages = Array.from(
-      { length: PAGES[this.mode] ?? 1 },
-      () => new Uint8Array(this.width * this.height)
-    );
+    this.driver = driver;
+    this.mode = mode;
+    this.modeInfo = info;
+    this.width = info.width;
+    this.height = info.height;
+    this.pages = Array.from({ length: info.pages }, () => new Uint8Array(this.width * this.height));
     this.pixels = defined(this.pages[0]);
     this.activePage = this.visualPage = 0;
     this.planarDac = egaDac();
-    // A round circle on a 4:3 screen: its height in dots over its width.
-    this.aspect = { x: Math.round((10000 * this.height * 4) / (this.width * 3)), y: 10000 };
+    // A round circle on a 4:3 screen, where the mode gives no number: its
+    // height in dots over its width.
+    this.aspect = {
+      x: info.aspect ?? Math.round((10000 * this.height * 4) / (this.width * 3)),
+      y: 10000,
+    };
     this.initialized = true;
     this.result = 0;
     this.defaults();
   }
   /** GraphDefaults: the settings InitGraph starts with, the screen kept. */
   defaults(): void {
-    this.color = this.fillColor = 15;
+    this.color = this.fillColor = this.maxColor();
     this.background = this.x = this.y = this.direction = this.font = this.horizontalJustify = 0;
     this.charSize = this.fillPattern = this.thickness = 1;
     this.strokeFont = null;
@@ -312,9 +387,21 @@ export class GraphicsRuntime {
     const rgb = ([red, green, blue]: [number, number, number]) =>
       (eightBit(red) << 16) | (eightBit(green) << 8) | eightBit(blue);
     if (this.dac) return this.dac.map(rgb);
-    // Graph's sixteen colours: each register's entry of the DAC.
     if (this.palette || !this.initialized) return undefined;
-    return this.registers.map((entry) => rgb(this.planarDac[entry & 0xff] ?? [0, 0, 0]));
+    // Each of the sixteen colours shows a palette register's entry of the DAC.
+    const colour = (index: number) =>
+      rgb(this.planarDac[(this.registers[index & 15] ?? 0) & 0xff] ?? [0, 0, 0]);
+    const info = this.modeInfo;
+    if (info.cga !== undefined)
+      return [this.background, ...(CGA_PALETTES[info.cga] ?? [])].map((index) =>
+        rgb(this.planarDac[defined(DEFAULT_PALETTE[index & 15])] ?? [0, 0, 0])
+      );
+    // Two colours: the background, and white.
+    if (info.colours === 2)
+      return [this.background, 15].map((index) =>
+        rgb(this.planarDac[defined(DEFAULT_PALETTE[index & 15])] ?? [0, 0, 0])
+      );
+    return Array.from({ length: info.colours }, (_, index) => colour(index));
   }
   /** Ports 3C7h, 3C8h and 3C9h: choose an entry to read or write, then its
    * red, green and blue in turn. */
@@ -389,7 +476,7 @@ export class GraphicsRuntime {
       this.external.putPixel(...this.onScreen(x, y), color);
       this.revision++;
     } else if (index >= 0) {
-      this.pixels[index] = color & 15;
+      this.pixels[index] = color & this.maxColor();
       this.revision++;
     }
   }
@@ -414,11 +501,11 @@ export class GraphicsRuntime {
       this.revision++;
       return;
     }
-    if (!viewportOnly) this.pixels.fill(this.background);
+    if (!viewportOnly) this.pixels.fill(this.blank);
     else
       for (let y = this.viewport.top; y <= this.viewport.bottom; y++) {
         this.pixels.fill(
-          this.background,
+          this.blank,
           y * this.width + this.viewport.left,
           y * this.width + this.viewport.right + 1
         );
@@ -433,7 +520,8 @@ export class GraphicsRuntime {
   }
   line(x1: number, y1: number, x2: number, y2: number, xor = false): void {
     const backend = this.external;
-    if (backend && !xor) {
+    // XORed through the driver's own write mode, where it has one.
+    if (backend && (!xor || backend.setWriteMode(1))) {
       this.sendSettings(backend);
       const [ax, ay] = this.onScreen(x1, y1),
         [bx, by] = this.onScreen(x2, y2);
@@ -445,6 +533,8 @@ export class GraphicsRuntime {
           if (steep) backend.line(ax + side, ay, bx + side, by);
           else backend.line(ax, ay + side, bx, by + side);
       }
+      // Only lines XOR: what is drawn next copies.
+      if (xor) backend.setWriteMode(0);
       this.revision++;
       return;
     }
@@ -456,8 +546,6 @@ export class GraphicsRuntime {
       dy = -Math.abs(y2 - y1),
       sx = x1 < x2 ? 1 : -1,
       sy = y1 < y2 ? 1 : -1;
-    let error = dx + dy,
-      step = 0;
     // Clip very large coordinates before raster traversal to bound each VM instruction.
     if (dx - dy > 1_000_000) {
       this.result = -11;
@@ -469,23 +557,26 @@ export class GraphicsRuntime {
       if (xor) dots.set(`${String(x)},${String(y)}`, [x, y]);
       else this.pixel(x, y);
     };
-    for (;;) {
-      if ((this.linePattern >>> (15 - (step % 16))) & 1) {
-        const radius = this.thickness === 3 ? 1 : 0;
-        for (let yy = -radius; yy <= radius; yy++)
-          for (let xx = -radius; xx <= radius; xx++) plot(x1 + xx, y1 + yy);
+    // A thick line is three, side by side across its run, each in the
+    // pattern, as the BGI draws it.
+    const steep = dy < -dx;
+    const sides = this.thickness === 3 ? [0, -1, 1] : [0];
+    for (const side of sides) {
+      let [x, y, error] = [x1 + (steep ? side : 0), y1 + (steep ? 0 : side), dx + dy];
+      const [endX, endY] = [x2 + (steep ? side : 0), y2 + (steep ? 0 : side)];
+      for (let step = 0; ; step++) {
+        if ((this.linePattern >>> (15 - (step % 16))) & 1) plot(x, y);
+        if (x === endX && y === endY) break;
+        const twice = 2 * error;
+        if (twice >= dy) {
+          error += dy;
+          x += sx;
+        }
+        if (twice <= dx) {
+          error += dx;
+          y += sy;
+        }
       }
-      if (x1 === x2 && y1 === y2) break;
-      const twice = 2 * error;
-      if (twice >= dy) {
-        error += dy;
-        x1 += sx;
-      }
-      if (twice <= dx) {
-        error += dx;
-        y1 += sy;
-      }
-      step++;
     }
     for (const [x, y] of dots.values()) {
       const old = this.getPixel(x, y);
@@ -504,10 +595,20 @@ export class GraphicsRuntime {
     if (this.external) return this.external.getPixel(x, y);
     return this.pixels[y * this.width + x] ?? 0;
   }
-  /** The bytes an image's rows take: a byte a dot under a loaded driver's
-   * 256 colours, or the VGA's four bit planes of eight dots a byte. */
+  /** The bits a dot takes in an image: its mode's, or a loaded driver's. */
+  private get bitsPerDot(): number {
+    return this.external?.bitsPerPixel ?? Math.log2(this.modeInfo.colours);
+  }
+  /** The bit planes an image's rows hold: four for 16 colours, two for
+   * four, one for two; none where a dot takes a byte or more. */
+  private get planes(): number {
+    return this.bitsPerDot < 8 ? this.bitsPerDot : 0;
+  }
+  /** The bytes an image's rows take: the bit planes from the highest down,
+   * as the BGI's 16-colour drivers save them, of eight dots a byte; or
+   * whole bytes a dot. */
   private rowBytes(width: number): number {
-    return this.external ? width : Math.ceil(width / 8) * 4;
+    return this.planes ? Math.ceil(width / 8) * this.planes : (width * this.bitsPerDot) / 8;
   }
   /** ImageSize: GetImage's bytes, a word each for the width and height less
    * one, the rows, and a spare word; 0 if that reaches 64K. */
@@ -526,6 +627,12 @@ export class GraphicsRuntime {
       height = Math.abs(y2 - y1) + 1,
       row = this.rowBytes(width);
     const image = new Uint8Array(6 + row * height);
+    // The driver's own SAVEBITMAP, where it has one.
+    const saved = this.external?.saveImage(left, top, width, height, row);
+    if (saved) {
+      image.set(saved);
+      return image;
+    }
     const view = new DataView(image.buffer);
     view.setUint16(0, width - 1, true);
     view.setUint16(2, height - 1, true);
@@ -533,11 +640,13 @@ export class GraphicsRuntime {
       for (let x = 0; x < width; x++) {
         const dot = this.screenDot(left + x, top + y),
           at = 4 + y * row;
-        if (this.external) image[at + x] = dot;
+        if (!this.planes)
+          for (let byte = 0; byte < this.bitsPerDot / 8; byte++)
+            image[at + (x * this.bitsPerDot) / 8 + byte] = (dot >> (byte * 8)) & 0xff;
         else
-          for (let plane = 0; plane < 4; plane++)
+          for (let plane = 0; plane < this.planes; plane++)
             if ((dot >> plane) & 1) {
-              const index = at + plane * (row / 4) + (x >> 3);
+              const index = at + (this.planes - 1 - plane) * (row / this.planes) + (x >> 3);
               image[index] = (image[index] ?? 0) | (0x80 >> (x & 7));
             }
       }
@@ -556,14 +665,24 @@ export class GraphicsRuntime {
     const { width, height } = this.imageExtent(image),
       row = this.rowBytes(width),
       mask = this.maxColor();
+    if (this.external?.restoreImage(...this.onScreen(x, y), image, operation)) {
+      this.revision++;
+      return;
+    }
     for (let yy = 0; yy < height; yy++)
       for (let xx = 0; xx < width; xx++) {
         const at = 4 + yy * row;
         let dot = 0;
-        if (this.external) dot = image[at + xx] ?? 0;
+        if (!this.planes)
+          for (let byte = 0; byte < this.bitsPerDot / 8; byte++)
+            dot |= (image[at + (xx * this.bitsPerDot) / 8 + byte] ?? 0) << (byte * 8);
         else
-          for (let plane = 0; plane < 4; plane++)
-            if (((image[at + plane * (row / 4) + (xx >> 3)] ?? 0) << (xx & 7)) & 0x80)
+          for (let plane = 0; plane < this.planes; plane++)
+            if (
+              ((image[at + (this.planes - 1 - plane) * (row / this.planes) + (xx >> 3)] ?? 0) <<
+                (xx & 7)) &
+              0x80
+            )
               dot |= 1 << plane;
         if (this.position(x + xx, y + yy) < 0) continue;
         const old = this.getPixel(x + xx, y + yy);
@@ -573,6 +692,14 @@ export class GraphicsRuntime {
   }
   /** SetActivePage and SetVisualPage, of the pages the mode has. */
   setPage(page: number, visual: boolean): void {
+    if (this.external) {
+      if (this.external.setPage(page, visual)) {
+        if (visual) this.visualPage = page;
+        else this.activePage = page;
+        this.revision++;
+      }
+      return;
+    }
     const screen = this.pages[page];
     if (!screen) return;
     if (visual) this.visualPage = page;
@@ -630,7 +757,7 @@ export class GraphicsRuntime {
       x % 4 === 0 && y % 4 === 0,
       ((this.userFill[y & 7] ?? 0) >> (7 - (x & 7))) & 1,
     ];
-    this.pixel(x, y, patterns[this.fillPattern] ? this.fillColor : this.background);
+    this.pixel(x, y, patterns[this.fillPattern] ? this.fillColor : this.blank);
   }
   bar(x1: number, y1: number, x2: number, y2: number): void {
     const backend = this.external;

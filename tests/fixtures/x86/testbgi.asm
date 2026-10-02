@@ -4,9 +4,10 @@
 ; set to the driver's segment; 'CB' after it; EMULATE, the five bytes the
 ; Graph unit takes over for what a driver leaves to it, at 10h.
 ;
-; One mode: 320x200 in 256 colours, through BIOS mode 13h. It draws lines,
-; bars and dots itself, clipped to the clip rectangle, and leaves flood fill
-; and text to the kernel.
+; One mode: 320x200 in 256 colours, through BIOS mode 13h. It draws lines
+; (copied or XORed, as SETWRITEMODE says), bars and dots itself, clipped to
+; the clip rectangle, saves and restores images, and leaves flood fill and
+; text to the kernel.
 bits 16
 cpu 186
 org 0
@@ -50,9 +51,9 @@ vectors:
         dw emulate              ; 22 flood fill
         dw getpixel             ; 23 get pixel
         dw putpixel             ; 24 put pixel
-        dw nothing              ; 25 bitmap util
-        dw nothing              ; 26 save bitmap
-        dw nothing              ; 27 restore bitmap
+        dw bitmaputil           ; 25 bitmap util
+        dw savebitmap           ; 26 save bitmap
+        dw restorebitmap        ; 27 restore bitmap
         dw setclip              ; 28 set clip
         dw colourquery          ; 29 colour query
 
@@ -66,7 +67,15 @@ status:                         ; the device status table
         db 8, 8, 90h, 90h
 modename: db 16, 'TEST 320x200x256'
 
+; BITMAPUTIL's table: far routines GotoGraphic, ExitGraphic, PutPixel,
+; GetPixel, GetPixByte, SetDrawPage, SetVisualPage and SetWriteMode.
+utilities:
+        dw farnothing, farnothing, farnothing, farnothing
+        dw pixbits, farnothing, farnothing, setwritemode
+
 drawcolour: db 15
+writemode: db 0                 ; 0 copies, 1 XORs the lines VECT draws
+xoring: db 0                    ; whether PLOT XORs now
 fillcolour: db 15
 fillpattern: db 1
 cpx:    dw 0
@@ -77,6 +86,28 @@ clipx2: dw 319
 clipy2: dw 199
 
 nothing: ret
+farnothing: retf
+
+bitmaputil:
+        push cs
+        pop es
+        mov bx, utilities
+        ret
+
+; GETPIXBYTE: AX the bits a dot takes.
+pixbits:
+        mov ax, 8
+        retf
+
+; SETWRITEMODE: AX the mode. A far routine, so it finds its own data.
+setwritemode:
+        push ds
+        push cs
+        pop ds
+        and al, 1
+        mov [writemode], al
+        pop ds
+        retf
 
 ; INSTALL: AL=0 install for mode CL, ES:BX the status table; AL=1, CX the
 ; number of modes; AL=2, ES:BX the name of mode CL.
@@ -130,8 +161,17 @@ draw:   mov cx, [cpx]
         xchg bx, dx
         ; fall through: a line from AX,BX to CX,DX
 
-; VECT: a line from (AX,BX) to (CX,DX), by Bresenham's steps.
-vect:   mov [x1], ax
+; VECT: a line from (AX,BX) to (CX,DX), by Bresenham's steps, in the
+; write mode.
+vect:   push ax
+        mov al, [writemode]
+        mov [xoring], al
+        pop ax
+        call line
+        mov byte [xoring], 0
+        ret
+
+line:   mov [x1], ax
         mov [y1], bx
         mov [x2], cx
         mov [y2], dx
@@ -202,8 +242,12 @@ plot:   cmp ax, [clipx1]
         mov ax, 0a000h
         mov es, ax
         pop dx
-        mov [es:di], dl
-        pop di
+        cmp byte [xoring], 0
+        je .copy
+        xor [es:di], dl
+        jmp .done
+.copy:  mov [es:di], dl
+.done:  pop di
         pop es
 .out:   ret
 
@@ -254,6 +298,117 @@ patbar: mov [x1], ax
         inc bx
         jmp .row
 .done:  ret
+
+; SAVEBITMAP: ES:BX the image, its width and height less one first, CX and
+; DX its top left; its rows follow, a byte a dot.
+savebitmap:
+        mov [x1], cx
+        mov [y1], dx
+        mov si, [es:bx]
+        inc si
+        mov [ddx], si           ; width
+        mov si, [es:bx + 2]
+        inc si
+        mov [ddy], si           ; height
+        lea di, [bx + 4]
+        mov dx, [y1]
+.row:   mov cx, [x1]
+        mov si, [ddx]
+.dot:   push si
+        push cx
+        push dx
+        mov ax, cx
+        mov bx, dx
+        call dotat              ; AL the dot
+        pop dx
+        pop cx
+        pop si
+        stosb
+        inc cx
+        dec si
+        jnz .dot
+        inc dx
+        dec word [ddy]
+        jnz .row
+        ret
+
+; RESTOREBITMAP: AL the operation (copy, XOR, OR, AND, NOT), ES:BX the
+; image, CX and DX where its top left goes.
+restorebitmap:
+        mov [sx], al
+        mov [x1], cx
+        mov [y1], dx
+        mov si, [es:bx]
+        inc si
+        mov [ddx], si
+        mov si, [es:bx + 2]
+        inc si
+        mov [ddy], si
+        lea si, [bx + 4]
+        mov dx, [y1]
+.row:   mov cx, [x1]
+        mov di, [ddx]
+.dot:   mov al, [es:si]
+        inc si
+        push si
+        push di
+        push cx
+        push dx
+        mov [err], al
+        mov ax, cx
+        mov bx, dx
+        call dotat              ; AL what is there
+        mov ah, [err]
+        mov bl, [sx]
+        cmp bl, 1
+        jne .notxor
+        xor al, ah
+        jmp .put
+.notxor:
+        cmp bl, 2
+        jne .notor
+        or al, ah
+        jmp .put
+.notor: cmp bl, 3
+        jne .notand
+        and al, ah
+        jmp .put
+.notand:
+        mov al, ah
+        cmp bl, 4
+        jne .put
+        not al
+.put:   mov dl, al
+        pop bx                  ; y
+        pop ax                  ; x
+        push ax
+        push bx
+        call plot
+        pop dx
+        pop cx
+        pop di
+        pop si
+        inc cx
+        dec di
+        jnz .dot
+        inc dx
+        dec word [ddy]
+        jnz .row
+        ret
+
+; DOTAT: AL the dot at (AX,BX), outside clipping.
+dotat:  push es
+        push di
+        mov di, ax
+        mov ax, 320
+        mul bx
+        add di, ax
+        mov ax, 0a000h
+        mov es, ax
+        mov al, [es:di]
+        pop di
+        pop es
+        ret
 
 colour: mov [drawcolour], al
         mov [fillcolour], ah

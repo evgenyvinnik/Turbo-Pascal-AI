@@ -2,12 +2,12 @@ import { PascalError } from '../errors/PascalError';
 import { TypeCode } from '../types/inst';
 import type { StackValue } from './Machine';
 import { TextConsole } from './TextConsole';
-import { GraphicsRuntime } from './GraphicsRuntime';
+import { BUILT_IN_MODES, GraphicsRuntime } from './GraphicsRuntime';
 import { Graph3 } from './Graph3';
 import { DosUnit, ENVIRONMENT } from './DosUnit';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
 import { VirtualFileSystem } from './VirtualFileSystem';
-import { parseStrokeFont, type StrokeFont } from './StrokeFont';
+import { hersheyFont, parseStrokeFont, type StrokeFont } from './StrokeFont';
 import { BGI_HEADER_BYTES, parseBgiDriver } from './BgiDriver';
 import { BgiDriverBackend, DriverRefused } from './BgiKernel';
 import { decodeOverlayFile, overlaySize, type OverlayUnit } from './OverlayFile';
@@ -88,7 +88,6 @@ const MODE_RANGES: Record<number, [number, number]> = {
   9: [0, 2],
   10: [0, 0],
 };
-const VGA_MODES = ['640 x 200 VGA', '640 x 350 VGA', '640 x 480 VGA'];
 /** The stroked fonts Turbo Pascal numbers 1 to 10, by their files. */
 const STANDARD_FONTS = [
   '',
@@ -957,11 +956,12 @@ export class RuntimeServices {
         code = bytes.subarray(header.headerSize, header.headerSize + header.codeSize);
       }
     }
-    if (name === 'EGAVGA') {
-      // The P-machine's own VGA, which EGAVGA drives, with or without the file.
+    if (name === 'EGAVGA' || name === 'CGA') {
+      // The P-machine's own VGA, in the modes of the CGA, MCGA, EGA and VGA
+      // that Borland's CGA and EGAVGA drivers use, with or without the file.
       g.detach();
       this.loadedDriver = undefined;
-      g.init(9, mode);
+      g.init(driver, mode);
       if (!g.initialized) return;
     } else {
       // Any other driver's code runs, on the emulated PC.
@@ -1077,9 +1077,17 @@ export class RuntimeServices {
       case 296:
         return { result: this.driverName };
       case 297:
-        return { result: g.external ? g.external.nameOfMode(a) : (VGA_MODES[a] ?? '') };
-      case 298:
-        return { result: g.external ? g.external.modeCount - 1 : VGA_MODES.length - 1 };
+        return {
+          result: g.external
+            ? g.external.nameOfMode(a)
+            : (BUILT_IN_MODES[g.driver]?.[a]?.name ?? ''),
+        };
+      case 298: {
+        if (g.external) return { result: g.external.modeCount - 1 };
+        return {
+          result: Math.max(...Object.keys(BUILT_IN_MODES[g.driver] ?? { 0: 0 }).map(Number)),
+        };
+      }
       case 299: {
         const loaded = this.loadedDriver?.number === a ? g.external : null;
         const [low, high] = loaded ? [0, loaded.modeCount - 1] : (MODE_RANGES[a] ?? [-1, -1]);
@@ -1154,8 +1162,9 @@ export class RuntimeServices {
         return {};
       case 211:
         return { result: g.color };
+      // Any of the sixteen colours, which CGA's colour 0 shows.
       case 212:
-        g.background = a & g.maxColor();
+        g.background = a & (g.external ? g.maxColor() : 15);
         return {};
       case 213:
         return { result: g.background };
@@ -1258,16 +1267,19 @@ export class RuntimeServices {
           else {
             const name = (STANDARD_FONTS[a] ?? this.userFonts[a - 11] ?? '') + '.CHR';
             const path = this.find(name);
-            if (!path) {
+            // With no file, a standard font's Hershey stand-in, as if linked in.
+            const builtIn = path ? undefined : hersheyFont(STANDARD_FONTS[a] ?? '');
+            if (builtIn) g.strokeFont = builtIn;
+            else if (!path) {
               g.result = -8;
               return {};
-            }
-            try {
-              g.strokeFont = parseStrokeFont(this.fileBytes(path));
-            } catch {
-              g.result = -13;
-              return {};
-            }
+            } else
+              try {
+                g.strokeFont = parseStrokeFont(this.fileBytes(path));
+              } catch {
+                g.result = -13;
+                return {};
+              }
           }
         }
         g.font = a;

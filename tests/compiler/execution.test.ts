@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { errorWith } from './matchers';
 import { Compiler } from '../../src/compiler/codegen/Compiler';
 import { Lexer, Stream } from '../../src/compiler/lexer';
@@ -55,6 +55,76 @@ describe('bundled Pascal programs', () => {
 
   it('executes PRIMES.PAS below the smallest prime', () => {
     expect(execute(sample('PRIMES'), ['1', ''])).toContain('No prime numbers below 2.');
+  });
+});
+
+/** Runs a sample through its screens: each time it waits, `look` sees the
+ * machine and returns the key to press; time moves on whenever it sleeps. */
+function tour(name: string, look: (machine: Machine, screen: number) => string = () => ' ') {
+  vi.useFakeTimers();
+  try {
+    const machine = new Machine(compile(sample(name)), { maxInstructions: 50_000_000 });
+    let screen = 0;
+    for (let turn = 0; turn < 20_000; turn++) {
+      machine.run();
+      const state = machine.getState();
+      if (state === MachineState.SLEEPING) {
+        vi.setSystemTime(machine.getWakeTime());
+        machine.wake();
+      } else if (state === MachineState.WAITING) machine.provideKey(look(machine, ++screen));
+      else break;
+    }
+    expect(machine.getState()).toBe(MachineState.STOPPED);
+    return { machine, screens: screen };
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+describe('the bundled demo programs', () => {
+  it('BGIDEMO.PAS shows each of its twelve screens of Graph', () => {
+    const seen: number[][] = [];
+    const { machine, screens } = tour('BGIDEMO', (machine) => {
+      const pixels = machine.getGraphics().pixels;
+      const at = (x: number, y: number) => pixels[y * 640 + x] ?? -1;
+      // The title bar, the hint line, and what the screen drew inside.
+      seen.push([at(5, 5), at(5, 470), at(181, 211), at(451, 291), at(20, 200)]);
+      return ' ';
+    });
+    expect(screens).toBe(12);
+    expect(machine.getGraphics().initialized).toBe(false);
+    expect(seen.every(([title, hint]) => title === 1 && hint === 7)).toBe(true);
+    // The fill screen's flood fill is green, and the polygon screen's star red.
+    expect(seen[5]?.[3]).toBe(2);
+    expect(seen[6]?.[2]).toBe(4);
+  });
+
+  it('BGIDEMO.PAS stops at Esc', () => {
+    expect(tour('BGIDEMO', () => '\x1b').screens).toBe(1);
+  });
+
+  it('CRTDEMO.PAS shows each of its screens of Crt', () => {
+    const titles: string[] = [];
+    const { machine, screens } = tour('CRTDEMO', (machine) => {
+      const console = machine.getConsole();
+      titles.push(console.chars.slice(0, 80).join('').trim());
+      return ' ';
+    });
+    // Nine screens, the keyboard one reading ten keys.
+    expect(screens).toBe(18);
+    expect([...new Set(titles)]).toEqual([
+      'Turbo Pascal Crt unit',
+      'TextColor and TextBackground',
+      'Window, and text scrolling in it',
+      'InsLine and DelLine',
+      'GotoXY, WhereX and WhereY',
+      'ReadKey',
+      'Sound and NoSound',
+      'KeyPressed: press a key to stop the ball',
+      'The end',
+    ]);
+    // It leaves the screen cleared in the normal colors.
+    expect(machine.getConsole().chars.join('').trim()).toBe('');
   });
 });
 

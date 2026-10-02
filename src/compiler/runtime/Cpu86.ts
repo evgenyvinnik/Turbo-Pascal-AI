@@ -840,9 +840,12 @@ export class Cpu86 {
         this.ip = (this.ip + displacement) & 0xffff;
         return;
       }
-      case 0xe9:
-        this.ip = (this.ip + this.fetch16()) & 0xffff;
+      case 0xe9: {
+        // Relative to the next instruction, past the displacement.
+        const displacement = this.fetch16();
+        this.ip = (this.ip + displacement) & 0xffff;
         return;
+      }
       case 0xea: {
         const offset = this.fetch16();
         this.setSegment(CS, this.fetch16());
