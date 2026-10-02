@@ -5,6 +5,7 @@ import { decodeBinary, encodeBinary, type BinaryCell } from './BinaryCodec';
 import type { MemoryAccess } from './FileRuntime';
 import type { TextConsole } from './TextConsole';
 import type { GraphicsRuntime } from './GraphicsRuntime';
+import type { MouseDriver } from './MouseDriver';
 import { CODE_SEGMENT, DATA_SEGMENT, STACK_SEGMENT } from './AddressSpace';
 import { defined } from '../../utils/defined';
 
@@ -32,6 +33,8 @@ export interface AsmHost extends MemoryAccess {
   console: TextConsole;
   /** The graphics screen, which BIOS mode 13h shows. */
   graphics?: GraphicsRuntime;
+  /** The mouse driver INT 33h calls. */
+  mouse?: MouseDriver;
   sound(frequency: number): void;
   now(): Date;
   /** Whether the program's own interrupt procedure handles an interrupt. */
@@ -1311,11 +1314,24 @@ export class Asm86 {
           kind: 'delay',
           milliseconds: Math.round((this.number(r.cx) * 65536 + this.number(r.dx)) / 1000),
         };
-      case 0x33:
-        // No mouse driver is installed.
-        r.ax = 0;
-        r.bx = 0;
+      case 0x33: {
+        const mouse = this.host.mouse;
+        if (!mouse) {
+          // No mouse driver is installed.
+          r.ax = 0;
+          r.bx = 0;
+          return undefined;
+        }
+        const registers = {
+          ax: this.number(r.ax),
+          bx: this.number(r.bx),
+          cx: this.number(r.cx),
+          dx: this.number(r.dx),
+        };
+        // A function the driver lacks leaves the registers as they were.
+        if (mouse.service(registers)) Object.assign(r, registers);
         return undefined;
+      }
       case 0x12:
         r.ax = 640;
         return undefined;

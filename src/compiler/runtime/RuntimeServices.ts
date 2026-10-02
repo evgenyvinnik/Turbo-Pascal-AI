@@ -3,6 +3,7 @@ import { TypeCode } from '../types/inst';
 import type { StackValue } from './Machine';
 import { TextConsole } from './TextConsole';
 import { BUILT_IN_MODES, GraphicsRuntime } from './GraphicsRuntime';
+import { MouseDriver } from './MouseDriver';
 import { Graph3 } from './Graph3';
 import { DosUnit, ENVIRONMENT } from './DosUnit';
 import { FileRuntime, type MemoryAccess } from './FileRuntime';
@@ -107,6 +108,13 @@ const STANDARD_FONTS = [
 export class RuntimeServices {
   readonly console = new TextConsole();
   readonly graphics = new GraphicsRuntime();
+  /** INT 33h's mouse, over the graphics screen while Graph or a BIOS mode
+   * has it, and over the text screen otherwise. */
+  readonly mouse = new MouseDriver(() =>
+    this.graphics.initialized
+      ? { width: this.graphics.width, height: this.graphics.height, text: false }
+      : { width: 640, height: 200, text: true }
+  );
   readonly graph3 = new Graph3(this.graphics, this.console);
   readonly files: FileRuntime;
   private clockOffset = 0;

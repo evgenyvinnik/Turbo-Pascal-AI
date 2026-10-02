@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { dosColors } from '../../styles/tokens.stylex';
-import { useProgramScreenStore } from '@stores/programScreenStore';
+import { programMouse, useProgramScreenStore } from '@stores/programScreenStore';
 import { EGA_PALETTE } from './graphicsApi';
 
 const styles = stylex.create({
@@ -37,6 +37,27 @@ const styles = stylex.create({
   },
 });
 
+/** The mouse driver's graphics cursor, an arrow with its point at the
+ * mouse: X its black outline, o its white inside. */
+const ARROW = [
+  'X',
+  'XX',
+  'XoX',
+  'XooX',
+  'XoooX',
+  'XooooX',
+  'XoooooX',
+  'XooooooX',
+  'XoooooooX',
+  'XooooooooX',
+  'XoooooXXXXX',
+  'XooXooX',
+  'XoX XooX',
+  'XX  XooX',
+  'X    XooX',
+  '     XXXX',
+];
+
 interface GraphicsCanvasProps {
   width?: number;
   height?: number;
@@ -48,6 +69,7 @@ export function GraphicsCanvas({ width = 640, height = 480 }: GraphicsCanvasProp
   const graphics = useProgramScreenStore((state) => state.graphics);
   const waiting = useProgramScreenStore((state) => state.waiting);
   const input = useProgramScreenStore((state) => state.input);
+  const mouse = useProgramScreenStore((state) => state.mouse);
 
   // Initialize canvas with black background
   useEffect(() => {
@@ -68,8 +90,30 @@ export function GraphicsCanvas({ width = 640, height = 480 }: GraphicsCanvasProp
       pixels.data[index * 4 + 2] = color & 255;
       pixels.data[index * 4 + 3] = 255;
     }
+    if (mouse)
+      ARROW.forEach((row, dy) => {
+        row.split('').forEach((dot, dx) => {
+          const x = mouse.x + dx,
+            y = mouse.y + dy;
+          if (dot === ' ' || x >= graphics.width || y >= graphics.height) return;
+          const at = (y * graphics.width + x) * 4,
+            level = dot === 'o' ? 255 : 0;
+          pixels.data.fill(level, at, at + 3);
+        });
+      });
     ctx.putImageData(pixels, 0, 0);
-  }, [graphics, isVisible]);
+  }, [graphics, isVisible, mouse]);
+
+  /** The browser's mouse over the canvas, for the program's mouse driver. */
+  const pointer = (kind: 'down' | 'move' | 'up') => (event: React.MouseEvent) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    programMouse(
+      (event.clientX - box.left) / box.width,
+      (event.clientY - box.top) / box.height,
+      kind,
+      event.button
+    );
+  };
 
   if (!isVisible) {
     return null;
@@ -80,6 +124,12 @@ export function GraphicsCanvas({ width = 640, height = 480 }: GraphicsCanvasProp
       <canvas
         ref={canvasRef}
         {...stylex.props(styles.canvas)}
+        onMouseDown={pointer('down')}
+        onMouseMove={pointer('move')}
+        onMouseUp={pointer('up')}
+        onContextMenu={(event) => {
+          event.preventDefault();
+        }}
         width={graphics?.width ?? width}
         height={graphics?.height ?? height}
       />
