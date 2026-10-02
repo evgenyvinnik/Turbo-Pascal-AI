@@ -143,3 +143,43 @@ export class Ide {
       .toBe(true);
   }
 }
+
+/** The program drive as IndexedDB stores it: path to contents, a byte a character. */
+export function storedDisk(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(
+    () =>
+      new Promise<Record<string, string>>((resolve, reject) => {
+        const request = indexedDB.open('TurboPascalIDE');
+        request.onerror = () => {
+          reject(new Error(request.error?.message ?? 'IndexedDB failed'));
+        };
+        request.onsuccess = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains('disk')) {
+            database.close();
+            resolve({});
+            return;
+          }
+          const read = database.transaction('disk').objectStore('disk').getAll();
+          read.onsuccess = () => {
+            database.close();
+            const rows = read.result as { name: string; content: string }[];
+            resolve(Object.fromEntries(rows.map((row) => [row.name, row.content])));
+          };
+          read.onerror = () => {
+            database.close();
+            reject(new Error(read.error?.message ?? 'IndexedDB read failed'));
+          };
+        };
+      })
+  );
+}
+
+/** The stored drive once it satisfies `ready`: writes land just after the change. */
+export async function storedDiskWhen(
+  page: Page,
+  ready: (disk: Record<string, string>) => boolean
+): Promise<Record<string, string>> {
+  await expect.poll(async () => ready(await storedDisk(page))).toBe(true);
+  return storedDisk(page);
+}

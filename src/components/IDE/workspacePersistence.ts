@@ -16,6 +16,7 @@ import {
   type WorkspaceSnapshot,
 } from '@services/db/workspaceSnapshot';
 import { stopProgram } from './runtimeSession';
+import { loadProgramDisk, programDiskSaving } from './programFiles';
 
 const ideKeys = [
   'helpTopic',
@@ -205,7 +206,7 @@ function scheduleWorkspaceSave(): void {
 }
 
 function beforeUnload(event: BeforeUnloadEvent): void {
-  if (dirty || writing) {
+  if (dirty || writing || programDiskSaving()) {
     event.preventDefault();
     // Legacy browsers require this in addition to preventDefault.
     // eslint-disable-next-line @typescript-eslint/no-deprecated
@@ -266,6 +267,8 @@ function subscribeToWorkspace(): void {
 async function restoreWorkspace(): Promise<void> {
   useWorkspaceStore.setState({ ready: false, status: 'loading', error: null, conflict: false });
   try {
+    await loadProgramDisk();
+    if (isDisposed()) return;
     if (hotHandoff) {
       // A preview code update can land between edits and a pending save. Carry
       // the latest live text across it, then observe the preceding write's

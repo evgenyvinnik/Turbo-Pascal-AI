@@ -18,7 +18,7 @@ import { bufferText } from '@stores/desktopStore';
 import { useProgramScreenStore } from '@stores/programScreenStore';
 import { useIdeStore } from '@stores/ideStore';
 import { decodeDosText } from '@compiler/encoding';
-import { programDisk as disk, persistProgramFiles } from './programFiles';
+import { programDisk as disk, onDiskError, persistProgramFiles } from './programFiles';
 import { parseProgramParameters } from './programParameters';
 import { defined } from '../../utils/defined';
 export { virtualFiles, readVirtualFile, writeVirtualFile } from './programFiles';
@@ -34,15 +34,11 @@ interface Session {
 }
 
 let current: Session | null = null;
-function persistDisk(): void {
-  try {
-    persistProgramFiles();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const compiler = useCompilerStore.getState();
-    if (!compiler.messages.includes(message)) compiler.setMessages([...compiler.messages, message]);
-  }
-}
+const persistDisk = persistProgramFiles;
+onDiskError((message) => {
+  const compiler = useCompilerStore.getState();
+  if (!compiler.messages.includes(message)) compiler.setMessages([...compiler.messages, message]);
+});
 let audio: AudioContext | null = null;
 let oscillator: OscillatorNode | null = null;
 let gain: GainNode | null = null;
