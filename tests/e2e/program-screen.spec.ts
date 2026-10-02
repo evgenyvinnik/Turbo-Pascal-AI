@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { Ide } from './ide';
+import { Ide, storedDisk } from './ide';
 import { testDriver } from '../fixtures/x86/testDriver';
 
 test('CRT video memory renders colors, cursor positions and interactive input', async ({
@@ -185,9 +185,7 @@ end.`);
   await ide.press('Control+F9');
   await ide.waitForDialog('Compiling');
   await ide.press('Enter');
-  await expect
-    .poll(() => page.evaluate(() => localStorage.getItem('turbo-pascal.virtual-disk.v1')))
-    .toContain('Saved by Pascal');
+  await expect.poll(async () => (await storedDisk(page))['SAVED.TXT']).toContain('Saved by Pascal');
   ide = await Ide.open(page);
   await ide.openMenu('F');
   await ide.chooseItem('n');

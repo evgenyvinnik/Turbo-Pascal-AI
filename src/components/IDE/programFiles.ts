@@ -1,74 +1,129 @@
 import { VirtualFileSystem } from '../../compiler/runtime/VirtualFileSystem';
 import { encodeDosText } from '../../compiler/encoding';
+import {
+  indexedDbDiskStore,
+  type DiskChanges,
+  type DiskFiles,
+  type DiskStore,
+} from '../../services/db/diskRepository';
 
-export const PROGRAM_DISK_KEY = 'turbo-pascal.virtual-disk.v1';
 export const PROGRAM_IMPORT_LIMIT = 8 * 1024 * 1024;
+export const DISK_SAVE_ERROR = 'Browser storage is full or unavailable. Files could not be saved.';
 
-function loadDisk(): VirtualFileSystem {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(PROGRAM_DISK_KEY) ?? '{}');
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-      return new VirtualFileSystem();
-    return new VirtualFileSystem(
-      Object.fromEntries(
-        Object.entries(parsed).filter(
-          (entry): entry is [string, string] => typeof entry[1] === 'string'
-        )
-      )
-    );
-  } catch {
-    return new VirtualFileSystem();
+/** Every running program and file import shares the same in-memory DOS drive.
+ * It is the drive programs read and write as they run; IndexedDB keeps a copy,
+ * written behind it. */
+export const programDisk = new VirtualFileSystem();
+
+let store: DiskStore = indexedDbDiskStore;
+/** What the store holds once the queued writes land. */
+let stored: DiskFiles = {};
+/** A write failed, so what the store holds is unknown: the next write replaces it. */
+let stale = false;
+let savedRevision = programDisk.revision;
+let writes: Promise<void> = Promise.resolve();
+let pendingWrites = 0;
+const errorListeners = new Set<(message: string) => void>();
+
+/** Swaps the durable store, for tests. */
+export function setDiskStore(next: DiskStore): void {
+  store = next;
+}
+/** Told when a write to the store fails; the drive itself keeps its files. */
+export function onDiskError(listener: (message: string) => void): () => void {
+  errorListeners.add(listener);
+  return () => errorListeners.delete(listener);
+}
+/** Settles once every write so far has landed or failed. */
+export function flushProgramDisk(): Promise<void> {
+  return writes;
+}
+export const programDiskSaving = (): boolean => pendingWrites > 0;
+
+/** Fills the drive from the store, as a page load starts. */
+export async function loadProgramDisk(): Promise<void> {
+  await writes;
+  const files = await store.load();
+  for (const name of Object.keys(programDisk.snapshot())) programDisk.remove(name);
+  for (const [name, content] of Object.entries(files)) {
+    try {
+      programDisk.write(name, content);
+    } catch {
+      // A name the drive cannot hold, or no room left: the rest still load.
+    }
   }
+  stored = programDisk.snapshot();
+  stale = false;
+  savedRevision = programDisk.revision;
 }
 
-/** Every running program and file import shares the same in-memory DOS drive. */
-export const programDisk = loadDisk();
-let savedRevision = programDisk.revision;
+function queue(write: () => Promise<void>): void {
+  pendingWrites++;
+  writes = writes.then(write).then(
+    () => {
+      pendingWrites--;
+    },
+    () => {
+      pendingWrites--;
+      stale = true;
+      // The next change, or the next program's end, writes the drive again.
+      savedRevision = -1;
+      for (const listener of errorListeners) listener(DISK_SAVE_ERROR);
+    }
+  );
+}
 
-function saveSnapshot(snapshot: Record<string, string>): void {
-  try {
-    localStorage.setItem(PROGRAM_DISK_KEY, JSON.stringify(snapshot));
-  } catch {
-    throw new Error('Browser storage is full or unavailable. Files could not be saved.');
+/** Writes what changed on the drive since the last write to the store. */
+function persist(): void {
+  const snapshot = programDisk.snapshot();
+  savedRevision = programDisk.revision;
+  if (stale) {
+    stale = false;
+    stored = snapshot;
+    queue(() => store.replace(snapshot));
+    return;
   }
+  const changes = new Map<string, string | null>();
+  for (const [name, content] of Object.entries(snapshot))
+    if (stored[name] !== content) changes.set(name, content);
+  for (const name of Object.keys(stored)) if (!(name in snapshot)) changes.set(name, null);
+  stored = snapshot;
+  if (changes.size) queue(() => store.save(changes));
 }
 
 export function persistProgramFiles(): void {
-  if (programDisk.revision === savedRevision) return;
-  saveSnapshot(programDisk.snapshot());
-  savedRevision = programDisk.revision;
+  if (programDisk.revision !== savedRevision) persist();
 }
 
 export const virtualFiles = (): string[] => Object.keys(programDisk.snapshot());
 export const readVirtualFile = (name: string): string | null =>
   programDisk.exists(name) ? programDisk.read(name) : null;
 
-/** Editor saves can replace their own files; validate and persist before mutation. */
+/** Editor saves can replace their own files; a file the drive has no room for
+ * throws before anything changes. */
 export function writeVirtualFile(name: string, content: string): void {
-  const candidate = new VirtualFileSystem(programDisk.snapshot());
-  candidate.write(name, content);
-  saveSnapshot(candidate.snapshot());
+  new VirtualFileSystem(programDisk.snapshot()).write(name, content);
   programDisk.write(name, content);
-  savedRevision = programDisk.revision;
+  persist();
 }
 
 /** Commit a DOS shell's file changes atomically, including deletions. */
-export function applyProgramFileChanges(changes: ReadonlyMap<string, string | null>): void {
+export function applyProgramFileChanges(changes: DiskChanges): void {
   const snapshot = programDisk.snapshot();
   for (const [name, content] of changes) {
     const path = programDisk.normalize(name);
     if (content === null) Reflect.deleteProperty(snapshot, path);
     else snapshot[path] = content;
   }
-  const candidate = new VirtualFileSystem(snapshot);
-  saveSnapshot(candidate.snapshot());
+  // Throws, changing nothing, when the result does not fit on the drive.
+  new VirtualFileSystem(snapshot);
   // Free replaced entries before writes so a valid final snapshot cannot fail
   // partway through because of a temporary peak in capacity.
   for (const name of changes.keys()) if (programDisk.exists(name)) programDisk.remove(name);
   for (const [name, content] of changes) {
     if (content !== null) programDisk.write(name, content);
   }
-  savedRevision = programDisk.revision;
+  persist();
 }
 
 export interface ImportedSource {
@@ -121,18 +176,16 @@ export async function importProgramFiles(files: readonly File[]): Promise<Import
       );
     snapshot[name] = contents;
   }
-  let candidate: VirtualFileSystem;
   try {
-    candidate = new VirtualFileSystem(snapshot);
+    new VirtualFileSystem(snapshot);
   } catch {
     throw new Error('The virtual disk exceeds its 8 MiB capacity. No files were imported.');
   }
   if (imported.size) {
-    saveSnapshot(candidate.snapshot());
-    // Capacity and persistence already succeeded. This synchronous commit cannot
-    // interleave with a VM slice or another browser drop event.
+    // Capacity already checked. This synchronous commit cannot interleave with
+    // a VM slice or another browser drop event.
     for (const [name, contents] of imported) programDisk.write(name, contents);
-    savedRevision = programDisk.revision;
+    persist();
   }
   return { sources, files: [...imported.keys()] };
 }

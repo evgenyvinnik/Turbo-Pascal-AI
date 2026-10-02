@@ -61,6 +61,14 @@ export interface WorkspaceRecord {
   writerId?: string;
 }
 
+/** A file on the drive programs and the editor share, C: in DOS terms. */
+export interface DiskFileRecord {
+  /** The file's path on the drive, as VirtualFileSystem keys it. */
+  name: string;
+  /** Its bytes, one character to a byte. */
+  content: string;
+}
+
 export class TurboPascalDB extends Dexie {
   files!: Table<FileRecord, string>;
   directories!: Table<DirectoryRecord, string>;
@@ -69,6 +77,7 @@ export class TurboPascalDB extends Dexie {
   recentFiles!: Table<RecentFileRecord, string>;
   breakpoints!: Table<BreakpointRecord, string>;
   workspaces!: Table<WorkspaceRecord, string>;
+  disk!: Table<DiskFileRecord, string>;
 
   constructor() {
     super('TurboPascalIDE');
@@ -86,6 +95,12 @@ export class TurboPascalDB extends Dexie {
     // store. Existing saved files, sessions, and settings are left intact.
     this.version(2).stores({
       workspaces: 'id, updatedAt',
+    });
+
+    // The program drive moved here from localStorage, which holds only a few
+    // megabytes; diskRepository carries a drive saved there across.
+    this.version(3).stores({
+      disk: 'name',
     });
   }
 }

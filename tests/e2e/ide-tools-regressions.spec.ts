@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { Ide } from './ide';
+import { Ide, storedDiskWhen } from './ide';
 
 async function find(ide: Ide, text: string, options: string[] = []) {
   await ide.openMenu('s');
@@ -341,13 +341,7 @@ test('Options Save keeps the custom configuration filename after a workspace rel
   await restored.press('Enter');
   await restored.openMenu('o');
   await restored.chooseItem('s');
-  const disk = await page.evaluate(
-    () =>
-      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
-        string,
-        string
-      >
-  );
+  const disk = await storedDiskWhen(page, (stored) => 'CUSTOM.TP' in stored);
   expect(JSON.parse(disk['CUSTOM.TP'] ?? '{}')).toMatchObject({
     optionDialogs: { 'options.memory': { stack: '54321' } },
   });

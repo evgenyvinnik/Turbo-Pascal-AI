@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { Ide } from './ide';
+import { Ide, storedDiskWhen } from './ide';
 import { defined } from '../../src/utils/defined';
 
 test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 registers, and files persist', async ({
@@ -40,13 +40,7 @@ test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 regi
   await expect(page.getByLabel('DOS output')).toContainText('AX=1236', { timeout: 20_000 });
   await workspace.getByRole('button', { name: 'Return to IDE', exact: true }).click();
   await expect(workspace).toBeHidden({ timeout: 20_000 });
-  const persisted = await page.evaluate(
-    () =>
-      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
-        string,
-        string
-      >
-  );
+  const persisted = await storedDiskWhen(page, (disk) => 'X86TEST.TXT' in disk);
   expect(Array.from(defined(persisted['REGTEST.COM']), (c) => c.charCodeAt(0))).toEqual([
     0xb8, 0x34, 0x12, 0xbb, 2, 0, 0x01, 0xd8, 0x50, 0x5a, 0xb8, 0, 0x4c, 0xcd, 0x21,
   ]);
@@ -74,13 +68,7 @@ test('DOS runs real COM instructions, DEBUG assembles and traces actual x86 regi
   await page.keyboard.type('exit', { delay: 60 });
   await page.keyboard.press('Enter');
   await expect(workspace).toBeHidden({ timeout: 20_000 });
-  const afterExit = await page.evaluate(
-    () =>
-      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
-        string,
-        string
-      >
-  );
+  const afterExit = await storedDiskWhen(page, (disk) => 'EXIT.TXT' in disk);
   expect(afterExit['EXIT.TXT']).toBe('saved by exit\r\n');
 });
 
@@ -105,12 +93,8 @@ test('native DOS Pascal compiles and executes inline x86 assembly and refuses to
   await expect(page.getByLabel('DOS output')).toContainText('INTEGER BYTES: 2');
   await workspace.getByRole('button', { name: 'Return to IDE', exact: true }).click();
   await expect(workspace).toBeHidden({ timeout: 20_000 });
-  const firstDisk = await page.evaluate(
-    () =>
-      JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
-        string,
-        string
-      >
+  const firstDisk = await storedDiskWhen(page, (disk) =>
+    Object.keys(disk).some((name) => /\.EXE$/i.test(name))
   );
   const executable = Object.keys(firstDisk).find((name) => /\.EXE$/i.test(name));
   expect(executable).toBeTruthy();

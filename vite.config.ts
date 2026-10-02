@@ -38,7 +38,7 @@ export default defineConfig({
     }),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['fonts/*.ttf', 'icons/*.png', 'samples/*.PAS'],
+      includeAssets: ['favicon.svg', 'fonts/*.ttf', 'icons/*.png', 'samples/*.PAS'],
       manifest: {
         name: 'Turbo Pascal IDE',
         short_name: 'TurboPascal',

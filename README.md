@@ -238,7 +238,13 @@ restoration before accepting input or file drops.
 Programs reopen stopped: the VM, compiled bytecode, call stack, registers,
 execution highlight and watch values are recreated when you run again. Autosave
 does not clear a file's modified marker; F2 still saves the source file to the
-virtual drive, which retains its existing localStorage storage.
+virtual drive.
+
+The virtual drive is kept in the same IndexedDB database (`disk`, one row a
+file). Programs read and write it in memory as they run, and each change is
+written behind them, only the files that changed. A failed write keeps the
+files and says so, and the next change writes the whole drive. A drive saved in
+localStorage by an earlier version moves to IndexedDB on the first load.
 
 A failed workspace write preserves the last committed snapshot and current
 editor contents. The status line reports the failure; another edit,
@@ -542,6 +548,7 @@ bun run fidelity:fetch  # Download the Museum of UI reference screenshots
 bun run test:fidelity   # Compare cell layouts and exact rendered gallery pixels
 bun run fidelity:report # Generate the complete 117-image comparison report
 bun run sloc            # Count source lines and update Project Statistics below
+bun scripts/build-social-images.ts  # Redraw the link preview and icons (dev server running)
 ```
 
 CI runs the typecheck, lint, unit tests and build, the Free Pascal reference,

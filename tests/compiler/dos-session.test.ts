@@ -3,6 +3,7 @@ import type { CommandInterface } from 'emulators';
 import type { DosFiles } from '../../src/services/dos/dosFiles';
 import { DOS_EXIT_SIGNAL } from '../../src/services/dos/dosRuntime';
 import { defined } from '../../src/utils/defined';
+import { memoryDiskStore } from './memoryDiskStore';
 
 /** A stand-in for the js-dos emulator, driven by the test instead of DOSBox. */
 interface FakeDos {
@@ -84,22 +85,19 @@ vi.mock('../../src/services/dos/dosRuntime', async (importOriginal) => ({
   typeDosCommand: () => Promise.resolve(),
 }));
 
-const DISK_KEY = 'turbo-pascal.virtual-disk.v1';
-
 /** Fresh modules over a browser drive holding `disk`, as a page load would see. */
 async function load(disk: DosFiles = {}) {
   vi.resetModules();
-  const stored = new Map([[DISK_KEY, JSON.stringify(disk)]]);
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => stored.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      stored.set(key, value);
-    },
-  });
+  const memory = memoryDiskStore(disk);
   const session = await import('../../src/services/dos/dosSession');
   const files = await import('../../src/components/IDE/programFiles');
+  files.setDiskStore(memory.store);
+  await files.loadProgramDisk();
   const state = () => session.useDosStore.getState();
-  const saved = () => JSON.parse(stored.get(DISK_KEY) ?? '{}') as DosFiles;
+  const saved = async () => {
+    await files.flushProgramDisk();
+    return memory.files;
+  };
   return { session, files, state, saved };
 }
 
@@ -127,7 +125,7 @@ describe('leaving the DOS workspace', () => {
       expect(state().visible).toBe(false);
     });
     expect(files.programDisk.snapshot()).toEqual({ 'NOTES.TXT': 'new', 'MADE.DAT': '\0ÿ' });
-    expect(saved()).toEqual({ 'NOTES.TXT': 'new', 'MADE.DAT': '\0ÿ' });
+    expect(await saved()).toEqual({ 'NOTES.TXT': 'new', 'MADE.DAT': '\0ÿ' });
     expect(dos.exit).toHaveBeenCalledOnce();
   });
 

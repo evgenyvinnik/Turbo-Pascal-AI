@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { Ide } from './ide';
+import { Ide, storedDisk, storedDiskWhen } from './ide';
 
 async function dropFiles(
   page: Page,
@@ -41,12 +41,9 @@ end.`;
   await expect(ide.row(1)).toContainText('IMPORTED.PAS');
   await expect
     .poll(() =>
-      page.evaluate(() => {
-        const disk = JSON.parse(
-          localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}'
-        ) as Record<string, string>;
-        return Array.from(disk['TRIP.CHR'] ?? '', (char) => char.charCodeAt(0));
-      })
+      storedDisk(page).then((disk) =>
+        Array.from(disk['TRIP.CHR'] ?? '', (char) => char.charCodeAt(0))
+      )
     )
     .toEqual([0, 128, 219, 255]);
   await ide.press('Control+F9');
@@ -68,9 +65,7 @@ test('rejects an oversized drop as one batch without replacing existing files or
 }) => {
   const ide = await Ide.open(page);
   await dropFiles(page, [{ name: 'kept.txt', text: 'keep this file' }]);
-  await expect
-    .poll(() => page.evaluate(() => localStorage.getItem('turbo-pascal.virtual-disk.v1')))
-    .toContain('keep this file');
+  await expect.poll(() => storedDisk(page)).toEqual({ 'KEPT.TXT': 'keep this file' });
   await dropFiles(page, [
     { name: 'small.txt', text: 'must not be partially imported' },
     { name: 'new.pas', text: 'program T;begin end.' },
@@ -78,15 +73,7 @@ test('rejects an oversized drop as one batch without replacing existing files or
   ]);
   await ide.waitForDialog('File import');
   await ide.waitForText('MiB import limit');
-  expect(
-    await page.evaluate(
-      () =>
-        JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
-          string,
-          string
-        >
-    )
-  ).toEqual({ 'KEPT.TXT': 'keep this file' });
+  expect(await storedDisk(page)).toEqual({ 'KEPT.TXT': 'keep this file' });
   await ide.press('Enter');
   await expect(ide.row(1)).toContainText('NONAME00.PAS');
 });
@@ -94,22 +81,49 @@ test('rejects an oversized drop as one batch without replacing existing files or
 test('rejects a conflicting filename without importing the rest of the drop', async ({ page }) => {
   const ide = await Ide.open(page);
   await dropFiles(page, [{ name: 'kept.txt', text: 'original data' }]);
-  await expect
-    .poll(() => page.evaluate(() => localStorage.getItem('turbo-pascal.virtual-disk.v1')))
-    .toContain('original data');
+  await expect.poll(() => storedDisk(page)).toEqual({ 'KEPT.TXT': 'original data' });
   await dropFiles(page, [
     { name: 'new.txt', text: 'new data' },
     { name: 'KEPT.TXT', text: 'replacement data' },
   ]);
   await ide.waitForDialog('File import');
   await ide.waitForText('already exists');
-  expect(
-    await page.evaluate(
-      () =>
-        JSON.parse(localStorage.getItem('turbo-pascal.virtual-disk.v1') ?? '{}') as Record<
-          string,
-          string
-        >
-    )
-  ).toEqual({ 'KEPT.TXT': 'original data' });
+  expect(await storedDisk(page)).toEqual({ 'KEPT.TXT': 'original data' });
+});
+
+test('saved files live in IndexedDB across reloads, and a drive from localStorage moves there', async ({
+  page,
+}) => {
+  let ide = await Ide.open(page);
+  // A drive as an earlier version kept it.
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'turbo-pascal.virtual-disk.v1',
+      JSON.stringify({ 'OLD.PAS': 'program Old;\r\nbegin\r\nend.\r\n' })
+    );
+  });
+  ide = await Ide.open(page);
+  await storedDiskWhen(page, (disk) => 'OLD.PAS' in disk);
+  expect(await page.evaluate(() => localStorage.getItem('turbo-pascal.virtual-disk.v1'))).toBe(
+    null
+  );
+
+  await ide.type('program Mine;');
+  await ide.openMenu('f');
+  await ide.chooseItem('a');
+  await ide.waitForDialog('Save File As');
+  await ide.type('MINE.PAS');
+  await ide.press('Enter');
+  await expect(ide.row(1)).toContainText('MINE.PAS');
+  const disk = await storedDiskWhen(page, (stored) => 'MINE.PAS' in stored);
+  expect(disk['MINE.PAS']).toContain('program Mine;');
+  expect(disk['OLD.PAS']).toContain('program Old;');
+  // Its window closed, the file is only on the drive.
+  await ide.press('Alt+F3');
+
+  ide = await Ide.open(page);
+  await ide.openFile('MINE.PAS');
+  await expect(ide.row(2)).toContainText('program Mine;');
+  await ide.openFile('OLD.PAS');
+  await expect(ide.row(2)).toContainText('program Old;');
 });
