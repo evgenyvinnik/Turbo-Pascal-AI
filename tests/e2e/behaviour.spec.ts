@@ -95,6 +95,22 @@ test.describe('editor', () => {
     await ide.clickCell(3, 3);
     expect(await ide.text(23)).toContain('2:3');
   });
+
+  test('the wheel scrolls by the distance it turns, not by its events', async ({ page }) => {
+    const ide = await Ide.open(page);
+    await ide.type(Array.from({ length: 40 }, (_, i) => `L${i + 1}`).join('\n'));
+    await ide.press('Control+PageUp');
+    expect(await ide.text(2)).toContain('L1 ');
+    await page.mouse.move(360, 200);
+    // A touchpad's small steps: five of them are not yet a line.
+    for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 4);
+    await expect.poll(() => ide.text(2)).toContain('L1 ');
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 4);
+    await expect.poll(() => ide.text(2)).toContain('L2 ');
+    // A mouse wheel's notch: three lines.
+    await page.mouse.wheel(0, 100);
+    await expect.poll(() => ide.text(2)).toContain('L5 ');
+  });
 });
 
 test.describe('windows', () => {

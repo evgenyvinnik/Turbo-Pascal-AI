@@ -588,12 +588,12 @@ export function IDE() {
     drag.current = null;
   }, []);
 
-  const onWheel = useCallback((e: CellEvent & { deltaY: number }) => {
+  const onWheel = useCallback((e: CellEvent & { lines: number }) => {
     if (!useWorkspaceStore.getState().ready) return;
     const d = useDesktopStore.getState();
     const win = d.activeWindow();
     if (!win) return;
-    const step = e.deltaY > 0 ? 3 : -3;
+    const step = e.lines;
     if (win.kind === 'edit') {
       d.edit((b) => {
         b.scroll.line = Math.max(0, Math.min(b.lines.length - 1, b.scroll.line + step));
