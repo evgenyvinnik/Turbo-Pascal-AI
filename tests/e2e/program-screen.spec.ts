@@ -411,3 +411,72 @@ test('the bundled CRTDEMO.PAS tours Crt to its last screen', async ({ page }) =>
   await ide.press('Escape');
   await expect(page.getByTestId('program-text-screen')).toHaveCount(0);
 });
+
+test('MOUSE.PAS paints with the browser mouse, through INT 33h', async ({ page }) => {
+  test.setTimeout(60_000);
+  const ide = await Ide.open(page);
+  await ide.openFile('MOUSE.PAS');
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  const canvas = page.getByTestId('program-graphics-screen').locator('canvas');
+  await expect(canvas).toBeVisible();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('no canvas');
+  /** A dot of the 640 by 480 screen, on the page. */
+  const at = (x: number, y: number) => ({
+    x: box.x + ((x + 0.5) * box.width) / 640,
+    y: box.y + ((y + 0.5) * box.height) / 480,
+  });
+  const pixel = (x: number, y: number) =>
+    canvas.evaluate(
+      (element: HTMLCanvasElement, [px, py]) =>
+        Array.from(element.getContext('2d')?.getImageData(px ?? 0, py ?? 0, 1, 1).data ?? []),
+      [x, y]
+    );
+  // Red from the toolbar, then a line dragged with the left button.
+  const red = at(136, 15);
+  await page.mouse.click(red.x, red.y);
+  const start = at(100, 100),
+    end = at(200, 100);
+  await page.mouse.move(start.x, start.y);
+  await page.waitForTimeout(100);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.waitForTimeout(100);
+  await page.mouse.up();
+  await expect.poll(() => pixel(150, 100)).toEqual([170, 0, 0, 255]);
+  // The driver's arrow is drawn where the mouse is: white inside, black edge.
+  await expect.poll(() => pixel(201, 102)).toEqual([255, 255, 255, 255]);
+  await expect.poll(() => pixel(200, 102)).toEqual([0, 0, 0, 255]);
+  const quit = at(599, 15);
+  await page.mouse.click(quit.x, quit.y);
+  await expect(canvas).toHaveCount(0, { timeout: 10_000 });
+});
+
+test('a text-mode program reads the mouse by character cell', async ({ page }) => {
+  const ide = await Ide.open(page);
+  await ide.typeSource(`program Clicks;
+uses Crt, Dos;
+var R: Registers;
+begin
+  ClrScr;
+  R.AX := 0; Intr($33, R);
+  R.AX := 1; Intr($33, R);
+  WriteLn('Click somewhere');
+  repeat
+    R.AX := 5; R.BX := 0; Intr($33, R);
+    Delay(10);
+  until R.BX > 0;
+  WriteLn('Clicked at column ', R.CX div 8 + 1, ', row ', R.DX div 8 + 1);
+  ReadLn;
+end.`);
+  await ide.press('Control+F9');
+  await ide.waitForDialog('Compiling');
+  await ide.press('Enter');
+  await expect(ide.row(0)).toContainText('Click somewhere');
+  const { x, y } = await ide.cellPoint(30, 10);
+  await page.mouse.click(x, y);
+  await expect(ide.row(1)).toContainText('Clicked at column 31, row 11');
+  await ide.press('Enter');
+});

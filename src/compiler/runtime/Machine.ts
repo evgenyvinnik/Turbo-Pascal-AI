@@ -1568,6 +1568,7 @@ export class Machine {
       },
       console: this.services.console,
       graphics: this.services.graphics,
+      mouse: this.services.mouse,
       sound: (frequency) => {
         this.config.onSound(frequency);
       },
@@ -1952,6 +1953,9 @@ export class Machine {
   }
   getGraphics() {
     return this.services.graphics;
+  }
+  getMouse() {
+    return this.services.mouse;
   }
   getFileSystem() {
     return this.config.fileSystem;

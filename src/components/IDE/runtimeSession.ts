@@ -252,7 +252,11 @@ function publish(session: Session, extra?: string): void {
   const consoleChanged = screen.console?.revision !== console.revision;
   const graphicsChanged = screen.graphics?.revision !== graphics.revision;
   const colors = graphicsChanged ? graphics.colors() : undefined;
+  // A program that has ended shows no mouse cursor.
+  const mouse = current === session ? session.machine.getMouse().cursor() : null;
+  const mouseChanged = mouse?.x !== screen.mouse?.x || mouse?.y !== screen.mouse?.y;
   useProgramScreenStore.setState({
+    ...(mouseChanged ? { mouse } : {}),
     ...(consoleChanged
       ? {
           console: {
@@ -302,7 +306,13 @@ export function stopProgram(notify = true): void {
   current = null;
   if (session.timer !== null) clearTimeout(session.timer);
   session.machine.halt();
-  useProgramScreenStore.setState({ visible: false, waiting: false, input: '' });
+  useProgramScreenStore.setState({
+    visible: false,
+    waiting: false,
+    input: '',
+    mouse: null,
+    mouseHandler: null,
+  });
   clearDebug();
   if (useDialogStore.getState().top()?.def.id === 'program-input') {
     useDialogStore.getState().close('cancel');
@@ -315,7 +325,7 @@ export function stopProgram(notify = true): void {
 function fail(session: Session, error: unknown): void {
   current = null;
   session.machine.halt();
-  useProgramScreenStore.setState({ visible: false, waiting: false, input: '' });
+  useProgramScreenStore.setState({ visible: false, waiting: false, input: '', mouseHandler: null });
   clearDebug();
   const diagnostic = describePascalDiagnostic(error, 'runtime');
   const detail = diagnostic.detail;
@@ -428,7 +438,12 @@ function schedule(session: Session, delay = 0): void {
         const compiler = useCompilerStore.getState();
         compiler.setRuntime('completed');
         compiler.setMessages([...compiler.messages, `${session.file}: Program finished`]);
-        useProgramScreenStore.setState({ waiting: false, input: '' });
+        useProgramScreenStore.setState({
+          waiting: false,
+          input: '',
+          mouse: null,
+          mouseHandler: null,
+        });
       } else if (state === MachineState.SLEEPING) {
         // Until Delay ends, or the timer interrupt comes first.
         const wake = Math.min(
@@ -572,6 +587,7 @@ export function startProgram(
     waiting: false,
     input: '',
     kind: 'text',
+    mouse: null,
   });
   const machine = new Machine(bytecode, {
     maxInstructions: 5_000_000,
@@ -597,6 +613,15 @@ export function startProgram(
     sources,
   };
   current = session;
+  // The browser's mouse over the program's screen is INT 33h's mouse.
+  useProgramScreenStore.setState({
+    mouseHandler: (fractionX, fractionY, buttons) => {
+      if (current !== session) return;
+      const mouse = session.machine.getMouse();
+      mouse.move(fractionX, fractionY, buttons);
+      useProgramScreenStore.setState({ mouse: mouse.cursor() });
+    },
+  });
   useCompilerStore.getState().setProgramOutput([]);
   useCompilerStore.getState().setRuntime('running');
   if (action === 'run') useDesktopStore.getState().openTool('output');

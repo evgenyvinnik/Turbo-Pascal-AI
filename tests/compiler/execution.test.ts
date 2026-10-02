@@ -103,6 +103,52 @@ describe('the bundled demo programs', () => {
     expect(tour('BGIDEMO', () => '\x1b').screens).toBe(1);
   });
 
+  it('MOUSE.PAS paints with the mouse, and quits from its toolbar', () => {
+    vi.useFakeTimers();
+    try {
+      const machine = new Machine(compile(sample('MOUSE')), { maxInstructions: 50_000_000 });
+      /** Runs on to the program's next Delay, and moves time on past it. */
+      const step = () => {
+        for (let turn = 0; turn < 3; turn++) {
+          machine.run();
+          if (machine.getState() !== MachineState.SLEEPING) return;
+          vi.setSystemTime(machine.getWakeTime());
+          machine.wake();
+        }
+      };
+      step();
+      const mouse = machine.getMouse();
+      const at = (x: number, y: number, buttons = 0) => {
+        mouse.move(x / 640, y / 480, buttons);
+        step();
+      };
+      // It shows the cursor in the middle of the VGA's screen.
+      expect(mouse.cursor()).toEqual({ x: 320, y: 240 });
+      // Red from the toolbar, then a line drawn with the left button.
+      at(136, 15, 1);
+      at(136, 15);
+      at(100, 100);
+      at(100, 100, 1);
+      at(200, 100, 1);
+      at(200, 100);
+      const graphics = machine.getGraphics();
+      expect([graphics.getPixel(150, 100), graphics.getPixel(150, 120)]).toEqual([4, 0]);
+      // The right button erases.
+      at(150, 90);
+      at(150, 90, 2);
+      at(150, 110, 2);
+      at(150, 110);
+      expect(graphics.getPixel(150, 100)).toBe(0);
+      // Quit.
+      at(599, 15, 1);
+      at(599, 15);
+      expect(machine.getState()).toBe(MachineState.STOPPED);
+      expect(graphics.initialized).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('CRTDEMO.PAS shows each of its screens of Crt', () => {
     const titles: string[] = [];
     const { machine, screens } = tour('CRTDEMO', (machine) => {

@@ -26,7 +26,8 @@ describe('The Dos unit', () => {
         R.AH := 2; R.DL := Ord('Q'); MsDos(R); WriteLn;
         R.AH := $30; Intr($21, R); Write(R.AL, '.', R.AH, ' ');
         n := $33; R.AX := 0; Intr(n, R); WriteLn(R.AX, ' ', R.Flags and FZero <> 0) end.`)
-    ).toEqual(['52 18 20 Q', '6.22 0 FALSE']);
+      // INT 33h, through a variable: the mouse driver is installed.
+    ).toEqual(['52 18 20 Q', '6.22 65535 FALSE']);
   });
 
   it('waits for a key through Intr, and reaches interrupt procedures', () => {

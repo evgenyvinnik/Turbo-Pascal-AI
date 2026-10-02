@@ -490,6 +490,7 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     [
       'Open HELLO.PAS for text input and output, or SQUARE.PAS for procedures and stepping. Compile with F9, dismiss the compilation result and run with Ctrl+F9.',
       'BGIDEMO.PAS tours the Graph unit and CRTDEMO.PAS the Crt unit, a screen at a time: press any key for the next screen, or Esc to stop.',
+      'MOUSE.PAS paints with the mouse, which a program reaches through INT 33h: click a color, draw with the left button, erase with the right.',
       'The examples in the Units and Objects topics are small enough to type into new source files. Save a unit with the same name as its UNIT heading.',
     ],
     [link('User-defined units', 'unit'), link('Objects', 'object'), link('Debugging')]

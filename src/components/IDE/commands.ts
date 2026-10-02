@@ -42,6 +42,7 @@ export const SAMPLE_FILES = [
   'CRTDEMO.PAS',
   'FIBONACCI.PAS',
   'HELLO.PAS',
+  'MOUSE.PAS',
   'PRIMES.PAS',
   'SQUARE.PAS',
 ];

@@ -152,4 +152,4 @@ lines, dialog layouts and colours are transcribed from those images.
   the `visual` project at a 720x400 viewport so one CSS pixel is one VGA pixel.
   Update baselines with `bun run test:e2e:update`.
 - Test sample Pascal programs: HELLO.PAS, FIBONACCI.PAS, PRIMES.PAS, SQUARE.PAS,
-  and the BGIDEMO.PAS and CRTDEMO.PAS tours in `public/samples`
+  and the BGIDEMO.PAS, CRTDEMO.PAS and MOUSE.PAS demos in `public/samples`

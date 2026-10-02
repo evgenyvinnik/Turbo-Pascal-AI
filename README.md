@@ -124,8 +124,26 @@ line styles, circles and arcs, a pie chart and a 3D bar chart, the fill
 patterns, polygons, the ten stroked fonts, viewports and clipping, an image
 moved with `PutImage`, and XOR drawing. CRTDEMO.PAS does the same for Crt:
 the color attributes, scrolling windows, `InsLine` and `DelLine`, `GotoXY`,
-the keyboard's codes, sound, and a `KeyPressed` animation. Both run as
-end-to-end tests.
+the keyboard's codes, sound, and a `KeyPressed` animation. MOUSE.PAS is a
+small paint program on the mouse driver. All three run as end-to-end
+tests.
+
+### The mouse
+
+The browser's mouse over the program's screen is a Microsoft-compatible
+mouse driver's, which programs reach through INT 33h, from `Intr($33, Regs)`
+or `asm int 33h`. It has two buttons (and a middle one), and answers reset
+(0), show and hide the cursor (1, 2), the position and buttons (3), set the
+position (4), the presses and releases with where they were (5, 6), the
+horizontal and vertical ranges (7, 8), the motion counters in mickeys (0Bh),
+software reset (21h) and its version (24h); it takes the cursor shape,
+mickey ratio and sensitivity calls (9, 0Ah, 0Fh, 1Ah, 1Dh) and draws its own
+cursor. Positions are counted as the real driver counts them: in text mode
+on a 640 by 200 screen, eight to a character cell, and in graphics in the
+screen's dots, with x doubled in the 320-wide modes. The text cursor is the
+cell under it in its colors XORed with 77h, and the graphics cursor an arrow
+drawn over the screen. There are no event handlers (function 0Ch): programs
+read the mouse by asking it.
 
 ## Keyboard Shortcuts
 
@@ -429,7 +447,7 @@ Interrupts reach the IDE's screen and keyboard: `INT 10h` (mode, mode 13h and
 its dots, cursor, characters, teletype), `INT 16h` (keys with BIOS scan codes, waiting as `ReadKey`
 does), `INT 21h` (character and `$`-string output, keyboard, date, time,
 version, exit with a code through the exit procedures), `INT 1Ah` (timer ticks),
-`INT 15h` function 86h (wait) and `INT 33h` (no mouse). Ports 42h, 43h and 61h
+`INT 15h` function 86h (wait) and `INT 33h` (the [mouse driver](#the-mouse)). Ports 42h, 43h and 61h
 drive the speaker, port 60h reads the last scan code, 3DAh toggles retrace and
 3C7h to 3C9h hold the VGA palette.
 An `interrupt` procedure, of `Word` register parameters from `Flags` to `BP`
