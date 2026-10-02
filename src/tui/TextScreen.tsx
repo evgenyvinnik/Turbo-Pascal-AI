@@ -31,8 +31,15 @@ export interface TextScreenProps {
   onCellMove?: (e: CellEvent) => void;
   onCellUp?: (e: CellEvent) => void;
   onCellDoubleClick?: (e: CellEvent) => void;
-  onWheel?: (e: CellEvent & { deltaY: number }) => void;
+  /** Whole lines to scroll, down positive; a touchpad's small steps are
+   * gathered until they add up to a line. */
+  onWheel?: (e: CellEvent & { lines: number }) => void;
 }
+
+/** A mouse wheel's notch is about 100 pixels and scrolls three lines. */
+const WHEEL_PIXELS_PER_LINE = 100 / 3;
+/** A page of the wheel's page mode, in lines. */
+const WHEEL_PAGE_LINES = 20;
 
 const styles = stylex.create({
   viewport: {
@@ -97,6 +104,8 @@ export function TextScreen({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [scale, setScale] = useState(1);
+  /** Wheel motion not yet a whole line, in lines. */
+  const wheelRest = useRef(0);
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -188,6 +197,18 @@ export function TextScreen({
       }}
       onWheel={(ev) => {
         if (!onWheel) return;
+        const delta =
+          ev.deltaMode === 1
+            ? ev.deltaY
+            : ev.deltaMode === 2
+              ? ev.deltaY * WHEEL_PAGE_LINES
+              : ev.deltaY / WHEEL_PIXELS_PER_LINE;
+        // Turning back starts afresh rather than first undoing the rest.
+        const rest = Math.sign(delta) === Math.sign(wheelRest.current) ? wheelRest.current : 0;
+        const total = rest + delta;
+        const lines = Math.trunc(total);
+        wheelRest.current = total - lines;
+        if (lines === 0) return;
         const { col, row } = toCell(ev.clientX, ev.clientY);
         onWheel({
           col,
@@ -196,7 +217,7 @@ export function TextScreen({
           shift: ev.shiftKey,
           ctrl: ev.ctrlKey || ev.metaKey,
           alt: ev.altKey,
-          deltaY: ev.deltaY,
+          lines,
         });
       }}
       data-testid="tp-screen"
