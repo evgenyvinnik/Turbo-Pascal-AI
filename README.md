@@ -14,7 +14,11 @@ A web-based recreation of the classic Turbo Pascal V7 IDE, bringing the authenti
 - **Authentic DOS UI**: IBM VGA bitmap rendering, with direct comparisons to the original screenshot gallery
 - **Pascal Compiler**: Type-checked Pascal compiled to executable P-machine bytecode
 - **P-Machine VM**: Execute Pascal programs in the browser
-- **Program runtime**: Console input, CRT video memory, VGA graphics, sound, delays, and persistent virtual files
+- **Program runtime**: Console input, CRT video memory, VGA graphics, sound, delays, a mouse, and persistent virtual files
+- **Graph unit**: Turbo Pascal 7's whole interface, in the VGA, EGA, MCGA and CGA modes, with palettes, images, pages, polygons, fill patterns and public-domain stand-ins for the ten stroked fonts
+- **BGI drivers**: Third-party `.BGI` files run their own 8086 code on an emulated PC with a VGA (bit planes included) and a VESA BIOS, so SVGA drivers draw in 256 colors up to 1024×768
+- **Mouse**: A Microsoft-compatible INT 33h mouse driver, driven by the browser's mouse over the program's screen
+- **Bundled demos**: BGIDEMO.PAS, CRTDEMO.PAS and MOUSE.PAS tour Graph, Crt and the mouse, and run as end-to-end tests
 - **Source debugger**: Trace, step over, go to cursor, conditional breakpoints, watches, call stack, and evaluate/modify
 - **Built-in assembler**: `asm` statements, `assembler` routines, `inline` machine code and `interrupt` procedures run on an 8086 inside the P-machine
 - **Native DOS tools**: Real x86 execution, DEBUG/DEBUGX, and a browser-hosted Free Pascal compiler for assembly beyond the P-machine's
@@ -188,7 +192,8 @@ src/
 │   ├── symbols/       # Symbol tables
 │   ├── codegen/       # Bytecode generator, Real48 and 8087 arithmetic
 │   ├── asm/           # Built-in assembler and inline machine code decoder
-│   ├── runtime/       # P-machine VM and its 8086, virtual files, source debugger
+│   ├── runtime/       # P-machine VM and its 8086, virtual files, source debugger,
+│   │                  # Graph, the BGI drivers' emulated PC and the mouse driver
 │   ├── stdlib/        # Standard units (System, Crt, Graph, Dos, Graph3, ...)
 │   └── errors/        # Pascal diagnostics
 ├── components/        # Painters that draw into the cell buffer
@@ -198,6 +203,8 @@ src/
 ├── hooks/             # React hooks
 ├── styles/            # StyleX theme tokens and Turbo Pascal attributes
 └── i18n/              # Translations (en, de, ru)
+public/samples/        # Bundled programs, from HELLO.PAS to the BGIDEMO tour
+scripts/               # Build helpers: x86 test fixtures, Hershey fonts, SLOC count
 tests/
 ├── compiler/          # Vitest unit tests
 ├── reference/         # Programs checked against Free Pascal
@@ -534,6 +541,7 @@ bun run test:e2e:update # Refresh the snapshot baselines
 bun run fidelity:fetch  # Download the Museum of UI reference screenshots
 bun run test:fidelity   # Compare cell layouts and exact rendered gallery pixels
 bun run fidelity:report # Generate the complete 117-image comparison report
+bun run sloc            # Count source lines and update Project Statistics below
 ```
 
 CI runs the typecheck, lint, unit tests and build, the Free Pascal reference,
@@ -608,6 +616,31 @@ Missing or partial subjects remain visible and labeled. Captures record source
 hashes, so edits during capture invalidate that evidence rather than silently
 mixing revisions. The report can be opened through the dev server at
 `/artifacts/fidelity-report/index.html`.
+
+## Project Statistics
+
+Source Lines of Code (SLOC), non-empty lines:
+
+<!-- sloc:start -->
+| Extension | Lines |
+|-----------|------:|
+| .ts | 60,831 |
+| .json | 1,439 |
+| .tsx | 1,406 |
+| .pas | 954 |
+| .md | 785 |
+| .asm | 523 |
+| .css | 56 |
+| .js | 40 |
+| .html | 14 |
+| **Total** | **66,048** |
+<!-- sloc:end -->
+
+*Run `bun run sloc` to recalculate. Counts the repository's TypeScript,
+JavaScript, CSS, HTML, JSON, Markdown, Pascal and assembly files; excludes
+`node_modules/`, build output, caches and test artifacts. The TypeScript
+includes generated data: the Hershey fonts' glyphs and the assembled x86 test
+programs.*
 
 ## Contributing
 
